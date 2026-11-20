@@ -59,6 +59,31 @@
       });
     },
 
+    // Normalize Phone or Email into Firebase Auth Email (0 EGP Free Phone Login)
+    toAuthEmail(identifier) {
+      const raw = String(identifier || '').trim();
+      if (raw.includes('@')) return raw.toLowerCase();
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length < 8) return '';
+      return `${digits}@phone.damansite.app`;
+    },
+
+    // Global Auto-Notification Helper (used by all modules)
+    async sendNotification(targetUid, title, body) {
+      if (!targetUid) return;
+      try {
+        await db.collection('notifications').add({
+          userId: targetUid,
+          title: String(title || ''),
+          body: String(body || ''),
+          read: false,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (e) {
+        console.error('sendNotification error:', e);
+      }
+    },
+
     getPackages() {
       return (this.appConfig && this.appConfig.packages) || window.DAMAN_DEFAULT_PACKAGES;
     },
@@ -122,8 +147,8 @@
           <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 leading-relaxed">
             <div class="font-extrabold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved me-1"></i> ${isAr ? 'نصيحة ضمان سايت الهامة:' : 'DamanSite Safety Advice:'}</div>
             ${isAr
-              ? 'تواصل بحرية، لكن لحماية حقك المالي والهندسي، اجعل التعاقد وحجز الدفعات داخل محفظة الضمان (3.5%) فقط — المنصة غير مسؤولة عن أي تعاملات مالية خارج التطبيق.'
-              : 'Communicate freely, but to protect your funds and work quality, keep all contracts and payments inside DamanSite 3.5% Escrow.'}
+              ? 'تواصل بحرية، لكن لحماية حقك المالي والهندسي، اجعل التعاقد وحجز الدفعات داخل محفظة الضمان (3.5%) واطبع العقد نسختين وارفع النسخة الموقّعة داخل الشات.'
+              : 'Communicate freely, but keep contracts and payments inside DamanSite 3.5% Escrow and upload the signed contract in chat.'}
           </div>
           <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 text-center space-y-1">
             <div class="text-xs text-slate-400">${this.esc(ownerName || '')}</div>
@@ -136,7 +161,6 @@
         </div>`;
     },
 
-    // Public Profile Page for ANY User/Company (Posts + Ratings + Reviews)
     async openPublicProfile(uid, fallbackData = {}) {
       const isAr = this.lang === 'ar';
       let modal = document.getElementById('daman-public-profile-modal');
@@ -186,7 +210,8 @@
               <div class="min-w-0">
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <h3 class="text-sm font-black text-white truncate">${this.esc(displayName)}</h3>
-                  ${uData.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs" title="${this.t('verified')}"></i>` : ''}
+                  ${uData.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs"></i>` : ''}
+                  ${uData.activePlanName ? `<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-black">VIP</span>` : ''}
                 </div>
                 <div class="flex items-center gap-2 mt-0.5 flex-wrap">
                   <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(uData.accountType)}</span>
@@ -241,7 +266,74 @@
         window.DamanChat.openDirectChat(targetUid, targetName, projectId, projectTitle);
       } else {
         this.switchTab('chat');
-        this.toast(this.lang === 'ar' ? 'سيتم تفعيل الدردشة المباشرة في الخطوة 4 (chat-support.js)' : 'Direct chat activates in Step 4', 'info');
+      }
+    },
+
+    // Edit Account Info Modal (Phone / Name / Password Reset)
+    openEditProfileModal() {
+      if (!this.user || !this.profile) return;
+      const isAr = this.lang === 'ar';
+      const p = this.profile;
+      let modal = document.getElementById('daman-edit-profile-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'daman-edit-profile-modal';
+        modal.className = 'fixed inset-0 z-[65] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(modal);
+      }
+      modal.classList.remove('hidden');
+      modal.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-extrabold text-amber-400"><i class="fa-solid fa-user-pen me-1"></i> ${isAr ? 'تعديل بيانات الحساب' : 'Edit Profile'}</h3>
+            <button onclick="document.getElementById('daman-edit-profile-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <form onsubmit="DamanApp.saveProfileEdit(event)" class="space-y-2.5">
+            <input id="ep-name" type="text" required value="${this.esc(p.name || '')}" placeholder="${isAr ? 'الاسم الكامل' : 'Full Name'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+            <input id="ep-phone" type="tel" required value="${this.esc(p.phone || '')}" placeholder="${isAr ? 'رقم الهاتف' : 'Phone Number'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+            <input id="ep-email-disp" type="email" value="${this.esc(p.contactEmail || (p.email && !p.email.endsWith('@phone.damansite.app') ? p.email : ''))}" placeholder="${isAr ? 'البريد الإلكتروني للتواصل (Gmail)' : 'Contact Email'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+            ${p.accountType === 'company' ? `<input id="ep-comp" type="text" value="${this.esc(p.companyName || '')}" placeholder="${isAr ? 'اسم الشركة' : 'Company Name'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />` : ''}
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${isAr ? 'حفظ التعديلات' : 'Save Changes'}</button>
+          </form>
+        </div>`;
+    },
+
+    async saveProfileEdit(e) {
+      e.preventDefault();
+      if (!this.user) return;
+      const patch = {
+        name: document.getElementById('ep-name').value.trim(),
+        phone: document.getElementById('ep-phone').value.trim(),
+        contactEmail: document.getElementById('ep-email-disp').value.trim().toLowerCase()
+      };
+      const compEl = document.getElementById('ep-comp');
+      if (compEl) patch.companyName = compEl.value.trim();
+      try {
+        await db.collection('users').doc(this.user.uid).update(patch);
+        document.getElementById('daman-edit-profile-modal').classList.add('hidden');
+        this.toast(this.lang === 'ar' ? 'تم تحديث بيانات حسابك بنجاح' : 'Profile updated', 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    },
+
+    async forgotPasswordPrompt() {
+      const isAr = this.lang === 'ar';
+      const val = window.prompt(
+        isAr
+          ? 'أدخل بريدك الإلكتروني (Gmail) لإرسال رابط استعادة كلمة السر مجاناً:\n(لو مسجّل برقم الموبايل فقط، تواصل مع الإدارة لإعادة تعيينها)'
+          : 'Enter your Gmail address for a free password reset link:',
+        ''
+      );
+      if (!val || !val.trim()) return;
+      if (!val.includes('@')) {
+        return this.toast(isAr ? 'لاستعادة كلمة سر حساب برقم الموبايل فقط، تواصل مع الدعم الفني أو الإدارة' : 'For phone-only accounts, contact Support/Admin', 'warning');
+      }
+      try {
+        await auth.sendPasswordResetEmail(val.trim());
+        this.toast(isAr ? 'تم إرسال رابط استعادة كلمة السر على بريدك الإلكتروني بنجاح' : 'Password reset email sent', 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
       }
     },
 
@@ -264,9 +356,8 @@
       this.renderCurrentTab();
     },
 
-    // Smart Cache: 1 Firestore read for ALL app settings (cached 5 mins)
     async loadAppConfig(force = false) {
-      const cacheKey = 'daman_app_config_v5';
+      const cacheKey = 'daman_app_config_v6';
       if (!force) {
         try {
           const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
@@ -298,22 +389,17 @@
       if (this.activeTab === 'home') this.renderHome();
     },
 
-    // Rotating 24-Hour Daily Notification Engine
     checkDailyNotification() {
       const pool =
         this.appConfig && Array.isArray(this.appConfig.dailyNotifs) && this.appConfig.dailyNotifs.length
           ? this.appConfig.dailyNotifs
           : window.DAMAN_DAILY_NOTIFS;
       if (!pool.length) return;
-
       const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) % pool.length;
       const todayItem = pool[dayIndex];
       const dismissedDay = localStorage.getItem('daman_daily_dismissed_day');
       const todayKey = new Date().toISOString().slice(0, 10);
-
-      if (dismissedDay !== todayKey) {
-        this.dailyBanner = todayItem;
-      }
+      if (dismissedDay !== todayKey) this.dailyBanner = todayItem;
     },
 
     dismissDailyBanner() {
@@ -351,14 +437,26 @@
             this.closeModal('auth-modal');
             this.renderHeaderState();
             this.renderCurrentTab();
+
+            // Prompt Mandatory KYC once per session if unverified (except admin)
+            if (this.profile.kycStatus === 'unverified' && !this.isAdmin() && !sessionStorage.getItem('daman_kyc_prompted')) {
+              sessionStorage.setItem('daman_kyc_prompted', '1');
+              setTimeout(() => {
+                if (window.DamanWallet && typeof window.DamanWallet.openKycModal === 'function') {
+                  window.DamanWallet.openKycModal();
+                }
+              }, 700);
+            }
           },
           (err) => console.error('Profile error:', err)
         );
 
+        // Listen to Personal + Broadcast (ALL) + Admin notifications
+        const targets = this.isAdmin() ? [user.uid, 'ALL', 'ADMIN'] : [user.uid, 'ALL'];
         this.unsubNotifs = db
           .collection('notifications')
-          .where('userId', 'in', [user.uid, 'ALL'])
-          .limit(20)
+          .where('userId', 'in', targets)
+          .limit(30)
           .onSnapshot(
             (snap) => {
               this.notifications = snap.docs
@@ -393,7 +491,11 @@
     },
 
     renderNotifBadge() {
-      const unread = this.notifications.filter((n) => !n.read && n.userId !== 'ALL').length;
+      const lastBroadcastSeen = Number(localStorage.getItem('daman_last_bc_seen') || 0);
+      const unread = this.notifications.filter((n) => {
+        if (n.userId === 'ALL') return (n.createdAt?.seconds || 0) > lastBroadcastSeen;
+        return !n.read;
+      }).length;
       const badge = document.getElementById('notif-badge');
       if (!badge) return;
       if (unread > 0) {
@@ -535,6 +637,7 @@
                 <span class="text-xs font-extrabold text-white truncate">${this.esc(this.profile.companyName || this.profile.name)}</span>
                 <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(this.profile.accountType)}</span>
                 ${this.profile.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs"></i>` : ''}
+                ${this.profile.activePlanName ? `<span class="text-[9px] px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black"><i class="fa-solid fa-crown me-0.5"></i>${this.esc(this.profile.activePlanName)}</span>` : ''}
               </div>
               <div class="flex items-center gap-3 mt-1 text-[11px]">
                 <span class="text-emerald-400 font-bold">${this.t('availableBal')}: ${this.fmtMoney(this.profile.balanceAvailable)} ${this.t('egp')}</span>
@@ -547,7 +650,7 @@
           <div class="glass-card rounded-2xl p-3.5 flex items-center justify-between gap-2">
             <div>
               <h2 class="text-xs font-black text-white">${isAr ? 'أهلاً بك في ضمان سايت' : 'Welcome to DamanSite'}</h2>
-              <p class="text-[10px] text-slate-400 mt-0.5">${isAr ? '24 قطاعاً • ضمان مالي 3.5% • شركات وأفراد' : '24 Sectors • 3.5% Escrow • Companies & Pros'}</p>
+              <p class="text-[10px] text-slate-400 mt-0.5">${isAr ? 'استلام هندسي بضمان 3 أضعاف • 24 قطاع • نظام HR وشركات' : '3x Engineering Guarantee • 24 Sectors • HR & Escrow'}</p>
             </div>
             <button onclick="DamanApp.openAuthModal('register')" class="shrink-0 px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${this.t('loginBtn')}</button>
           </div>`;
@@ -560,11 +663,21 @@
           <!-- Quick Search Bar -->
           <form onsubmit="DamanApp.handleHomeSearch(event)" class="relative">
             <input id="home-search-input" type="search" value="${this.esc(this.searchQuery)}"
-              placeholder="${isAr ? 'ابحث في 24 قسم (مثال: تشطيب، أمن، موردين، التجمع...)' : 'Search 24 sectors, companies, locations...'}"
+              placeholder="${isAr ? 'ابحث في 24 قسم (مثال: شدة، محارة، أمن، التجمع...)' : 'Search 24 sectors, companies, locations...'}"
               class="w-full ps-10 pe-16 py-2.5 rounded-2xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none text-xs text-white" />
             <i class="fa-solid fa-magnifying-glass text-slate-400 absolute top-1/2 -translate-y-1/2 start-3.5 text-xs"></i>
             <button type="submit" class="absolute top-1/2 -translate-y-1/2 end-1.5 px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]">${isAr ? 'بحث' : 'Go'}</button>
           </form>
+
+          <!-- Highlighted 3x Engineering Inspection Guarantee Card -->
+          <div onclick="DamanApp.switchTab('about')" class="p-4 rounded-2xl bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950 border border-emerald-500/50 cursor-pointer space-y-2 shadow-lg">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950"><i class="fa-solid fa-shield-halved me-1"></i>${isAr ? 'ضمان مادي 3 أضعاف القيمة (3x)' : '3x Financial Guarantee'}</span>
+              <span class="text-[10px] text-emerald-300 font-bold">${isAr ? 'اعرف التفاصيل ←' : 'Learn More →'}</span>
+            </div>
+            <h3 class="text-sm font-black text-white leading-snug">${isAr ? 'استلام هندسي استشاري لشداتك وأسقفك ومحارتك بضمان مادي 3 أضعاف!' : 'Consultant Engineering Handover with 3x Financial Warranty!'}</h3>
+            <p class="text-[11px] text-slate-300 leading-relaxed">${isAr ? 'نستلم الشدات، الأسقف، المحارة، التشطيبات، أو نمسك مشروعك كامل استشارات وإشراف هندسي بضمان مادي حقيقي.' : 'We inspect shoring, slabs, plastering, finishing, or manage your full project as engineering consultants.'}</p>
+          </div>
 
           <!-- Homepage Main Ads Slider -->
           <div id="home-ad-slider">${this.buildAdSlideHtml()}</div>
@@ -575,32 +688,18 @@
               <span class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center"><i class="fa-solid fa-plus"></i></span>
               <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('postProject')}</span>
             </button>
+            <button onclick="DamanApp.switchTab('company')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-sky-500/50">
+              <span class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center"><i class="fa-solid fa-users-gear"></i></span>
+              <span class="text-[10px] font-bold text-slate-200 text-center">${isAr ? 'الشركات وHR' : 'HR & Teams'}</span>
+            </button>
             <button onclick="DamanApp.switchTab('wallet')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-emerald-500/50">
               <span class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-gem"></i></span>
               <span class="text-[10px] font-bold text-slate-200 text-center">${isAr ? 'الباقات' : 'Plans'}</span>
-            </button>
-            <button onclick="DamanApp.switchTab('company')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-sky-500/50">
-              <span class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center"><i class="fa-solid fa-building"></i></span>
-              <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('companyPanel')}</span>
             </button>
             <button onclick="DamanApp.switchTab('chat')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-purple-500/50">
               <span class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center"><i class="fa-solid fa-robot"></i></span>
               <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('aiSupport')}</span>
             </button>
-          </div>
-
-          <!-- Featured Promo Cards Strip -->
-          <div class="grid grid-cols-2 gap-2">
-            <div onclick="DamanApp.switchTab('projects')" class="p-3 rounded-2xl bg-gradient-to-br from-amber-500/20 to-slate-900 border border-amber-500/40 cursor-pointer space-y-1">
-              <span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-slate-950">${isAr ? 'إعلان مميز ★' : 'Featured ★'}</span>
-              <div class="text-xs font-black text-white pt-1">${isAr ? 'طلب عمالة VIP مضمونة' : 'VIP Guaranteed Labor'}</div>
-              <div class="text-[10px] text-slate-300">${isAr ? 'نوفر لك فرق عمل كاملة لأي قطاع' : 'Vetted teams for any sector'}</div>
-            </div>
-            <div onclick="DamanApp.switchTab('about')" class="p-3 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-slate-900 border border-emerald-500/40 cursor-pointer space-y-1">
-              <span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950">${isAr ? 'ضمان سايت' : 'DamanSite'}</span>
-              <div class="text-xs font-black text-white pt-1">${isAr ? 'باقات المعاينة والضمان' : 'Inspection Packages'}</div>
-              <div class="text-[10px] text-slate-300">${isAr ? 'سقف كامل • 4 زيارات • مبنى كامل' : 'Roof • 4 Visits • Full Building'}</div>
-            </div>
           </div>
 
           <!-- 24 Sectors Smooth Grid -->
@@ -633,23 +732,28 @@
       const isAr = this.lang === 'ar';
       main.innerHTML = `
         <div class="space-y-4">
-          <div class="rounded-2xl p-5 bg-gradient-to-br from-slate-800 to-slate-900 border border-amber-500/30 text-center">
-            <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 flex items-center justify-center text-2xl shadow-lg mb-3">
-              <i class="fa-solid fa-helmet-safety"></i>
+          <div class="rounded-2xl p-5 bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-950 border border-emerald-500/40 text-center space-y-2">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center text-2xl shadow-lg">
+              <i class="fa-solid fa-shield-halved"></i>
             </div>
-            <h2 class="text-lg font-extrabold text-white">${isAr ? 'ضمان سايت | DamanSite' : 'DamanSite Platform'}</h2>
-            <p class="text-xs text-slate-300 mt-2 leading-relaxed">
+            <h2 class="text-base font-black text-white">${isAr ? 'ضمان سايت — استلام هندسي بضمان مادي 3 أضعاف' : 'DamanSite — 3x Engineering Handover Guarantee'}</h2>
+            <p class="text-xs text-slate-300 leading-relaxed">
               ${isAr
-                ? 'المنصة الشاملة لـ 24 قطاعاً في المقاولات والتشطيبات واللاند سكيب والمنشآت، بنظام الضمان المالي (Escrow 3.5%)، توثيق الشركات والأفراد، المعاينات الهندسية، وعمالة VIP.'
-                : 'All-in-one platform across 24 sectors with 3.5% Escrow protection, verified companies & pros, site inspections, and VIP labor.'}
+                ? 'نحن مكتبك الاستشاري وضامنك الهندسي والمالي في الموقع: نستلم الشدات، الأسقف، المحارة، التشطيبات، أو ندير مشروعك بالكامل، ونمنحك ضماناً مادياً يصل إلى 3 أضعاف قيمة الخدمة المدفوعة.'
+                : 'Your on-site engineering consultant & financial guarantor: we inspect shoring, slabs, plastering, finishing, or full projects with a 3x financial warranty.'}
             </p>
+            <button onclick="if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects');" class="mt-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">
+              <i class="fa-solid fa-clipboard-check me-1"></i> ${isAr ? 'اطلب استلام هندسي أو باقة ضمان الآن' : 'Request Engineering Inspection'}
+            </button>
           </div>
+
           <div class="glass-card rounded-2xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed">
-            <h3 class="text-sm font-extrabold text-amber-400">${isAr ? 'لماذا ضمان سايت؟' : 'Why DamanSite?'}</h3>
-            <p>• ${isAr ? 'ضمان مالي 100% بعمولة 3.5% فقط مع عقود إلكترونية رسمية A4.' : '100% Escrow protection (3.5% fee) with printable A4 contracts.'}</p>
-            <p>• ${isAr ? 'إيداع وسحب منضبط بنفس اسم صاحب الحساب وخلال يوم عمل واحد.' : 'Same-name deposits & withdrawals processed within 1 business day.'}</p>
-            <p>• ${isAr ? 'مراجعة المنشورات من الإدارة قبل النشر لضمان الدقة وتنظيم الأقسام.' : 'Admin review before publishing to keep every sector organized.'}</p>
-            <p>• ${isAr ? 'توثيق الشركات بالسجل التجاري والبطاقة الضريبية مع صلاحيات Access لفريق العمل.' : 'Company verification with CR & Tax Card plus team Access controls.'}</p>
+            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-scale-balanced me-1"></i> ${isAr ? 'بنود وقواعد العمل في ضمان سايت:' : 'DamanSite Rules & Terms:'}</h3>
+            <p>• <b>${isAr ? 'الضمان المادي 3x للاستلام الهندسي:' : '3x Engineering Guarantee:'}</b> ${isAr ? 'في حالة وجود خطأ فني في بند تم استلامه واعتماده هندسياً من ضمان سايت، نتحمل تعويضاً مادياً يصل لـ 3 أضعاف قيمة الخدمة طبقاً لشروط العقد.' : 'Covers approved engineering inspections up to 3x service fee.'}</p>
+            <p>• <b>${isAr ? 'الضمان المالي للوساطة (Escrow 3.5%):' : '3.5% Financial Escrow:'}</b> ${isAr ? 'تُحجز قيمة الاتفاق داخل المحفظة وتُصرف بالدفعات أو بالتصفية الأسبوعية بعد التأكيد.' : 'Funds are locked safely and released upon confirmation.'}</p>
+            <p>• <b>${isAr ? 'شرط العقد المطبوع نسختين:' : 'Signed Dual-Copy Contract:'}</b> ${isAr ? 'بعد الاتفاق داخل الشات، يُطبع العقد A4 نسختين ويوقّع الطرفان ويتبادلا النسخ، وتُرفع صورة العقد الموقّع داخل الشات لتفعيل شرط الضمان.' : 'Print 2 copies, sign, exchange, and upload a photo in chat.'}</p>
+            <p>• <b>${isAr ? 'التأكيد اليومي ووقف العمل الأوتوماتيك:' : 'Daily Dual Confirmation:'}</b> ${isAr ? 'العامل والمهندس يؤكدان يوم العمل يومياً، وعند عدم كفاية الرصيد ليوم الغد يصدر إشعار فوري بوقف العمل لحين الشحن.' : 'Both sides confirm each workday; low balance triggers a stop-work alert.'}</p>
+            <p>• <b>${isAr ? 'الإيداع والسحب (يوم عمل واحد):' : 'Deposits & Withdrawals:'}</b> ${isAr ? 'الإيداع بالمحفظة أو رابط إنستا باي أو البنك، والسحب على المحفظة أو البنك فقط بنفس الاسم خلال يوم عمل واحد.' : 'Processed within 1 business day in the same legal name.'}</p>
           </div>
           <button onclick="DamanApp.switchTab('home')" class="w-full py-3 rounded-xl bg-slate-800 text-xs font-extrabold text-white">${isAr ? 'العودة للرئيسية' : 'Back to Home'}</button>
         </div>`;
@@ -683,8 +787,8 @@
                   <h3 class="text-sm font-extrabold text-white truncate">${this.esc(p.companyName || p.name)}</h3>
                   <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(p.accountType)}</span>
                 </div>
-                <p class="text-[11px] text-slate-400 truncate mt-0.5">${this.esc(p.email)}</p>
-                <div class="flex items-center gap-2 mt-1 text-xs">
+                <p class="text-[11px] text-slate-400 truncate mt-0.5">${this.esc(p.phone || '')} ${p.contactEmail || (p.email && !p.email.endsWith('@phone.damansite.app')) ? '• ' + this.esc(p.contactEmail || p.email) : ''}</p>
+                <div class="flex items-center gap-2 mt-1 text-xs flex-wrap">
                   <span class="text-amber-400">${stars}</span>
                   <span class="text-[10px] text-slate-400">(${p.ratingCount || 0})</span>
                   <span class="text-[10px] px-2 py-0.5 rounded-full ${p.kycStatus === 'verified' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'}">
@@ -693,9 +797,21 @@
                 </div>
               </div>
             </div>
-            <button onclick="DamanApp.openPublicProfile('${this.user.uid}')" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300">
-              <i class="fa-solid fa-eye me-1"></i> ${isAr ? 'معاينة صفحتي العامة (تقييماتي ومنشوراتي)' : 'View My Public Profile & Reviews'}
-            </button>
+
+            ${p.activePlanName ? `
+              <div class="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/10 border border-amber-500/40 flex items-center justify-between text-xs font-bold text-amber-300">
+                <span><i class="fa-solid fa-crown me-1"></i> ${this.esc(p.activePlanName)}</span>
+                <span class="text-[10px] text-slate-200">${isAr ? 'حتى' : 'Until'} ${this.esc(p.activePlanExpires || '')}</span>
+              </div>` : ''}
+
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="DamanApp.openPublicProfile('${this.user.uid}')" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-amber-300">
+                <i class="fa-solid fa-eye me-1"></i> ${isAr ? 'صفحتي العامة' : 'Public Profile'}
+              </button>
+              <button onclick="DamanApp.openEditProfileModal()" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-sky-300">
+                <i class="fa-solid fa-user-pen me-1"></i> ${isAr ? 'تعديل بياناتي' : 'Edit Profile'}
+              </button>
+            </div>
           </div>
 
           <div class="grid grid-cols-3 gap-2">
@@ -714,22 +830,17 @@
           </div>
 
           <div class="glass-card rounded-2xl divide-y divide-slate-800 overflow-hidden">
-            ${p.accountType === 'company' ? `
-              <button onclick="DamanApp.switchTab('company')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
-                <span class="flex items-center gap-2.5"><i class="fa-solid fa-building-shield text-sky-400 w-4"></i>${this.t('companyPanel')}</span>
-                <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
-              </button>` : ''}
+            <button onclick="DamanApp.switchTab('company')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
+              <span class="flex items-center gap-2.5"><i class="fa-solid fa-building-shield text-sky-400 w-4"></i>${isAr ? 'لوحة الشركات ونظام الـ HR' : 'Company & HR System'}</span>
+              <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
+            </button>
             ${this.isAdmin() ? `
               <button onclick="DamanApp.switchTab('admin')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-amber-400 hover:bg-slate-800/60">
                 <span class="flex items-center gap-2.5"><i class="fa-solid fa-crown w-4"></i>${isAr ? 'لوحة الإدارة العليا (Super Admin)' : 'Super Admin Dashboard'}</span>
                 <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
               </button>` : ''}
-            <button onclick="DamanApp.switchTab('wallet')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
-              <span class="flex items-center gap-2.5"><i class="fa-solid fa-wallet text-emerald-400 w-4"></i>${isAr ? 'المحفظة والباقات والتوثيق' : 'Wallet, Plans & KYC'}</span>
-              <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
-            </button>
-            <button onclick="DamanApp.switchTab('chat')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
-              <span class="flex items-center gap-2.5"><i class="fa-solid fa-headset text-purple-400 w-4"></i>${this.t('aiSupport')}</span>
+            <button onclick="DamanApp.switchTab('about')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
+              <span class="flex items-center gap-2.5"><i class="fa-solid fa-shield-halved text-emerald-400 w-4"></i>${isAr ? 'خدمات الضمان 3x وبنود العمل' : '3x Guarantee & Rules'}</span>
               <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
             </button>
             <button onclick="DamanApp.logout()" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-rose-400 hover:bg-rose-950/30">
@@ -740,20 +851,7 @@
     },
 
     renderPhasePlaceholder(container, tabName) {
-      const phaseMap = {
-        wallet: 'الخطوة 2 (wallet.js)',
-        projects: 'الخطوة 3 (projects-escrow.js)',
-        chat: 'الخطوة 4 (chat-support.js)',
-        company: 'الخطوة 5 (company-panel.js)',
-        admin: 'الخطوة 6 (admin.js)'
-      };
-      container.innerHTML = `
-        <div class="glass-card rounded-2xl p-6 text-center mt-6 space-y-3 border-amber-500/30">
-          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl"><i class="fa-solid fa-cubes"></i></div>
-          <h3 class="text-sm font-extrabold text-white">${this.t('phasePendingTitle')}</h3>
-          <p class="text-xs text-slate-400 leading-relaxed">${this.t('phasePendingDesc')}</p>
-          <div class="inline-block text-[11px] font-bold px-3 py-1 rounded-full bg-slate-800 text-amber-300">${phaseMap[tabName] || tabName}</div>
-        </div>`;
+      container.innerHTML = `<div class="glass-card rounded-2xl p-6 text-center mt-6 text-xs text-slate-400">${tabName}</div>`;
     },
 
     getRoleLabel(type) {
@@ -798,6 +896,7 @@
 
     openNotifications() {
       const list = document.getElementById('notif-list');
+      localStorage.setItem('daman_last_bc_seen', String(Math.floor(Date.now() / 1000)));
       if (list) {
         if (!this.notifications.length) {
           list.innerHTML = `<div class="text-center text-xs text-slate-400 py-8">${this.lang === 'ar' ? 'لا توجد إشعارات حالياً' : 'No notifications yet'}</div>`;
@@ -806,7 +905,7 @@
             .map((n) => `
               <div class="p-3 rounded-xl ${n.read ? 'bg-slate-900/60' : 'bg-amber-500/10 border border-amber-500/30'}">
                 <div class="text-xs font-bold text-white">${this.esc(n.title || '')}</div>
-                <div class="text-[11px] text-slate-300 mt-0.5">${this.esc(n.body || '')}</div>
+                <div class="text-[11px] text-slate-300 mt-0.5 leading-relaxed">${this.esc(n.body || '')}</div>
               </div>`)
             .join('');
           this.notifications
@@ -814,19 +913,41 @@
             .forEach((n) => db.collection('notifications').doc(n.id).update({ read: true }).catch(() => {}));
         }
       }
+      this.renderNotifBadge();
       this.openModal('notifications-modal');
     },
 
     bindAuthForms() {
+      // Upgrade login/register email inputs to accept Phone OR Email
+      const loginEmail = document.getElementById('login-email');
+      if (loginEmail) {
+        loginEmail.type = 'text';
+        loginEmail.placeholder = this.lang === 'ar' ? 'رقم الموبايل أو البريد الإلكتروني (Gmail)' : 'Phone Number or Email';
+      }
+      const regEmail = document.getElementById('reg-email');
+      if (regEmail) {
+        regEmail.type = 'text';
+        regEmail.placeholder = this.lang === 'ar' ? 'البريد الإلكتروني (Gmail) أو رقم الموبايل' : 'Email or Phone Number';
+      }
+
       const loginForm = document.getElementById('login-form');
       if (loginForm) {
+        if (!document.getElementById('daman-forgot-btn')) {
+          const btn = document.createElement('button');
+          btn.id = 'daman-forgot-btn';
+          btn.type = 'button';
+          btn.className = 'w-full text-center text-[11px] text-amber-400 font-bold pt-1 hover:underline';
+          btn.textContent = this.lang === 'ar' ? 'نسيت كلمة السر؟' : 'Forgot Password?';
+          btn.onclick = () => this.forgotPasswordPrompt();
+          loginForm.appendChild(btn);
+        }
+
         loginForm.onsubmit = async (e) => {
           e.preventDefault();
+          const authEmail = this.toAuthEmail(document.getElementById('login-email').value);
+          if (!authEmail) return this.toast(this.lang === 'ar' ? 'أدخل رقم موبايل أو بريد إلكتروني صحيح' : 'Enter valid phone or email', 'error');
           try {
-            await auth.signInWithEmailAndPassword(
-              document.getElementById('login-email').value.trim(),
-              document.getElementById('login-pass').value
-            );
+            await auth.signInWithEmailAndPassword(authEmail, document.getElementById('login-pass').value);
             this.toast(this.lang === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Signed in', 'success');
           } catch (err) {
             this.toast(err.message, 'error');
@@ -838,18 +959,23 @@
       if (regForm) {
         regForm.onsubmit = async (e) => {
           e.preventDefault();
-          const email = document.getElementById('reg-email').value.trim();
+          const rawId = document.getElementById('reg-email').value.trim();
+          const phoneVal = document.getElementById('reg-phone').value.trim();
+          const authEmail = this.toAuthEmail(rawId || phoneVal);
+          if (!authEmail) return this.toast(this.lang === 'ar' ? 'أدخل بريد إلكتروني أو رقم موبايل صحيح' : 'Enter valid email or phone', 'error');
           const accountType = document.getElementById('reg-role').value;
           try {
-            const cred = await auth.createUserWithEmailAndPassword(email, document.getElementById('reg-pass').value);
+            const cred = await auth.createUserWithEmailAndPassword(authEmail, document.getElementById('reg-pass').value);
             await db.collection('users').doc(cred.user.uid).set({
               uid: cred.user.uid,
-              email: email.toLowerCase(),
+              email: authEmail,
+              contactEmail: rawId.includes('@') ? rawId.toLowerCase() : '',
               name: document.getElementById('reg-name').value.trim(),
-              phone: document.getElementById('reg-phone').value.trim(),
+              phone: phoneVal,
               accountType,
               companyName: accountType === 'company' ? document.getElementById('reg-company-name').value.trim() : '',
               commercialReg: accountType === 'company' ? document.getElementById('reg-company-cr').value.trim() : '',
+              companyCode: accountType === 'company' ? 'CMP-' + Math.floor(1000 + Math.random() * 9000) : '',
               kycStatus: 'unverified',
               status: 'active',
               balanceAvailable: 0,
@@ -859,7 +985,7 @@
               ratingCount: 0,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-            this.toast(this.lang === 'ar' ? 'تم إنشاء الحساب بنجاح' : 'Account created', 'success');
+            this.toast(this.lang === 'ar' ? 'تم إنشاء الحساب! يرجى استكمال التوثيق الإلزامي الآن' : 'Account created! Complete KYC now', 'success');
           } catch (err) {
             this.toast(err.message, 'error');
           }
@@ -876,11 +1002,13 @@
             await db.collection('users').doc(this.user.uid).set({
               uid: this.user.uid,
               email: (this.user.email || '').toLowerCase(),
+              contactEmail: (this.user.email || '').toLowerCase(),
               name: document.getElementById('ob-name').value.trim(),
               phone: document.getElementById('ob-phone').value.trim(),
               accountType,
               companyName: accountType === 'company' ? document.getElementById('ob-company-name').value.trim() : '',
               commercialReg: accountType === 'company' ? document.getElementById('ob-company-cr').value.trim() : '',
+              companyCode: accountType === 'company' ? 'CMP-' + Math.floor(1000 + Math.random() * 9000) : '',
               kycStatus: 'unverified',
               status: 'active',
               balanceAvailable: 0,
@@ -890,7 +1018,7 @@
               ratingCount: 0,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-            this.toast(this.lang === 'ar' ? 'تم حفظ بيانات حسابك بنجاح' : 'Profile completed', 'success');
+            this.toast(this.lang === 'ar' ? 'تم حفظ بياناتك! يرجى استكمال التوثيق الإلزامي' : 'Saved! Complete KYC now', 'success');
           } catch (err) {
             this.toast(err.message, 'error');
           }
@@ -908,6 +1036,7 @@
 
     async logout() {
       await auth.signOut();
+      sessionStorage.removeItem('daman_kyc_prompted');
       this.activeTab = 'home';
       this.toast(this.lang === 'ar' ? 'تم تسجيل الخروج' : 'Signed out', 'info');
     }
