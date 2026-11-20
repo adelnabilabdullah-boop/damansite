@@ -1,6 +1,6 @@
 (function () {
   const CompanyMod = {
-    subTab: 'team', // 'team' | 'hr' | 'custody' | 'leaves' | 'chat'
+    subTab: 'team',
     members: [],
     myMemberships: [],
     attendance: [],
@@ -122,7 +122,6 @@
       return { allowed: isVerified && hasBalanceOrPlan, isVerified, hasBalanceOrPlan, minBal };
     },
 
-    // ==================== 1. SEARCH EMPLOYEES & JOIN BY COMPANY CODE ====================
     async searchEmployee() {
       const app = window.DamanApp;
       const q = (document.getElementById('cm-search-input')?.value || '').trim();
@@ -255,7 +254,6 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== 2. HR ATTENDANCE (SELFIE + GPS) & PAYROLL SHEET ====================
     compressSelfie(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -337,7 +335,7 @@
     },
 
     calcPayrollRow(m) {
-      const monthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const monthPrefix = new Date().toISOString().slice(0, 7);
       const recs = this.attendance.filter((a) => (a.memberUid === m.memberUid || a.memberName === m.memberName) && (a.date || '').startsWith(monthPrefix));
       const daysPresent = recs.length;
       const totalHours = Math.round(recs.reduce((s, r) => s + Number(r.hoursWorked || 8), 0) * 10) / 10;
@@ -368,7 +366,6 @@
       win.document.close();
     },
 
-    // ==================== 3. CUSTODY (العُهد) & LEAVES (الإجازات) & GROUP CHAT ====================
     async addCustodyItem(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -376,7 +373,7 @@
         await app.db.collection('companyCustody').add({
           companyUid: this.activeCompanyUid,
           byName: app.profile.name || '',
-          kind: document.getElementById('cus-kind').value, // custody | expense
+          kind: document.getElementById('cus-kind').value,
           amount: parseFloat(document.getElementById('cus-amt').value) || 0,
           notes: document.getElementById('cus-notes').value.trim(),
           date: new Date().toISOString().slice(0, 10),
@@ -433,7 +430,6 @@
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
-    // ==================== RENDER SUB-TABS ====================
     renderTeamTab(app) {
       const check = this.canGrantAccess(app);
       const unlocked = check.allowed || app.isAdmin();
@@ -507,7 +503,6 @@
       const activeMembers = this.members.filter((m) => m.status === 'active');
       return `
         <div class="space-y-3.5">
-          <!-- Employee Check-In / Check-Out with Selfie + GPS -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2.5 border-emerald-500/40">
             <div class="text-xs font-black text-emerald-400"><i class="fa-solid fa-camera-retro me-1"></i> تسجيل الحضور والانصراف اليومي (سيلفي + لوكيشن GPS)</div>
             <div class="grid grid-cols-2 gap-2">
