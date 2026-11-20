@@ -17,13 +17,17 @@
     unsubProfile: null,
     unsubNotifs: null,
     notifications: [],
+    appConfig: null,
     lang: savedLang || autoLang,
     activeTab: 'home',
-    selectedMainCat: window.DAMAN_CATEGORIES[0].id,
-    selectedSubCat: null,
+    selectedMainCat: 'all',
+    selectedGov: 'all',
+    searchQuery: '',
+    showAllCats: false,
     ads: window.DAMAN_DEFAULT_ADS.slice(),
     adIndex: 0,
     adTimer: null,
+    dailyBanner: null,
     modules: {},
 
     isAdmin() {
@@ -55,6 +59,14 @@
       });
     },
 
+    getPackages() {
+      return (this.appConfig && this.appConfig.packages) || window.DAMAN_DEFAULT_PACKAGES;
+    },
+
+    getCommissionRate() {
+      return (this.appConfig && Number(this.appConfig.commissionRate)) || window.DAMAN_CONFIG.commissionRate;
+    },
+
     toast(message, type = 'info') {
       const box = document.getElementById('toast-container');
       if (!box) return;
@@ -72,13 +84,164 @@
         el.style.opacity = '0';
         el.style.transform = 'translateY(-8px)';
         setTimeout(() => el.remove(), 300);
-      }, 3200);
+      }, 3400);
     },
 
     registerModule(name, moduleObj) {
       this.modules[name] = moduleObj;
-      if (this.activeTab === name || (name === 'chat' && this.activeTab === 'support')) {
-        this.renderCurrentTab();
+      if (this.activeTab === name) this.renderCurrentTab();
+    },
+
+    shareOnWhatsApp(title, details) {
+      const url = window.location.href.split('#')[0];
+      const msg = `🏗️ *ضمان سايت | DamanSite*\n📌 ${title}\n${details ? details + '\n' : ''}🔗 ${url}`;
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    },
+
+    revealPhoneWithAdvice(phone, ownerName) {
+      if (!this.user) {
+        this.toast(this.lang === 'ar' ? 'سجّل الدخول أولاً لإظهار رقم الهاتف والتواصل' : 'Sign in first to view phone number', 'warning');
+        return this.openAuthModal('login');
+      }
+      const isAr = this.lang === 'ar';
+      let modal = document.getElementById('daman-phone-advice-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'daman-phone-advice-modal';
+        modal.className = 'fixed inset-0 z-[70] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(modal);
+      }
+      modal.classList.remove('hidden');
+      const cleanPhone = String(phone || '').replace(/[^\d+]/g, '');
+      modal.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-extrabold text-amber-400"><i class="fa-solid fa-phone-volume me-1"></i> ${isAr ? 'بيانات التواصل' : 'Contact Details'}</h3>
+            <button onclick="document.getElementById('daman-phone-advice-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 leading-relaxed">
+            <div class="font-extrabold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved me-1"></i> ${isAr ? 'نصيحة ضمان سايت الهامة:' : 'DamanSite Safety Advice:'}</div>
+            ${isAr
+              ? 'تواصل بحرية، لكن لحماية حقك المالي والهندسي، اجعل التعاقد وحجز الدفعات داخل محفظة الضمان (3.5%) فقط — المنصة غير مسؤولة عن أي تعاملات مالية خارج التطبيق.'
+              : 'Communicate freely, but to protect your funds and work quality, keep all contracts and payments inside DamanSite 3.5% Escrow.'}
+          </div>
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 text-center space-y-1">
+            <div class="text-xs text-slate-400">${this.esc(ownerName || '')}</div>
+            <div class="text-lg font-black text-emerald-400 tracking-wider" dir="ltr">${this.esc(phone || '-')}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <a href="tel:${cleanPhone}" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs text-center"><i class="fa-solid fa-phone me-1"></i> ${isAr ? 'اتصال مباشر' : 'Call Now'}</a>
+            <a href="https://wa.me/${cleanPhone.replace(/^0/, '20')}" target="_blank" class="py-2.5 rounded-xl bg-green-600 text-white font-black text-xs text-center"><i class="fa-brands fa-whatsapp me-1"></i> ${isAr ? 'واتساب' : 'WhatsApp'}</a>
+          </div>
+        </div>`;
+    },
+
+    // Public Profile Page for ANY User/Company (Posts + Ratings + Reviews)
+    async openPublicProfile(uid, fallbackData = {}) {
+      const isAr = this.lang === 'ar';
+      let modal = document.getElementById('daman-public-profile-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'daman-public-profile-modal';
+        modal.className = 'fixed inset-0 z-[65] bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-4';
+        document.body.appendChild(modal);
+      }
+      modal.classList.remove('hidden');
+      modal.innerHTML = `<div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center text-xs text-slate-300"><i class="fa-solid fa-spinner fa-spin text-amber-400 text-xl mb-2"></i><div>${isAr ? 'جارٍ تحميل الملف والتقييمات...' : 'Loading profile...'}</div></div>`;
+
+      let uData = Object.assign({}, fallbackData);
+      let reviews = [];
+      let posts = [];
+
+      if (uid && !String(uid).startsWith('demo_')) {
+        try {
+          const [uSnap, rSnap, pSnap] = await Promise.all([
+            db.collection('users').doc(uid).get(),
+            db.collection('reviews').where('targetUserId', '==', uid).limit(20).get(),
+            db.collection('projects').where('clientId', '==', uid).limit(15).get()
+          ]);
+          if (uSnap.exists) uData = Object.assign(uData, uSnap.data());
+          reviews = rSnap.docs.map((d) => d.data());
+          posts = pSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.status !== 'pending_review');
+        } catch (e) {
+          console.error('openPublicProfile error:', e);
+        }
+      } else if (fallbackData.demoReviews) {
+        reviews = fallbackData.demoReviews;
+        posts = fallbackData.demoPosts || [];
+      }
+
+      const avg = Number(uData.ratingAvg || 0);
+      const count = Number(uData.ratingCount || reviews.length || 0);
+      const stars = '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
+      const displayName = uData.companyName || uData.name || (isAr ? 'مستخدم ضمان سايت' : 'DamanSite User');
+
+      modal.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 max-h-[90vh] overflow-y-auto space-y-3.5">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-12 h-12 shrink-0 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-slate-950 flex items-center justify-center text-lg font-black">
+                ${this.esc(displayName.charAt(0).toUpperCase())}
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <h3 class="text-sm font-black text-white truncate">${this.esc(displayName)}</h3>
+                  ${uData.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs" title="${this.t('verified')}"></i>` : ''}
+                </div>
+                <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(uData.accountType)}</span>
+                  <span class="text-xs text-amber-400">${stars} <span class="text-[10px] text-slate-400">(${avg.toFixed(1)} / ${count})</span></span>
+                </div>
+              </div>
+            </div>
+            <button onclick="document.getElementById('daman-public-profile-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300 shrink-0"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          ${uData.commercialReg ? `<div class="text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-1.5 rounded-xl"><i class="fa-solid fa-building-shield me-1"></i> ${isAr ? 'سجل تجاري:' : 'CR:'} ${this.esc(uData.commercialReg)}</div>` : ''}
+
+          <div class="grid grid-cols-2 gap-2">
+            ${uData.phone ? `<button onclick="DamanApp.revealPhoneWithAdvice('${this.esc(uData.phone)}','${this.esc(displayName).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-extrabold text-xs"><i class="fa-solid fa-phone me-1"></i> ${isAr ? 'إظهار الهاتف' : 'Show Phone'}</button>` : ''}
+            <button onclick="DamanApp.openChatWith('${this.esc(uid || 'admin')}','${this.esc(displayName).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-sky-500/20 border border-sky-500/40 text-sky-300 font-extrabold text-xs ${!uData.phone ? 'col-span-2' : ''}"><i class="fa-solid fa-comments me-1"></i> ${isAr ? 'مراسلة مباشرة' : 'Direct Chat'}</button>
+          </div>
+
+          <div class="space-y-2">
+            <h4 class="text-xs font-extrabold text-amber-400"><i class="fa-solid fa-star me-1"></i> ${isAr ? 'التقييمات والمراجعات' : 'Ratings & Reviews'} (${reviews.length})</h4>
+            ${!reviews.length
+              ? `<div class="text-center text-[11px] text-slate-400 py-3 bg-slate-950/60 rounded-xl">${isAr ? 'لا توجد تقييمات مكتوبة بعد' : 'No written reviews yet'}</div>`
+              : reviews.map((r) => `
+                  <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="font-bold text-white">${this.esc(r.fromName || (isAr ? 'عميل ضمان سايت' : 'Client'))}</span>
+                      <span class="text-amber-400">${'★'.repeat(r.rating || 5)}${'☆'.repeat(5 - (r.rating || 5))}</span>
+                    </div>
+                    <p class="text-[11px] text-slate-300">${this.esc(r.comment || '')}</p>
+                  </div>`).join('')}
+          </div>
+
+          <div class="space-y-2">
+            <h4 class="text-xs font-extrabold text-white"><i class="fa-solid fa-bullhorn text-emerald-400 me-1"></i> ${isAr ? 'المنشورات والمشاريع السابقة' : 'Past Posts & Projects'} (${posts.length})</h4>
+            ${!posts.length
+              ? `<div class="text-center text-[11px] text-slate-400 py-3 bg-slate-950/60 rounded-xl">${isAr ? 'لا توجد منشورات سابقة' : 'No previous posts'}</div>`
+              : posts.map((p) => `
+                  <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="text-xs font-bold text-white truncate">${this.esc(p.title)}</div>
+                      <div class="text-[10px] text-slate-400">${this.esc(p.location || '')}</div>
+                    </div>
+                    <span class="text-[11px] font-black text-emerald-400 shrink-0">${this.fmtMoney(p.budget || p.contractAmount)} ${this.t('egp')}</span>
+                  </div>`).join('')}
+          </div>
+        </div>`;
+    },
+
+    openChatWith(targetUid, targetName, projectId = '', projectTitle = '') {
+      const m = document.getElementById('daman-public-profile-modal');
+      if (m) m.classList.add('hidden');
+      if (window.DamanChat && typeof window.DamanChat.openDirectChat === 'function') {
+        window.DamanChat.openDirectChat(targetUid, targetName, projectId, projectTitle);
+      } else {
+        this.switchTab('chat');
+        this.toast(this.lang === 'ar' ? 'سيتم تفعيل الدردشة المباشرة في الخطوة 4 (chat-support.js)' : 'Direct chat activates in Step 4', 'info');
       }
     },
 
@@ -87,13 +250,10 @@
       html.lang = this.lang;
       html.dir = this.lang === 'ar' ? 'rtl' : 'ltr';
       localStorage.setItem('daman_lang', this.lang);
-
       const langBtn = document.getElementById('lang-btn-text');
       if (langBtn) langBtn.textContent = this.lang === 'ar' ? 'EN' : 'عربي';
-
       document.querySelectorAll('[data-i18n]').forEach((el) => {
-        const key = el.getAttribute('data-i18n');
-        el.textContent = this.t(key);
+        el.textContent = this.t(el.getAttribute('data-i18n'));
       });
     },
 
@@ -104,21 +264,73 @@
       this.renderCurrentTab();
     },
 
+    // Smart Cache: 1 Firestore read for ALL app settings (cached 5 mins)
+    async loadAppConfig(force = false) {
+      const cacheKey = 'daman_app_config_v5';
+      if (!force) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+          if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+            this.appConfig = cached.data;
+            this.applyAppConfig();
+            return;
+          }
+        } catch (e) {}
+      }
+      try {
+        const snap = await db.collection('settings').doc('appConfig').get();
+        this.appConfig = snap.exists ? snap.data() : {};
+        localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: this.appConfig }));
+      } catch (e) {
+        this.appConfig = {};
+      }
+      this.applyAppConfig();
+    },
+
+    applyAppConfig() {
+      if (this.appConfig && Array.isArray(this.appConfig.ads) && this.appConfig.ads.length) {
+        this.ads = this.appConfig.ads.filter((a) => a.active !== false);
+      } else {
+        this.ads = window.DAMAN_DEFAULT_ADS.slice();
+      }
+      this.checkDailyNotification();
+      this.startAdAutoplay();
+      if (this.activeTab === 'home') this.renderHome();
+    },
+
+    // Rotating 24-Hour Daily Notification Engine
+    checkDailyNotification() {
+      const pool =
+        this.appConfig && Array.isArray(this.appConfig.dailyNotifs) && this.appConfig.dailyNotifs.length
+          ? this.appConfig.dailyNotifs
+          : window.DAMAN_DAILY_NOTIFS;
+      if (!pool.length) return;
+
+      const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) % pool.length;
+      const todayItem = pool[dayIndex];
+      const dismissedDay = localStorage.getItem('daman_daily_dismissed_day');
+      const todayKey = new Date().toISOString().slice(0, 10);
+
+      if (dismissedDay !== todayKey) {
+        this.dailyBanner = todayItem;
+      }
+    },
+
+    dismissDailyBanner() {
+      this.dailyBanner = null;
+      localStorage.setItem('daman_daily_dismissed_day', new Date().toISOString().slice(0, 10));
+      if (this.activeTab === 'home') this.renderHome();
+    },
+
     init() {
       this.applyLanguage();
-      this.loadAds();
+      this.loadAppConfig();
       this.bindAuthForms();
 
       auth.onAuthStateChanged((user) => {
         this.user = user;
-        if (this.unsubProfile) {
-          this.unsubProfile();
-          this.unsubProfile = null;
-        }
-        if (this.unsubNotifs) {
-          this.unsubNotifs();
-          this.unsubNotifs = null;
-        }
+        if (this.unsubProfile) { this.unsubProfile(); this.unsubProfile = null; }
+        if (this.unsubNotifs) { this.unsubNotifs(); this.unsubNotifs = null; }
 
         if (!user) {
           this.profile = null;
@@ -128,8 +340,7 @@
           return;
         }
 
-        const userRef = db.collection('users').doc(user.uid);
-        this.unsubProfile = userRef.onSnapshot(
+        this.unsubProfile = db.collection('users').doc(user.uid).onSnapshot(
           (snap) => {
             if (!snap.exists) {
               this.openOnboardingModal();
@@ -141,14 +352,12 @@
             this.renderHeaderState();
             this.renderCurrentTab();
           },
-          (err) => {
-            console.error('Profile listener error:', err);
-          }
+          (err) => console.error('Profile error:', err)
         );
 
         this.unsubNotifs = db
           .collection('notifications')
-          .where('userId', '==', user.uid)
+          .where('userId', 'in', [user.uid, 'ALL'])
           .limit(20)
           .onSnapshot(
             (snap) => {
@@ -165,21 +374,6 @@
       this.renderCurrentTab();
     },
 
-    async loadAds() {
-      try {
-        const snap = await db.collection('ads').where('active', '==', true).get();
-        if (!snap.empty) {
-          this.ads = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-        } else {
-          this.ads = window.DAMAN_DEFAULT_ADS.slice();
-        }
-      } catch (e) {
-        this.ads = window.DAMAN_DEFAULT_ADS.slice();
-      }
-      if (this.activeTab === 'home') this.renderHome();
-      this.startAdAutoplay();
-    },
-
     startAdAutoplay() {
       if (this.adTimer) clearInterval(this.adTimer);
       this.adTimer = setInterval(() => {
@@ -188,7 +382,7 @@
           const wrap = document.getElementById('home-ad-slider');
           if (wrap) wrap.innerHTML = this.buildAdSlideHtml();
         }
-      }, 5000);
+      }, 4500);
     },
 
     stepAd(delta) {
@@ -199,7 +393,7 @@
     },
 
     renderNotifBadge() {
-      const unread = this.notifications.filter((n) => !n.read).length;
+      const unread = this.notifications.filter((n) => !n.read && n.userId !== 'ALL').length;
       const badge = document.getElementById('notif-badge');
       if (!badge) return;
       if (unread > 0) {
@@ -215,28 +409,14 @@
       const authBtn = document.getElementById('header-auth-btn');
       const notifBtn = document.getElementById('header-notif-btn');
 
-      if (adminBtn) {
-        if (this.isAdmin()) adminBtn.classList.remove('hidden');
-        else adminBtn.classList.add('hidden');
-      }
-      if (authBtn) {
-        if (this.user) authBtn.classList.add('hidden');
-        else authBtn.classList.remove('hidden');
-      }
-      if (notifBtn) {
-        if (this.user) notifBtn.classList.remove('hidden');
-        else notifBtn.classList.add('hidden');
-      }
+      if (adminBtn) adminBtn.classList.toggle('hidden', !this.isAdmin());
+      if (authBtn) authBtn.classList.toggle('hidden', !!this.user);
+      if (notifBtn) notifBtn.classList.toggle('hidden', !this.user);
 
       document.querySelectorAll('.nav-btn').forEach((btn) => {
         const t = btn.getAttribute('data-tab');
-        if (t === this.activeTab) {
-          btn.classList.add('text-amber-400');
-          btn.classList.remove('text-slate-400');
-        } else {
-          btn.classList.remove('text-amber-400');
-          btn.classList.add('text-slate-400');
-        }
+        btn.classList.toggle('text-amber-400', t === this.activeTab);
+        btn.classList.toggle('text-slate-400', t !== this.activeTab);
       });
     },
 
@@ -251,16 +431,22 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
-    selectMainCategory(catId) {
+    openCategory(catId) {
       this.selectedMainCat = catId;
-      this.selectedSubCat = null;
-      this.renderHome();
+      this.switchTab('projects');
     },
 
-    openSubCategory(mainId, subId) {
-      this.selectedMainCat = mainId;
-      this.selectedSubCat = subId;
+    handleHomeSearch(e) {
+      e.preventDefault();
+      const inp = document.getElementById('home-search-input');
+      this.searchQuery = inp ? inp.value.trim() : '';
+      this.selectedMainCat = 'all';
       this.switchTab('projects');
+    },
+
+    toggleShowAllCats() {
+      this.showAllCats = !this.showAllCats;
+      this.renderHome();
     },
 
     renderCurrentTab() {
@@ -293,27 +479,28 @@
     buildAdSlideHtml() {
       const ad = this.ads[this.adIndex] || this.ads[0];
       if (!ad) return '';
-      const badge = this.lang === 'ar' ? (ad.badgeAr || ad.badge || 'إعلان') : (ad.badgeEn || ad.badgeAr || 'Promo');
-      const title = this.lang === 'ar' ? (ad.titleAr || ad.title) : (ad.titleEn || ad.titleAr);
-      const desc = this.lang === 'ar' ? (ad.descAr || ad.desc) : (ad.descEn || ad.descAr);
-      const grad = ad.gradient || 'from-amber-600 via-amber-500 to-orange-600';
+      const isAr = this.lang === 'ar';
+      const badge = isAr ? (ad.badgeAr || ad.badge || 'إعلان مميز') : (ad.badgeEn || ad.badgeAr || 'Featured');
+      const title = isAr ? (ad.titleAr || ad.title) : (ad.titleEn || ad.titleAr);
+      const desc = isAr ? (ad.descAr || ad.desc) : (ad.descEn || ad.descAr);
+      const grad = ad.gradient || 'from-amber-600 via-orange-600 to-amber-800';
       const clickAttr = ad.linkUrl
         ? `window.open('${this.esc(ad.linkUrl)}','_blank')`
-        : `DamanApp.switchTab('${this.esc(ad.actionTab || 'about')}')`;
+        : `DamanApp.switchTab('${this.esc(ad.actionTab || 'projects')}')`;
 
       return `
-        <div onclick="${clickAttr}" class="relative overflow-hidden rounded-2xl p-4 cursor-pointer bg-gradient-to-br ${grad} border border-white/15 shadow-lg min-h-[132px] flex flex-col justify-between">
+        <div onclick="${clickAttr}" class="relative overflow-hidden rounded-2xl p-4 cursor-pointer bg-gradient-to-br ${grad} border border-white/15 shadow-lg min-h-[138px] flex flex-col justify-between">
           ${ad.imageBase64 ? `<img src="${ad.imageBase64}" class="absolute inset-0 w-full h-full object-cover opacity-35 pointer-events-none" />` : ''}
           <div class="relative z-10 flex items-center justify-between">
-            <span class="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-black/35 text-amber-200 border border-white/15">${this.esc(badge)}</span>
+            <span class="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-black/40 text-amber-200 border border-white/15">${this.esc(badge)}</span>
             <div class="flex items-center gap-1" onclick="event.stopPropagation()">
-              <button onclick="DamanApp.stepAd(-1)" class="w-6 h-6 rounded-full bg-black/30 text-white text-[10px] flex items-center justify-center"><i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'right' : 'left'}"></i></button>
-              <button onclick="DamanApp.stepAd(1)" class="w-6 h-6 rounded-full bg-black/30 text-white text-[10px] flex items-center justify-center"><i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'}"></i></button>
+              <button onclick="DamanApp.stepAd(-1)" class="w-6 h-6 rounded-full bg-black/35 text-white text-[10px] flex items-center justify-center"><i class="fa-solid fa-chevron-${isAr ? 'right' : 'left'}"></i></button>
+              <button onclick="DamanApp.stepAd(1)" class="w-6 h-6 rounded-full bg-black/35 text-white text-[10px] flex items-center justify-center"><i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'}"></i></button>
             </div>
           </div>
           <div class="relative z-10 mt-2">
-            <h3 class="text-sm font-extrabold text-white leading-snug">${this.esc(title)}</h3>
-            <p class="text-[11px] text-white/85 mt-1 leading-relaxed line-clamp-2">${this.esc(desc)}</p>
+            <h3 class="text-sm font-black text-white leading-snug">${this.esc(title)}</h3>
+            <p class="text-[11px] text-white/90 mt-1 leading-relaxed line-clamp-2">${this.esc(desc)}</p>
           </div>
           <div class="relative z-10 flex justify-center gap-1.5 mt-3">
             ${this.ads.map((_, idx) => `<span class="h-1.5 rounded-full transition-all ${idx === this.adIndex ? 'w-5 bg-white' : 'w-1.5 bg-white/40'}"></span>`).join('')}
@@ -323,114 +510,120 @@
 
     renderHome() {
       const main = document.getElementById('app-main');
-      const activeCat = window.DAMAN_CATEGORIES.find((c) => c.id === this.selectedMainCat) || window.DAMAN_CATEGORIES[0];
+      const isAr = this.lang === 'ar';
+      const catsToShow = this.showAllCats ? window.DAMAN_CATEGORIES : window.DAMAN_CATEGORIES.slice(0, 8);
 
-      const frozenBar =
-        this.profile && this.profile.status === 'frozen'
-          ? `<div class="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i><span>${this.t('frozenNotice')}</span></div>`
-          : '';
+      const dailyHtml = this.dailyBanner
+        ? `
+          <div class="p-3 rounded-2xl bg-gradient-to-r from-amber-500/20 to-orange-500/10 border border-amber-500/40 flex items-start justify-between gap-2">
+            <div class="flex items-start gap-2">
+              <i class="fa-solid fa-bell text-amber-400 mt-0.5"></i>
+              <div>
+                <div class="text-[11px] font-black text-amber-300">${this.esc(this.dailyBanner.title)}</div>
+                <div class="text-[11px] text-slate-200 leading-snug mt-0.5">${this.esc(this.dailyBanner.body)}</div>
+              </div>
+            </div>
+            <button onclick="DamanApp.dismissDailyBanner()" class="text-slate-400 hover:text-white text-xs"><i class="fa-solid fa-xmark"></i></button>
+          </div>`
+        : '';
 
       const userCard = this.profile
         ? `
-          <div class="glass-card rounded-2xl p-3.5 flex items-center justify-between gap-2">
+          <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-xs font-extrabold text-white truncate">${this.esc(this.profile.name)}</span>
+                <span class="text-xs font-extrabold text-white truncate">${this.esc(this.profile.companyName || this.profile.name)}</span>
                 <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(this.profile.accountType)}</span>
-                ${this.profile.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs" title="${this.t('verified')}"></i>` : ''}
+                ${this.profile.kycStatus === 'verified' ? `<i class="fa-solid fa-circle-check text-sky-400 text-xs"></i>` : ''}
               </div>
-              <div class="flex items-center gap-3 mt-1.5 text-[11px]">
+              <div class="flex items-center gap-3 mt-1 text-[11px]">
                 <span class="text-emerald-400 font-bold">${this.t('availableBal')}: ${this.fmtMoney(this.profile.balanceAvailable)} ${this.t('egp')}</span>
                 <span class="text-amber-300 font-bold">${this.t('escrowBal')}: ${this.fmtMoney(this.profile.balanceEscrow)} ${this.t('egp')}</span>
               </div>
             </div>
-            <button onclick="DamanApp.switchTab('wallet')" class="shrink-0 px-3 py-2 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-[11px]">
-              <i class="fa-solid fa-wallet"></i>
-            </button>
+            <button onclick="DamanApp.switchTab('wallet')" class="shrink-0 px-3 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs"><i class="fa-solid fa-wallet"></i></button>
           </div>`
         : `
-          <div class="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
+          <div class="glass-card rounded-2xl p-3.5 flex items-center justify-between gap-2">
             <div>
-              <h2 class="text-sm font-extrabold text-white">${this.lang === 'ar' ? 'أهلاً بك في ضمان سايت' : 'Welcome to DamanSite'}</h2>
-              <p class="text-[11px] text-slate-400 mt-0.5">${this.lang === 'ar' ? 'سجّل كعميل أو مقاول أو شركة مقاولات وابدأ بأمان' : 'Join as Client, Contractor, or Contracting Company'}</p>
+              <h2 class="text-xs font-black text-white">${isAr ? 'أهلاً بك في ضمان سايت' : 'Welcome to DamanSite'}</h2>
+              <p class="text-[10px] text-slate-400 mt-0.5">${isAr ? '24 قطاعاً • ضمان مالي 3.5% • شركات وأفراد' : '24 Sectors • 3.5% Escrow • Companies & Pros'}</p>
             </div>
-            <button onclick="DamanApp.openAuthModal('register')" class="shrink-0 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs">
-              ${this.t('loginBtn')}
-            </button>
+            <button onclick="DamanApp.openAuthModal('register')" class="shrink-0 px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${this.t('loginBtn')}</button>
           </div>`;
 
       main.innerHTML = `
         <div class="space-y-4">
-          ${frozenBar}
+          ${dailyHtml}
           ${userCard}
 
-          <!-- Homepage Ads Slider -->
+          <!-- Quick Search Bar -->
+          <form onsubmit="DamanApp.handleHomeSearch(event)" class="relative">
+            <input id="home-search-input" type="search" value="${this.esc(this.searchQuery)}"
+              placeholder="${isAr ? 'ابحث في 24 قسم (مثال: تشطيب، أمن، موردين، التجمع...)' : 'Search 24 sectors, companies, locations...'}"
+              class="w-full ps-10 pe-16 py-2.5 rounded-2xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none text-xs text-white" />
+            <i class="fa-solid fa-magnifying-glass text-slate-400 absolute top-1/2 -translate-y-1/2 start-3.5 text-xs"></i>
+            <button type="submit" class="absolute top-1/2 -translate-y-1/2 end-1.5 px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]">${isAr ? 'بحث' : 'Go'}</button>
+          </form>
+
+          <!-- Homepage Main Ads Slider -->
           <div id="home-ad-slider">${this.buildAdSlideHtml()}</div>
 
-          <!-- Quick Shortcuts -->
+          <!-- Quick Services Grid -->
           <div class="grid grid-cols-4 gap-2">
-            <button onclick="DamanApp.switchTab('projects')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-amber-500/40">
+            <button onclick="DamanApp.switchTab('projects')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-amber-500/50">
               <span class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center"><i class="fa-solid fa-plus"></i></span>
               <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('postProject')}</span>
             </button>
-            <button onclick="DamanApp.switchTab('chat')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-emerald-500/40">
-              <span class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-robot"></i></span>
-              <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('aiSupport')}</span>
+            <button onclick="DamanApp.switchTab('wallet')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-emerald-500/50">
+              <span class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-gem"></i></span>
+              <span class="text-[10px] font-bold text-slate-200 text-center">${isAr ? 'الباقات' : 'Plans'}</span>
             </button>
-            <button onclick="DamanApp.switchTab('company')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-sky-500/40">
+            <button onclick="DamanApp.switchTab('company')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-sky-500/50">
               <span class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center"><i class="fa-solid fa-building"></i></span>
               <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('companyPanel')}</span>
             </button>
-            <button onclick="DamanApp.switchTab('about')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-purple-500/40">
-              <span class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center"><i class="fa-solid fa-circle-info"></i></span>
-              <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('aboutApp')}</span>
+            <button onclick="DamanApp.switchTab('chat')" class="glass-card rounded-xl p-2.5 flex flex-col items-center gap-1.5 hover:border-purple-500/50">
+              <span class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center"><i class="fa-solid fa-robot"></i></span>
+              <span class="text-[10px] font-bold text-slate-200 text-center">${this.t('aiSupport')}</span>
             </button>
           </div>
 
-          <!-- Hierarchical Categories (Smooth Grid) -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-sm font-extrabold text-white">${this.t('mainCategories')}</h3>
-              <span class="text-[10px] text-slate-400">${this.t('tapCategoryHint')}</span>
+          <!-- Featured Promo Cards Strip -->
+          <div class="grid grid-cols-2 gap-2">
+            <div onclick="DamanApp.switchTab('projects')" class="p-3 rounded-2xl bg-gradient-to-br from-amber-500/20 to-slate-900 border border-amber-500/40 cursor-pointer space-y-1">
+              <span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-slate-950">${isAr ? 'إعلان مميز ★' : 'Featured ★'}</span>
+              <div class="text-xs font-black text-white pt-1">${isAr ? 'طلب عمالة VIP مضمونة' : 'VIP Guaranteed Labor'}</div>
+              <div class="text-[10px] text-slate-300">${isAr ? 'نوفر لك فرق عمل كاملة لأي قطاع' : 'Vetted teams for any sector'}</div>
             </div>
-            <div class="grid grid-cols-2 gap-2.5">
-              ${window.DAMAN_CATEGORIES.map((cat) => {
-                const isSelected = cat.id === activeCat.id;
-                return `
-                  <button onclick="DamanApp.selectMainCategory('${cat.id}')"
-                    class="text-start rounded-2xl p-3 border transition-all ${isSelected ? 'bg-slate-800 border-amber-500 shadow-md shadow-amber-500/10' : 'glass-card hover:border-slate-600'}">
-                    <div class="flex items-center justify-between mb-2">
-                      <span class="w-9 h-9 rounded-xl bg-gradient-to-br ${cat.color} text-white flex items-center justify-center text-sm shadow">
-                        <i class="fa-solid ${cat.icon}"></i>
-                      </span>
-                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-900/80 text-slate-300">${cat.subs.length}</span>
-                    </div>
-                    <div class="text-xs font-extrabold text-white">${this.lang === 'ar' ? cat.ar : cat.en}</div>
-                    <div class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">${this.lang === 'ar' ? cat.descAr : cat.descEn}</div>
-                  </button>`;
-              }).join('')}
+            <div onclick="DamanApp.switchTab('about')" class="p-3 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-slate-900 border border-emerald-500/40 cursor-pointer space-y-1">
+              <span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950">${isAr ? 'ضمان سايت' : 'DamanSite'}</span>
+              <div class="text-xs font-black text-white pt-1">${isAr ? 'باقات المعاينة والضمان' : 'Inspection Packages'}</div>
+              <div class="text-[10px] text-slate-300">${isAr ? 'سقف كامل • 4 زيارات • مبنى كامل' : 'Roof • 4 Visits • Full Building'}</div>
             </div>
           </div>
 
-          <!-- Sub-Categories Panel -->
-          <div class="glass-card rounded-2xl p-3.5 border-amber-500/30">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <i class="fa-solid ${activeCat.icon} text-amber-400"></i>
-                <h4 class="text-xs font-extrabold text-white">${this.lang === 'ar' ? activeCat.ar : activeCat.en} — ${this.t('subCategories')}</h4>
-              </div>
-              <button onclick="DamanApp.openSubCategory('${activeCat.id}', null)" class="text-[10px] font-bold text-amber-400 hover:underline">${this.t('browseProjects')}</button>
+          <!-- 24 Sectors Smooth Grid -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-sm font-black text-white">${this.t('mainCategories')}</h3>
+              <button onclick="DamanApp.toggleShowAllCats()" class="text-[11px] font-extrabold text-amber-400">
+                ${this.showAllCats ? (isAr ? 'عرض أقل' : 'Show Less') : (isAr ? 'عرض كل الـ 24 قسم' : 'View All 24')}
+              </button>
             </div>
             <div class="grid grid-cols-2 gap-2">
-              ${activeCat.subs.map((sub) => `
-                <button onclick="DamanApp.openSubCategory('${activeCat.id}', '${sub.id}')"
-                  class="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-start transition-all">
-                  <span class="w-8 h-8 shrink-0 rounded-lg bg-slate-800 text-amber-400 flex items-center justify-center text-xs">
-                    <i class="fa-solid ${sub.icon}"></i>
+              ${catsToShow.map((cat) => `
+                <button onclick="DamanApp.openCategory('${cat.id}')" class="glass-card rounded-2xl p-3 flex items-center gap-2.5 text-start hover:border-amber-500/50 transition-all">
+                  <span class="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-br ${cat.color} text-white flex items-center justify-center text-sm shadow">
+                    <i class="fa-solid ${cat.icon}"></i>
                   </span>
-                  <span class="text-[11px] font-bold text-slate-200 leading-tight">${this.lang === 'ar' ? sub.ar : sub.en}</span>
+                  <span class="text-[11px] font-extrabold text-white leading-snug">${isAr ? cat.ar : cat.en}</span>
                 </button>`).join('')}
             </div>
+            ${!this.showAllCats ? `
+              <button onclick="DamanApp.toggleShowAllCats()" class="w-full mt-2.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-amber-400 text-xs font-extrabold">
+                <i class="fa-solid fa-angles-down me-1"></i> ${isAr ? 'إظهار باقي الأقسام (16 قسم إضافي)' : 'Show Remaining 16 Sectors'}
+              </button>` : ''}
           </div>
         </div>`;
     },
@@ -447,34 +640,18 @@
             <h2 class="text-lg font-extrabold text-white">${isAr ? 'ضمان سايت | DamanSite' : 'DamanSite Platform'}</h2>
             <p class="text-xs text-slate-300 mt-2 leading-relaxed">
               ${isAr
-                ? 'أول منصة مصرية متكاملة تجمع بين إدارة المقاولات والتشطيبات، الضمان المالي الوسيط (Escrow)، والمعاينات الهندسية المعتمدة لحماية المالك والمقاول وشركات المقاولات.'
-                : 'An integrated platform combining contracting & finishing, financial escrow protection, and certified site inspections for owners, contractors, and firms.'}
+                ? 'المنصة الشاملة لـ 24 قطاعاً في المقاولات والتشطيبات واللاند سكيب والمنشآت، بنظام الضمان المالي (Escrow 3.5%)، توثيق الشركات والأفراد، المعاينات الهندسية، وعمالة VIP.'
+                : 'All-in-one platform across 24 sectors with 3.5% Escrow protection, verified companies & pros, site inspections, and VIP labor.'}
             </p>
           </div>
-
-          <div class="glass-card rounded-2xl p-4 space-y-3">
-            <h3 class="text-sm font-extrabold text-amber-400 flex items-center gap-2"><i class="fa-solid fa-shield-halved"></i> ${isAr ? 'كيف يعمل نظام الضمان المالي (3.5%)؟' : 'How 3.5% Financial Escrow Works'}</h3>
-            <ol class="space-y-2 text-xs text-slate-300 list-decimal list-inside leading-relaxed">
-              <li>${isAr ? 'ينشر العميل مشروعه ويستقبل عروض الأسعار والدفعات من المقاولين والشركات الموثّقة.' : 'Client posts a project and receives formal cost & milestone bids.'}</li>
-              <li>${isAr ? 'عند قبول العرض، يتم حجز قيمة المرحلة داخل محفظة الضمان (Escrow) بأمان تام.' : 'Upon acceptance, the stage amount is locked safely in Escrow.'}</li>
-              <li>${isAr ? 'ينفذ المقاول أو الشركة العمل ويتم الاستلام الهندسي أو موافقة العميل.' : 'Contractor/Company executes the work and completes handover.'}</li>
-              <li>${isAr ? 'يتحرر المبلغ فوراً لمحفظة المنفّذ بعد خصم عمولة ضمان المنصة (3.5%) مع إتاحة التقييم.' : 'Funds release immediately minus 3.5% escrow fee, unlocking verified ratings.'}</li>
-            </ol>
+          <div class="glass-card rounded-2xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed">
+            <h3 class="text-sm font-extrabold text-amber-400">${isAr ? 'لماذا ضمان سايت؟' : 'Why DamanSite?'}</h3>
+            <p>• ${isAr ? 'ضمان مالي 100% بعمولة 3.5% فقط مع عقود إلكترونية رسمية A4.' : '100% Escrow protection (3.5% fee) with printable A4 contracts.'}</p>
+            <p>• ${isAr ? 'إيداع وسحب منضبط بنفس اسم صاحب الحساب وخلال يوم عمل واحد.' : 'Same-name deposits & withdrawals processed within 1 business day.'}</p>
+            <p>• ${isAr ? 'مراجعة المنشورات من الإدارة قبل النشر لضمان الدقة وتنظيم الأقسام.' : 'Admin review before publishing to keep every sector organized.'}</p>
+            <p>• ${isAr ? 'توثيق الشركات بالسجل التجاري والبطاقة الضريبية مع صلاحيات Access لفريق العمل.' : 'Company verification with CR & Tax Card plus team Access controls.'}</p>
           </div>
-
-          <div class="glass-card rounded-2xl p-4 space-y-2.5">
-            <h3 class="text-sm font-extrabold text-sky-400 flex items-center gap-2"><i class="fa-solid fa-building-user"></i> ${isAr ? 'خدماتنا للأفراد والشركات' : 'Services for Individuals & Companies'}</h3>
-            <ul class="space-y-2 text-xs text-slate-300">
-              <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-400 mt-1"></i><span>${isAr ? '17 تخصصاً معمارياً وإنشائياً مقسمة تحت 4 قطاعات رئيسية.' : '17 construction & finishing specialties across 4 main pillars.'}</span></li>
-              <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-400 mt-1"></i><span>${isAr ? 'حسابات موثّقة لشركات المقاولات والمكاتب الهندسية مع إدارة فرق العمل وعقود الباطن (B2B).' : 'Verified corporate accounts with internal team management and B2B subcontracting.'}</span></li>
-              <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-400 mt-1"></i><span>${isAr ? 'باقات معاينة هندسية قبل الصب وعند الاستلام مع تقارير فنية معتمدة.' : 'Engineering inspection visits before pouring and at handover.'}</span></li>
-              <li class="flex items-start gap-2"><i class="fa-solid fa-check text-emerald-400 mt-1"></i><span>${isAr ? 'دردشة مباشرة، دعم فني بالذكاء الاصطناعي 24/7، ولجنة إدارة للفصل العادل في النزاعات.' : 'Live chat, 24/7 AI support, and fair administrative dispute resolution.'}</span></li>
-            </ul>
-          </div>
-
-          <button onclick="DamanApp.switchTab('home')" class="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-extrabold text-white">
-            ${isAr ? 'العودة للرئيسية' : 'Back to Home'}
-          </button>
+          <button onclick="DamanApp.switchTab('home')" class="w-full py-3 rounded-xl bg-slate-800 text-xs font-extrabold text-white">${isAr ? 'العودة للرئيسية' : 'Back to Home'}</button>
         </div>`;
     },
 
@@ -485,30 +662,30 @@
           <div class="glass-card rounded-2xl p-6 text-center mt-6 space-y-3">
             <i class="fa-solid fa-user-shield text-4xl text-amber-400"></i>
             <h3 class="text-base font-extrabold text-white">${this.lang === 'ar' ? 'سجّل الدخول لإدارة حسابك' : 'Sign in to manage your profile'}</h3>
-            <p class="text-xs text-slate-400">${this.lang === 'ar' ? 'تابع محفظتك، مشاريعك، تقييماتك، وحساب شركتك من مكان واحد.' : 'Track your wallet, projects, ratings, and company workspace.'}</p>
             <button onclick="DamanApp.openAuthModal('login')" class="px-6 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-extrabold text-xs">${this.t('loginBtn')}</button>
           </div>`;
         return;
       }
 
       const p = this.profile;
+      const isAr = this.lang === 'ar';
       const stars = '★'.repeat(Math.round(p.ratingAvg || 0)) + '☆'.repeat(5 - Math.round(p.ratingAvg || 0));
 
       main.innerHTML = `
         <div class="space-y-4">
-          <div class="glass-card rounded-2xl p-4">
+          <div class="glass-card rounded-2xl p-4 space-y-3">
             <div class="flex items-center gap-3">
               <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-slate-950 flex items-center justify-center text-xl font-black">
-                ${this.esc((p.name || 'U').charAt(0).toUpperCase())}
+                ${this.esc((p.companyName || p.name || 'U').charAt(0).toUpperCase())}
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <h3 class="text-sm font-extrabold text-white truncate">${this.esc(p.name)}</h3>
+                  <h3 class="text-sm font-extrabold text-white truncate">${this.esc(p.companyName || p.name)}</h3>
                   <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">${this.getRoleLabel(p.accountType)}</span>
                 </div>
                 <p class="text-[11px] text-slate-400 truncate mt-0.5">${this.esc(p.email)}</p>
                 <div class="flex items-center gap-2 mt-1 text-xs">
-                  <span class="text-amber-400 tracking-tighter">${stars}</span>
+                  <span class="text-amber-400">${stars}</span>
                   <span class="text-[10px] text-slate-400">(${p.ratingCount || 0})</span>
                   <span class="text-[10px] px-2 py-0.5 rounded-full ${p.kycStatus === 'verified' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'}">
                     ${p.kycStatus === 'verified' ? this.t('verified') : p.kycStatus === 'pending' ? this.t('pendingKyc') : this.t('unverified')}
@@ -516,15 +693,11 @@
                 </div>
               </div>
             </div>
-
-            ${p.accountType === 'company' ? `
-              <div class="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-300 flex items-center justify-between">
-                <span><i class="fa-solid fa-building text-sky-400 me-1"></i> ${this.esc(p.companyName || '-')}</span>
-                <span class="text-[10px] text-slate-400">${this.lang === 'ar' ? 'سجل تجاري:' : 'CR:'} ${this.esc(p.commercialReg || '-')}</span>
-              </div>` : ''}
+            <button onclick="DamanApp.openPublicProfile('${this.user.uid}')" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300">
+              <i class="fa-solid fa-eye me-1"></i> ${isAr ? 'معاينة صفحتي العامة (تقييماتي ومنشوراتي)' : 'View My Public Profile & Reviews'}
+            </button>
           </div>
 
-          <!-- Balances Snapshot -->
           <div class="grid grid-cols-3 gap-2">
             <div class="glass-card rounded-xl p-3 text-center">
               <div class="text-[10px] text-slate-400">${this.t('availableBal')}</div>
@@ -540,29 +713,24 @@
             </div>
           </div>
 
-          <!-- Action List -->
           <div class="glass-card rounded-2xl divide-y divide-slate-800 overflow-hidden">
             ${p.accountType === 'company' ? `
               <button onclick="DamanApp.switchTab('company')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
                 <span class="flex items-center gap-2.5"><i class="fa-solid fa-building-shield text-sky-400 w-4"></i>${this.t('companyPanel')}</span>
-                <i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'} text-slate-500"></i>
+                <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
               </button>` : ''}
             ${this.isAdmin() ? `
               <button onclick="DamanApp.switchTab('admin')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-amber-400 hover:bg-slate-800/60">
-                <span class="flex items-center gap-2.5"><i class="fa-solid fa-crown w-4"></i>${this.lang === 'ar' ? 'لوحة الإدارة العليا (Super Admin)' : 'Super Admin Dashboard'}</span>
-                <i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'}"></i>
+                <span class="flex items-center gap-2.5"><i class="fa-solid fa-crown w-4"></i>${isAr ? 'لوحة الإدارة العليا (Super Admin)' : 'Super Admin Dashboard'}</span>
+                <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
               </button>` : ''}
             <button onclick="DamanApp.switchTab('wallet')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
-              <span class="flex items-center gap-2.5"><i class="fa-solid fa-wallet text-emerald-400 w-4"></i>${this.t('navWallet')}</span>
-              <i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'} text-slate-500"></i>
+              <span class="flex items-center gap-2.5"><i class="fa-solid fa-wallet text-emerald-400 w-4"></i>${isAr ? 'المحفظة والباقات والتوثيق' : 'Wallet, Plans & KYC'}</span>
+              <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
             </button>
             <button onclick="DamanApp.switchTab('chat')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
               <span class="flex items-center gap-2.5"><i class="fa-solid fa-headset text-purple-400 w-4"></i>${this.t('aiSupport')}</span>
-              <i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'} text-slate-500"></i>
-            </button>
-            <button onclick="DamanApp.switchTab('about')" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-white hover:bg-slate-800/60">
-              <span class="flex items-center gap-2.5"><i class="fa-solid fa-circle-info text-slate-300 w-4"></i>${this.t('aboutApp')}</span>
-              <i class="fa-solid fa-chevron-${this.lang === 'ar' ? 'left' : 'right'} text-slate-500"></i>
+              <i class="fa-solid fa-chevron-${isAr ? 'left' : 'right'} text-slate-500"></i>
             </button>
             <button onclick="DamanApp.logout()" class="w-full p-3.5 flex items-center justify-between text-xs font-bold text-rose-400 hover:bg-rose-950/30">
               <span class="flex items-center gap-2.5"><i class="fa-solid fa-right-from-bracket w-4"></i>${this.t('logout')}</span>
@@ -573,17 +741,15 @@
 
     renderPhasePlaceholder(container, tabName) {
       const phaseMap = {
-        wallet: 'المرحلة 2 (wallet.js)',
-        projects: 'المرحلة 2 (projects-escrow.js)',
-        chat: 'المرحلة 3 (chat-support.js)',
-        company: 'المرحلة 3 (company-panel.js)',
-        admin: 'المرحلة 4 (admin.js)'
+        wallet: 'الخطوة 2 (wallet.js)',
+        projects: 'الخطوة 3 (projects-escrow.js)',
+        chat: 'الخطوة 4 (chat-support.js)',
+        company: 'الخطوة 5 (company-panel.js)',
+        admin: 'الخطوة 6 (admin.js)'
       };
       container.innerHTML = `
         <div class="glass-card rounded-2xl p-6 text-center mt-6 space-y-3 border-amber-500/30">
-          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl">
-            <i class="fa-solid fa-cubes"></i>
-          </div>
+          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl"><i class="fa-solid fa-cubes"></i></div>
           <h3 class="text-sm font-extrabold text-white">${this.t('phasePendingTitle')}</h3>
           <p class="text-xs text-slate-400 leading-relaxed">${this.t('phasePendingDesc')}</p>
           <div class="inline-block text-[11px] font-bold px-3 py-1 rounded-full bg-slate-800 text-amber-300">${phaseMap[tabName] || tabName}</div>
@@ -596,20 +762,9 @@
       return this.t('roleClient');
     },
 
-    openModal(id) {
-      const el = document.getElementById(id);
-      if (el) el.classList.remove('hidden');
-    },
-
-    closeModal(id) {
-      const el = document.getElementById(id);
-      if (el) el.classList.add('hidden');
-    },
-
-    openAuthModal(mode = 'login') {
-      this.setAuthMode(mode);
-      this.openModal('auth-modal');
-    },
+    openModal(id) { document.getElementById(id)?.classList.remove('hidden'); },
+    closeModal(id) { document.getElementById(id)?.classList.add('hidden'); },
+    openAuthModal(mode = 'login') { this.setAuthMode(mode); this.openModal('auth-modal'); },
 
     setAuthMode(mode) {
       const loginForm = document.getElementById('login-form');
@@ -632,9 +787,7 @@
     toggleCompanyFields(selectId, boxId) {
       const sel = document.getElementById(selectId);
       const box = document.getElementById(boxId);
-      if (!sel || !box) return;
-      if (sel.value === 'company') box.classList.remove('hidden');
-      else box.classList.add('hidden');
+      if (sel && box) box.classList.toggle('hidden', sel.value !== 'company');
     },
 
     openOnboardingModal() {
@@ -657,7 +810,7 @@
               </div>`)
             .join('');
           this.notifications
-            .filter((n) => !n.read)
+            .filter((n) => !n.read && n.userId !== 'ALL')
             .forEach((n) => db.collection('notifications').doc(n.id).update({ read: true }).catch(() => {}));
         }
       }
@@ -669,11 +822,12 @@
       if (loginForm) {
         loginForm.onsubmit = async (e) => {
           e.preventDefault();
-          const email = document.getElementById('login-email').value.trim();
-          const pass = document.getElementById('login-pass').value;
           try {
-            await auth.signInWithEmailAndPassword(email, pass);
-            this.toast(this.lang === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Signed in successfully', 'success');
+            await auth.signInWithEmailAndPassword(
+              document.getElementById('login-email').value.trim(),
+              document.getElementById('login-pass').value
+            );
+            this.toast(this.lang === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Signed in', 'success');
           } catch (err) {
             this.toast(err.message, 'error');
           }
@@ -684,24 +838,18 @@
       if (regForm) {
         regForm.onsubmit = async (e) => {
           e.preventDefault();
-          const name = document.getElementById('reg-name').value.trim();
-          const phone = document.getElementById('reg-phone').value.trim();
           const email = document.getElementById('reg-email').value.trim();
-          const pass = document.getElementById('reg-pass').value;
           const accountType = document.getElementById('reg-role').value;
-          const companyName = document.getElementById('reg-company-name').value.trim();
-          const commercialReg = document.getElementById('reg-company-cr').value.trim();
-
           try {
-            const cred = await auth.createUserWithEmailAndPassword(email, pass);
+            const cred = await auth.createUserWithEmailAndPassword(email, document.getElementById('reg-pass').value);
             await db.collection('users').doc(cred.user.uid).set({
               uid: cred.user.uid,
               email: email.toLowerCase(),
-              name,
-              phone,
+              name: document.getElementById('reg-name').value.trim(),
+              phone: document.getElementById('reg-phone').value.trim(),
               accountType,
-              companyName: accountType === 'company' ? companyName : '',
-              commercialReg: accountType === 'company' ? commercialReg : '',
+              companyName: accountType === 'company' ? document.getElementById('reg-company-name').value.trim() : '',
+              commercialReg: accountType === 'company' ? document.getElementById('reg-company-cr').value.trim() : '',
               kycStatus: 'unverified',
               status: 'active',
               balanceAvailable: 0,
@@ -711,7 +859,7 @@
               ratingCount: 0,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-            this.toast(this.lang === 'ar' ? 'تم إنشاء الحساب بنجاح' : 'Account created successfully', 'success');
+            this.toast(this.lang === 'ar' ? 'تم إنشاء الحساب بنجاح' : 'Account created', 'success');
           } catch (err) {
             this.toast(err.message, 'error');
           }
@@ -723,20 +871,16 @@
         obForm.onsubmit = async (e) => {
           e.preventDefault();
           if (!this.user) return;
-          const name = document.getElementById('ob-name').value.trim();
-          const phone = document.getElementById('ob-phone').value.trim();
           const accountType = document.getElementById('ob-role').value;
-          const companyName = document.getElementById('ob-company-name').value.trim();
-          const commercialReg = document.getElementById('ob-company-cr').value.trim();
           try {
             await db.collection('users').doc(this.user.uid).set({
               uid: this.user.uid,
               email: (this.user.email || '').toLowerCase(),
-              name,
-              phone,
+              name: document.getElementById('ob-name').value.trim(),
+              phone: document.getElementById('ob-phone').value.trim(),
               accountType,
-              companyName: accountType === 'company' ? companyName : '',
-              commercialReg: accountType === 'company' ? commercialReg : '',
+              companyName: accountType === 'company' ? document.getElementById('ob-company-name').value.trim() : '',
+              commercialReg: accountType === 'company' ? document.getElementById('ob-company-cr').value.trim() : '',
               kycStatus: 'unverified',
               status: 'active',
               balanceAvailable: 0,
@@ -756,8 +900,7 @@
 
     async googleSignIn() {
       try {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        await auth.signInWithPopup(provider);
+        await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
       } catch (err) {
         this.toast(err.message, 'error');
       }
