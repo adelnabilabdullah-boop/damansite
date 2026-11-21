@@ -1,7 +1,7 @@
 (function () {
   const ProjectsMod = {
-    subTab: 'browse', // 'browse' | 'my' | 'ledger' | 'inspection' | 'vip_labor'
-    postTypeFilter: 'all', // 'all' | 'hiring' | 'seeking'
+    subTab: 'browse', // 'browse' | 'ledger' | 'inspection' | 'vip_labor'
+    postTypeFilter: 'all', // 'all' | 'hiring' | 'seeking' | 'supplier'
     projects: [],
     ledgerEntries: [],
     ledgerSiteFilter: 'all',
@@ -24,7 +24,7 @@
         this.unsubProjects = app.db
           .collection('projects')
           .orderBy('createdAt', 'desc')
-          .limit(60)
+          .limit(70)
           .onSnapshot(
             (snap) => {
               this.projects = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
@@ -47,7 +47,7 @@
         this.unsubLedger = app.db
           .collection('siteLedger')
           .where('ownerUid', '==', app.user.uid)
-          .limit(100)
+          .limit(120)
           .onSnapshot(
             (snap) => {
               this.ledgerEntries = snap.docs
@@ -104,7 +104,7 @@
     },
 
     setSubTab(tab) { this.subTab = tab; this.rerender(); },
-    setPostTypeFilter(t) { this.postTypeFilter = t; this.rerender(); },
+    setPostTypeFilter(t) { this.subTab = 'browse'; this.postTypeFilter = t || 'all'; this.rerender(); },
     setFilter(catId) { window.DamanApp.selectedMainCat = catId || 'all'; this.rerender(); },
     setGovFilter(gov) { window.DamanApp.selectedGov = gov || 'all'; this.rerender(); },
     setSearch(val) { window.DamanApp.searchQuery = (val || '').trim(); this.rerender(); },
@@ -115,7 +115,7 @@
       return lang === 'ar' ? c.ar : c.en;
     },
 
-    // Zero-Firebase-Reads Demo Ads Engine (split between Hiring & Seeking)
+    // Zero-Firebase-Reads Demo Ads Engine (Hiring + Seeking + B2B Suppliers)
     getDemoAdsForCategory(catId) {
       const app = window.DamanApp;
       if (app.appConfig && app.appConfig.hideDemoAds) return [];
@@ -124,47 +124,53 @@
       const govs = window.DAMAN_GOVERNORATES;
       const providers = [
         { name: 'مجموعة النيل للمقاولات والإنشاءات', role: 'company', phone: '01000001021', rating: 4.9, count: 18 },
-        { name: 'م. أحمد السعيد — مكتب استشاري', role: 'company', phone: '01100002032', rating: 4.8, count: 14 },
-        { name: 'شركة الرواد للخدمات المتكاملة', role: 'company', phone: '01200003043', rating: 4.7, count: 22 },
+        { name: 'الشركة المصرية لتوريد مواد البناء (B2B)', role: 'supplier', phone: '01100002032', rating: 4.9, count: 27 },
+        { name: 'شركة الرواد للتوريدات والشدات المعدنية', role: 'supplier', phone: '01200003043', rating: 4.8, count: 22 },
         { name: 'مقاول تنفيذ معتمد — محمود حسن', role: 'contractor', phone: '01000004054', rating: 4.6, count: 9 },
-        { name: 'المتحدة للتوريدات والتنفيذ', role: 'company', phone: '01500005065', rating: 4.9, count: 31 },
-        { name: 'فريق الإتقان الفني المتخصص', role: 'contractor', phone: '01000006076', rating: 4.5, count: 11 },
+        { name: 'المتحدة لتوريد الحديد والأسمنت والخرسانة', role: 'supplier', phone: '01500005065', rating: 4.9, count: 31 },
+        { name: 'فريق الإتقان الفني المتخصص', role: 'contractor', phone: '01000006076', rating: 4.7, count: 11 },
         { name: 'مكتب الصفا الهندسي والتشطيبات', role: 'company', phone: '01100007087', rating: 4.8, count: 16 },
-        { name: 'شركة الأفق لإدارة المواقع والمنشآت', role: 'company', phone: '01200008098', rating: 4.7, count: 13 },
-        { name: 'م. طارق عبد الرحمن — إشراف وتنفيذ', role: 'contractor', phone: '01000009109', rating: 4.9, count: 25 },
-        { name: 'شركة البناء الحديث للتعاقدات', role: 'company', phone: '01100001120', rating: 4.6, count: 12 }
+        { name: 'شركة الأفق لتوريد السيراميك والرخام', role: 'supplier', phone: '01200008098', rating: 4.8, count: 19 },
+        { name: 'م. طارق عبد الرحمن — إشراف وتنفيذ', role: 'contractor', phone: '01000009109', rating: 4.9, count: 25 }
       ];
 
       const list = [];
       cats.forEach((cat, cIdx) => {
-        const perCat = catId === 'all' ? 2 : 10;
+        const perCat = catId === 'all' ? 3 : 9;
         for (let i = 0; i < perCat; i++) {
           const prov = providers[(cIdx + i) % providers.length];
           const gov = govs[(cIdx * 3 + i * 2) % govs.length];
-          const isHiring = i % 2 === 0;
+          const mod = i % 3;
+          const postType = mod === 0 ? 'hiring' : mod === 1 ? 'seeking' : 'supplier';
           const id = `demo_${cat.id}_${i}`;
           const item = {
             id,
             isDemo: true,
             isFeatured: i === 0,
-            postType: isHiring ? 'hiring' : 'seeking',
+            postType,
             mainCategory: cat.id,
-            title: isHiring ? `مطلوب تنفيذ / عمالة في ${cat.ar} — ${gov}` : `متاح للتنفيذ والعمل في ${cat.ar} (${prov.name})`,
+            title: postType === 'supplier'
+              ? `توريد خامات ومعدات ${cat.ar} بأسعار الجملة — ${gov}`
+              : postType === 'hiring'
+              ? `مطلوب تنفيذ / عمالة في ${cat.ar} — ${gov}`
+              : `متاح للتنفيذ والعمل في ${cat.ar} (${prov.name})`,
             location: gov,
-            budget: (i + 2) * 12500,
-            description: isHiring
+            budget: postType === 'supplier' ? (i + 1) * 18500 : (i + 2) * 12500,
+            description: postType === 'supplier'
+              ? `توريد فوري ومباشر للمواقع والشركات والموردين في قطاع ${cat.ar} داخل ${gov} وجميع المحافظات. يتم حجز المبلغ في محفظة ضمان سايت (B2B Escrow) ولا يُفرج عنه إلا بعد وصول البضاعة وفحصها واستلامها في الموقع.`
+              : postType === 'hiring'
               ? `مطلوب فريق عمل أو شركة متخصصة لتنفيذ أعمال ${cat.ar} في ${gov}. التعاقد وحجز الدفعات عبر محفظة ضمان سايت (3.5%) لضمان حق الطرفين.`
               : `فريق ومقاول جاهز للتنفيذ الفوري في قطاع ${cat.ar} داخل ${gov} وجميع المحافظات بأعلى جودة والتزام تام بالمواعيد.`,
             clientId: `demo_user_${(cIdx + i) % providers.length}`,
             clientName: prov.name,
             clientPhone: prov.phone,
-            clientAccountType: prov.role,
+            clientAccountType: postType === 'supplier' ? 'supplier' : prov.role,
             clientRating: prov.rating,
             clientRatingCount: prov.count,
             status: 'open',
             proposalsCount: (i % 5) + 1,
             demoReviews: [
-              { fromName: 'عميل موثّق', rating: 5, comment: 'التزام ممتاز بالمواعيد وجودة عالية في التنفيذ.' },
+              { fromName: 'عميل موثّق', rating: 5, comment: 'التزام ممتاز بالمواعيد ومطابقة كاملة للمواصفات.' },
               { fromName: 'م. كريم عادل', rating: 4, comment: 'تعامل محترم وسعر مناسب جداً.' }
             ]
           };
@@ -187,6 +193,16 @@
       };
       const st = map[status] || map.open;
       return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${st.cls}">${isAr ? st.ar : st.en}</span>`;
+    },
+
+    postTypeBadge(postType) {
+      if (postType === 'supplier') {
+        return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 shrink-0"><i class="fa-solid fa-truck-fast me-0.5"></i>مورّد / توريد B2B</span>`;
+      }
+      if (postType === 'seeking') {
+        return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 shrink-0">باحث عن عمل</span>`;
+      }
+      return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 shrink-0">صاحب عمل</span>`;
     },
 
     compressImage(file, maxW = 820, quality = 0.58) {
@@ -226,6 +242,9 @@
       const isAr = app.lang === 'ar';
       if (!app.user || !app.profile) return app.openAuthModal('login');
       if (app.profile.status === 'frozen') return app.toast(app.t('frozenNotice'), 'error');
+      if (app.appConfig?.disablePosting && !app.isAdmin()) {
+        return app.toast('نشر الإعلانات والمشاريع الجديدة متوقف مؤقتاً من قِبل الإدارة', 'warning');
+      }
 
       this.postPhotoBase64 = '';
       let modal = document.getElementById('daman-post-project-modal');
@@ -238,35 +257,42 @@
       modal.classList.remove('hidden');
 
       const defaultCat = app.selectedMainCat && app.selectedMainCat !== 'all' ? app.selectedMainCat : window.DAMAN_CATEGORIES[0].id;
+      const defaultType = app.profile.accountType === 'supplier' ? 'supplier' : (this.postTypeFilter !== 'all' ? this.postTypeFilter : 'hiring');
       const catOpts = window.DAMAN_CATEGORIES.map((c) => `<option value="${c.id}" ${c.id === defaultCat ? 'selected' : ''}>${isAr ? c.ar : c.en}</option>`).join('');
       const govOpts = window.DAMAN_GOVERNORATES.map((g) => `<option value="${g}">${g}</option>`).join('');
 
       modal.innerHTML = `
         <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 max-h-[92vh] overflow-y-auto">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-extrabold text-amber-400"><i class="fa-solid fa-plus-circle me-1"></i> ${isAr ? 'نشر مشروع أو إعلان جديد' : 'Post Project / Ad'}</h3>
+            <h3 class="text-sm font-extrabold text-amber-400"><i class="fa-solid fa-plus-circle me-1"></i> نشر مشروع / عرض عمل / توريد B2B</h3>
             <button onclick="document.getElementById('daman-post-project-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
-          <form onsubmit="DamanProjects.submitProject(event)" class="space-y-2.5">
-            <select id="pp-post-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/50 text-xs text-amber-300 font-black">
-              <option value="hiring">${isAr ? '📌 صاحب عمل / مشروع (أبحث عن مقاول أو شركة أو عمالة)' : 'Hiring / Project Owner'}</option>
-              <option value="seeking">${isAr ? '👷 باحث عن عمل / مقدم خدمة (أعرض خدماتي ومعداتي)' : 'Job Seeker / Service Provider'}</option>
-            </select>
-            <select id="pp-main-cat" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white font-bold">${catOpts}</select>
-            <select id="pp-gov" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white font-bold">${govOpts}</select>
-            <input id="pp-title" type="text" required placeholder="${isAr ? 'عنوان المشروع أو الإعلان' : 'Title'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <div class="grid grid-cols-2 gap-2">
-              <input id="pp-budget" type="number" min="100" step="any" required placeholder="${isAr ? 'الميزانية / السعر (ج.م)' : 'Budget (EGP)'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-xs text-white font-bold" />
-              <input id="pp-area" type="text" placeholder="${isAr ? 'المساحة / الكمية' : 'Area / Qty'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+          <form onsubmit="DamanProjects.submitProject(event)" class="space-y-2.5 text-xs">
+            <div>
+              <label class="block text-[10px] text-slate-300 font-bold mb-1">تصنيف الإعلان</label>
+              <select id="pp-post-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/50 text-amber-300 font-black">
+                <option value="hiring" ${defaultType === 'hiring' ? 'selected' : ''}>📌 صاحب عمل / مشروع (مطلوب مقاول أو شركة أو عمالة)</option>
+                <option value="seeking" ${defaultType === 'seeking' ? 'selected' : ''}>👷 باحث عن عمل / مقدم خدمة (أعرض خدماتي ومعداتي)</option>
+                <option value="supplier" ${defaultType === 'supplier' ? 'selected' : ''}>🚚 مورّد خامات ومعدات B2B (عرض خامات أو طلب توريد)</option>
+              </select>
             </div>
-            <textarea id="pp-desc" rows="3" required placeholder="${isAr ? 'اكتب تفاصيل البنود والمواصفات...' : 'Details...'}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"></textarea>
+            <div class="grid grid-cols-2 gap-2">
+              <select id="pp-main-cat" class="px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${catOpts}</select>
+              <select id="pp-gov" class="px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${govOpts}</select>
+            </div>
+            <input id="pp-title" type="text" required placeholder="العنوان (مثال: توريد 50 طن أسمنت / مطلوب نجارين مسلح)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div class="grid grid-cols-2 gap-2">
+              <input id="pp-budget" type="number" min="50" step="any" required placeholder="السعر / الميزانية (ج.م)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
+              <input id="pp-area" type="text" placeholder="الكمية / المساحة / الوحدة" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <textarea id="pp-desc" rows="3" required placeholder="اكتب التفاصيل والمواصفات وموعد التنفيذ أو التسليم..." class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
             <label class="block p-2.5 rounded-xl border border-dashed border-slate-600 bg-slate-950/70 text-center cursor-pointer">
-              <span class="text-xs font-bold text-slate-300"><i class="fa-solid fa-image text-amber-400 me-1"></i> ${isAr ? 'إرفاق صورة (اختياري)' : 'Photo (Optional)'}</span>
+              <span class="font-bold text-slate-300"><i class="fa-solid fa-image text-amber-400 me-1"></i> إرفاق صورة للموقع أو الخامات (اختياري)</span>
               <input type="file" accept="image/*" class="hidden" onchange="DamanProjects.handleProjectPhoto(this)" />
               <div id="post-proj-prev"></div>
             </label>
-            <button id="pp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs">
-              <i class="fa-solid fa-paper-plane me-1"></i> ${isAr ? 'إرسال المنشور لمراجعة الإدارة' : 'Submit for Review'}
+            <button id="pp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black">
+              <i class="fa-solid fa-paper-plane me-1"></i> إرسال المنشور لمراجعة الإدارة
             </button>
           </form>
         </div>`;
@@ -275,13 +301,12 @@
     async submitProject(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      const isAr = app.lang === 'ar';
       const btn = document.getElementById('pp-submit-btn');
       if (btn) btn.disabled = true;
       const title = document.getElementById('pp-title').value.trim();
 
       try {
-        const initialStatus = app.isAdmin() ? 'open' : 'pending_review';
+        const initialStatus = app.hasAdminAccess() ? 'open' : 'pending_review';
         await app.db.collection('projects').add({
           postType: document.getElementById('pp-post-type').value,
           mainCategory: document.getElementById('pp-main-cat').value,
@@ -303,12 +328,12 @@
           proposalsCount: 0,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        if (!app.isAdmin()) {
+        if (!app.hasAdminAccess()) {
           await app.sendNotification('ADMIN', 'منشور جديد بانتظار المراجعة', `${title} — بواسطة ${app.profile.name}`);
         }
         this.postPhotoBase64 = '';
         document.getElementById('daman-post-project-modal').classList.add('hidden');
-        app.toast(app.isAdmin() ? 'تم النشر بنجاح' : 'تم إرسال منشورك لمراجعة الإدارة قبل النشر', 'success');
+        app.toast(app.hasAdminAccess() ? 'تم النشر بنجاح ✅' : 'تم إرسال منشورك لمراجعة الإدارة قبل النشر', 'success');
       } catch (err) {
         app.toast(err.message, 'error');
         if (btn) btn.disabled = false;
@@ -323,7 +348,7 @@
       const siteName = document.getElementById('lg-site').value.trim();
       const workerName = document.getElementById('lg-worker').value.trim();
       const entryDate = document.getElementById('lg-date').value || new Date().toISOString().slice(0, 10);
-      const entryType = document.getElementById('lg-type').value; // daily | expense | lump | deduction
+      const entryType = document.getElementById('lg-type').value;
       const count = parseFloat(document.getElementById('lg-count').value) || 1;
       const rate = parseFloat(document.getElementById('lg-rate').value) || 0;
       const overtime = parseFloat(document.getElementById('lg-overtime').value) || 0;
@@ -335,15 +360,7 @@
       try {
         await app.db.collection('siteLedger').add({
           ownerUid: app.user.uid,
-          siteName,
-          workerName,
-          entryDate,
-          entryType,
-          count,
-          rate,
-          overtime,
-          total,
-          notes,
+          siteName, workerName, entryDate, entryType, count, rate, overtime, total, notes,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         e.target.reset();
@@ -388,7 +405,6 @@
     },
 
     renderLedgerTab(app) {
-      const isAr = app.lang === 'ar';
       if (!app.user) return `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${app.t('loginBtn')}</button></div>`;
 
       const sites = [...new Set(this.ledgerEntries.map((x) => x.siteName).filter(Boolean))];
@@ -408,7 +424,7 @@
         <div class="space-y-3.5">
           <div class="rounded-2xl p-3.5 bg-gradient-to-br from-slate-800 to-slate-950 border border-amber-500/40 space-y-2.5">
             <div class="flex items-center justify-between gap-2">
-              <div class="text-xs font-black text-amber-400"><i class="fa-solid fa-book-open me-1"></i> ${isAr ? 'سجل العمال واليوميات وتصفية الخميس' : 'Site Labor Ledger'}</div>
+              <div class="text-xs font-black text-amber-400"><i class="fa-solid fa-book-open me-1"></i> سجل العمال واليوميات وتصفية الحساب</div>
               <button onclick="DamanProjects.printLedgerA4()" class="px-2.5 py-1.5 rounded-lg bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>كشف A4 PDF</button>
             </div>
             <div class="grid grid-cols-3 gap-1.5 text-center text-[10px]">
@@ -418,15 +434,15 @@
             </div>
           </div>
 
-          <form onsubmit="DamanProjects.addLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
-            <div class="text-xs font-extrabold text-white"><i class="fa-solid fa-plus text-emerald-400 me-1"></i> تسجيل حركة جديدة (يومية / مصروف / مقطوعية / خصم)</div>
+          <form onsubmit="DamanProjects.addLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2 text-xs">
+            <div class="font-extrabold text-white"><i class="fa-solid fa-plus text-emerald-400 me-1"></i> تسجيل حركة جديدة (يومية / مصروف / مقطوعية / خصم)</div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="lg-site" type="text" required placeholder="اسم الموقع / المشروع" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-              <input id="lg-date" type="date" value="${today}" required class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+              <input id="lg-site" type="text" required placeholder="اسم الموقع / المشروع" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="lg-date" type="date" value="${today}" required class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             </div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="lg-worker" type="text" required placeholder="اسم العامل / المقاول" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-              <select id="lg-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-xs font-bold text-white">
+              <input id="lg-worker" type="text" required placeholder="اسم العامل / المقاول" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <select id="lg-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
                 <option value="daily">يوميات عمل (+)</option>
                 <option value="lump">مقطوعية / بند (+)</option>
                 <option value="expense">مصروف / سلفة / عهدة (-)</option>
@@ -434,12 +450,12 @@
               </select>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
-              <input id="lg-count" type="number" step="any" min="0.5" value="1" placeholder="العدد" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-              <input id="lg-rate" type="number" step="any" min="1" required placeholder="السعر / المبلغ" class="px-2 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-xs text-white font-bold" />
-              <input id="lg-overtime" type="number" step="any" min="0" value="0" placeholder="إضافي (ج.م)" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+              <input id="lg-count" type="number" step="any" min="0.5" value="1" placeholder="العدد" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="lg-rate" type="number" step="any" min="1" required placeholder="السعر / المبلغ" class="px-2 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" />
+              <input id="lg-overtime" type="number" step="any" min="0" value="0" placeholder="إضافي (ج.م)" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             </div>
-            <input id="lg-notes" type="text" placeholder="ملاحظات (مثال: مصاريف يوم الثلاثاء / سلفة)" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">إضافة للسجل</button>
+            <input id="lg-notes" type="text" placeholder="ملاحظات (مثال: مصاريف يوم الثلاثاء / سلفة)" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">إضافة للسجل</button>
           </form>
 
           ${sites.length ? `
@@ -469,7 +485,7 @@
         </div>`;
     },
 
-    // ==================== PROJECT DETAIL, ESCROW & CONTRACTS ====================
+    // ==================== PROJECT DETAIL & BIDS ====================
     openProjectDetail(projectId) {
       const app = window.DamanApp;
       this.activeProjectId = projectId;
@@ -518,16 +534,14 @@
       const isOwner = !isDemo && uid && proj.clientId === uid;
       const stars = '★'.repeat(Math.round(proj.clientRating || 4)) + '☆'.repeat(5 - Math.round(proj.clientRating || 4));
       const chatTargetUid = isDemo ? 'admin' : proj.clientId;
-      const typeBadge = proj.postType === 'seeking'
-        ? `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300">${isAr ? 'باحث عن عمل / مقدم خدمة' : 'Provider'}</span>`
-        : `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">${isAr ? 'صاحب عمل / مشروع' : 'Project Owner'}</span>`;
+      const isSupplier = proj.postType === 'supplier';
 
       modal.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 max-h-[92vh] overflow-y-auto space-y-3.5">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="flex items-center gap-1.5 flex-wrap mb-1">
-                ${typeBadge}
+                ${this.postTypeBadge(proj.postType)}
                 ${this.statusBadge(proj.status, isAr)}
               </div>
               <h3 class="text-sm font-black text-white leading-snug">${app.esc(proj.title)}</h3>
@@ -535,7 +549,7 @@
             <button onclick="DamanProjects.closeDetailModal()" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300 shrink-0"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
-          ${proj.photoBase64 ? `<img src="${proj.photoBase64}" class="w-full max-h-48 object-cover rounded-xl border border-slate-800" />` : ''}
+          ${proj.photoBase64 ? `<img src="${proj.photoBase64}" onclick="window.open('${proj.photoBase64}','_blank')" class="w-full max-h-48 object-cover rounded-xl border border-slate-800 cursor-pointer" />` : ''}
 
           <div onclick="DamanApp.openPublicProfile('${proj.clientId}',{name:'${app.esc(proj.clientName).replace(/'/g, "\\'")}',phone:'${app.esc(proj.clientPhone || '')}',accountType:'${proj.clientAccountType || 'company'}',ratingAvg:${proj.clientRating || 4.8},ratingCount:${proj.clientRatingCount || 5},kycStatus:'verified'})"
             class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 cursor-pointer hover:border-amber-500/40">
@@ -545,7 +559,7 @@
             </div>
             <div class="text-end shrink-0">
               <div class="text-xs font-black text-emerald-400">${app.fmtMoney(proj.contractAmount || proj.budget)} ${app.t('egp')}</div>
-              <div class="text-[10px] text-slate-400">${app.esc(proj.location)}</div>
+              <div class="text-[10px] text-slate-400">${app.esc(proj.location)} ${proj.areaSpecs ? '• ' + app.esc(proj.areaSpecs) : ''}</div>
             </div>
           </div>
 
@@ -553,20 +567,31 @@
 
           <div class="grid grid-cols-3 gap-1.5">
             <button onclick="DamanApp.revealPhoneWithAdvice('${app.esc(proj.clientPhone || '01000000000')}','${app.esc(proj.clientName).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-extrabold text-[11px]"><i class="fa-solid fa-phone me-1"></i>الهاتف</button>
-            <button onclick="DamanProjects.closeDetailModal(); DamanApp.openChatWith('${chatTargetUid}','${app.esc(proj.clientName).replace(/'/g, "\\'")}','${proj.id}','${app.esc(proj.title).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-sky-500/20 border border-sky-500/40 text-sky-300 font-extrabold text-[11px]"><i class="fa-solid fa-comments me-1"></i>دردشة واتفاق</button>
+            <button onclick="DamanProjects.closeDetailModal(); DamanApp.openChatWith('${chatTargetUid}','${app.esc(proj.clientName).replace(/'/g, "\\'")}','${proj.id}','${app.esc(proj.title).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-sky-500/20 border border-sky-500/40 text-sky-300 font-extrabold text-[11px]"><i class="fa-solid fa-comments me-1"></i>${isSupplier ? 'تفاوض وتوريد' : 'دردشة واتفاق'}</button>
             <button onclick="DamanApp.shareOnWhatsApp('${app.esc(proj.title).replace(/'/g, "\\'")}','${app.esc(proj.location)}')" class="py-2 rounded-xl bg-green-600/20 border border-green-500/40 text-green-300 font-extrabold text-[11px]"><i class="fa-brands fa-whatsapp me-1"></i>مشاركة</button>
           </div>
 
           ${!isDemo && proj.status === 'open' && uid && !isOwner ? `
-            <form onsubmit="DamanProjects.submitProposal(event,'${proj.id}')" class="p-3 rounded-2xl bg-slate-950/90 border border-emerald-500/30 space-y-2">
-              <div class="text-xs font-extrabold text-emerald-400">تقديم عرض سعر سريع</div>
+            <form onsubmit="DamanProjects.submitProposal(event,'${proj.id}')" class="p-3 rounded-2xl bg-slate-950/90 border border-emerald-500/30 space-y-2 text-xs">
+              <div class="font-extrabold text-emerald-400">${isSupplier ? 'تقديم عرض توريد / طلب كمية' : 'تقديم عرض سعر سريع'}</div>
               <div class="grid grid-cols-2 gap-2">
-                <input id="bid-cost" type="number" min="100" required placeholder="التكلفة (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
-                <input id="bid-days" type="number" min="1" required placeholder="المدة (أيام)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
+                <input id="bid-cost" type="number" min="50" required placeholder="السعر المقترح (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+                <input id="bid-days" type="number" min="1" required placeholder="${isSupplier ? 'مدة التسليم (أيام)' : 'مدة التنفيذ (أيام)'}" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
               </div>
-              <textarea id="bid-notes" rows="2" required placeholder="تفاصيل العرض..." class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"></textarea>
-              <button type="submit" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">إرسال العرض</button>
+              <textarea id="bid-notes" rows="2" required placeholder="تفاصيل العرض أو الكمية والمواصفات..." class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white"></textarea>
+              <button type="submit" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال العرض</button>
             </form>` : ''}
+
+          ${!isDemo && this.currentProposals.length ? `
+            <div class="space-y-1.5 pt-2 border-t border-slate-800">
+              <div class="text-xs font-extrabold text-amber-400">العروض المقدّمة (${this.currentProposals.length})</div>
+              ${this.currentProposals.map((b) => `
+                <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-xs">
+                  <div class="flex justify-between font-bold"><span class="text-white">${app.esc(b.bidderName)}</span><span class="text-emerald-400">${app.fmtMoney(b.totalCost)} ج.م (${b.durationDays} يوم)</span></div>
+                  <p class="text-[11px] text-slate-400">${app.esc(b.notes)}</p>
+                  ${isOwner ? `<button onclick="DamanProjects.closeDetailModal(); DamanApp.openChatWith('${b.bidderId}','${app.esc(b.bidderName).replace(/'/g, "\\'")}','${proj.id}','${app.esc(proj.title).replace(/'/g, "\\'")}')" class="w-full py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">فتح شات وتوقيع اتفاق الضمان</button>` : ''}
+                </div>`).join('')}
+            </div>` : ''}
         </div>`;
     },
 
@@ -583,7 +608,8 @@
           totalCost, durationDays, notes, status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         await app.db.collection('projects').doc(projectId).update({ proposalsCount: firebase.firestore.FieldValue.increment(1) });
-        if (proj?.clientId) await app.sendNotification(proj.clientId, 'عرض سعر جديد على مشروعك', `${app.profile.name} — ${app.fmtMoney(totalCost)} ج.م`);
+        if (proj?.clientId) await app.sendNotification(proj.clientId, 'عرض سعر جديد على إعلانك', `${app.profile.name} — ${app.fmtMoney(totalCost)} ج.م`);
+        e.target.reset();
         app.toast('تم إرسال عرض السعر بنجاح', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
     },
@@ -592,15 +618,12 @@
       const isAr = app.lang === 'ar';
       const catLabel = this.getCatLabel(proj.mainCategory, app.lang);
       const stars = '★'.repeat(Math.round(proj.clientRating || 4)) + '☆'.repeat(5 - Math.round(proj.clientRating || 4));
-      const typeTag = proj.postType === 'seeking'
-        ? `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 shrink-0">باحث عن عمل</span>`
-        : `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 shrink-0">مطلوب تنفيذ</span>`;
 
       return `
         <div onclick="DamanProjects.openProjectDetail('${proj.id}')" class="glass-card rounded-2xl p-3.5 space-y-2 cursor-pointer transition-all ${proj.isFeatured ? 'border-amber-500/70 bg-amber-500/5' : 'hover:border-amber-500/40'}">
           <div class="flex items-center justify-between gap-1.5">
             <div class="flex items-center gap-1 min-w-0">
-              ${typeTag}
+              ${this.postTypeBadge(proj.postType)}
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 truncate">${app.esc(catLabel)}</span>
             </div>
             ${this.statusBadge(proj.status, isAr)}
@@ -637,11 +660,12 @@
 
       return `
         <div class="space-y-3">
-          <!-- Hiring vs Seeking Split -->
-          <div class="grid grid-cols-3 gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button onclick="DamanProjects.setPostTypeFilter('all')" class="py-1.5 rounded-lg text-[10px] font-black ${this.postTypeFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">الكل</button>
-            <button onclick="DamanProjects.setPostTypeFilter('hiring')" class="py-1.5 rounded-lg text-[10px] font-black ${this.postTypeFilter === 'hiring' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">أصحاب الأعمال</button>
-            <button onclick="DamanProjects.setPostTypeFilter('seeking')" class="py-1.5 rounded-lg text-[10px] font-black ${this.postTypeFilter === 'seeking' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">باحثين عن عمل</button>
+          <!-- 4-Way Market Filter: All / Hiring / Seeking / B2B Suppliers -->
+          <div class="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button onclick="DamanProjects.setPostTypeFilter('all')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">الكل</button>
+            <button onclick="DamanProjects.setPostTypeFilter('hiring')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'hiring' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">أصحاب أعمال</button>
+            <button onclick="DamanProjects.setPostTypeFilter('seeking')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'seeking' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">باحثين عن عمل</button>
+            <button onclick="DamanProjects.setPostTypeFilter('supplier')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'supplier' ? 'bg-orange-500 text-slate-950' : 'text-slate-400'}">الموردين B2B</button>
           </div>
 
           <div class="grid grid-cols-2 gap-2">
@@ -655,7 +679,7 @@
             </select>
           </div>
 
-          <input type="search" value="${app.esc(app.searchQuery || '')}" oninput="DamanProjects.setSearch(this.value)" placeholder="ابحث بالعنوان أو المحافظة أو التخصص..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white" />
+          <input type="search" value="${app.esc(app.searchQuery || '')}" oninput="DamanProjects.setSearch(this.value)" placeholder="ابحث بالعنوان أو الخامات أو المحافظة أو المورّد..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white" />
 
           ${!combined.length
             ? '<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد نتائج مطابقة</div>'
@@ -670,19 +694,19 @@
             <div class="text-xs font-black text-emerald-300"><i class="fa-solid fa-shield-halved me-1"></i> الاستلام الهندسي بضمان مادي 3 أضعاف (3x)</div>
             <p class="text-[11px] text-slate-200 leading-relaxed">نستلم الشدات، الأسقف، المحارة، التشطيبات، أو نمسك مشروعك كامل استشارات هندسية مع ضمان مادي يصل لـ 3 أضعاف قيمة الخدمة. حدد المساحة والموقع وسنرسل لك السعر فوراً.</p>
           </div>
-          <form onsubmit="DamanProjects.submitInspectionRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
-            <select id="insp-pkg" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-xs font-bold text-white">
+          <form onsubmit="DamanProjects.submitInspectionRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
+            <select id="insp-pkg" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white">
               <option value="shoring_roof">استلام شدة وسقف كامل بضمان 3x (تشوين + شدة وحدادة + صب)</option>
               <option value="plaster_finish">استلام محارة وتشطيبات بضمان 3x (شقة / فيلا / مبنى)</option>
               <option value="four_visits">باقة 4 زيارات هندسية شاملة بضمان 3x</option>
               <option value="full_consulting">استشارات وإدارة مشروع كامل من البداية للتسليم (3x)</option>
               <option value="single_visit">معاينة هندسية منفردة وتقرير فني معتمد</option>
             </select>
-            <input id="insp-area" type="text" required placeholder="المساحة بالمتر المربع وعدد الأدوار (إلزامي للتسعير)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <input id="insp-location" type="text" required placeholder="المحافظة وعنوان الموقع بالتفصيل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <input id="insp-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <textarea id="insp-notes" rows="2" placeholder="ملاحظات إضافية عن البند المطلوب استلامه..." class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"></textarea>
-            <button id="insp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">إرسال للإدارة لتحديد السعر</button>
+            <input id="insp-area" type="text" required placeholder="المساحة بالمتر المربع وعدد الأدوار (إلزامي للتسعير)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <input id="insp-location" type="text" required placeholder="المحافظة وعنوان الموقع بالتفصيل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <input id="insp-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <textarea id="insp-notes" rows="2" placeholder="ملاحظات إضافية عن البند المطلوب استلامه..." class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <button id="insp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال للإدارة لتحديد السعر</button>
           </form>
           ${this.myInspections.length ? `
             <div class="glass-card rounded-2xl p-3.5 space-y-2">
@@ -704,18 +728,18 @@
             <div class="text-xs font-black text-amber-300"><i class="fa-solid fa-people-group me-1"></i> طلب عمالة VIP مضمونة من ضمان سايت</div>
             <p class="text-[11px] text-slate-300">للشركات والمهندسين والأفراد — نوفر فرق عمل مضمونة في كل القطاعات.</p>
           </div>
-          <form onsubmit="DamanProjects.submitVipLabor(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
-            <select id="vl-cat" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-xs font-bold text-white">
+          <form onsubmit="DamanProjects.submitVipLabor(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
+            <select id="vl-cat" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
               ${window.DAMAN_CATEGORIES.map((c) => `<option value="${c.id}">${c.ar}</option>`).join('')}
             </select>
-            <input id="vl-trade" type="text" required placeholder="التخصص المطلوب (نجارين، حدادين، مبيضين محارة...)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+            <input id="vl-trade" type="text" required placeholder="التخصص المطلوب (نجارين، حدادين، مبيضين محارة...)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             <div class="grid grid-cols-2 gap-2">
-              <input id="vl-count" type="number" min="1" required placeholder="عدد العمال" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-              <input id="vl-days" type="text" required placeholder="المدة (مثلاً 10 أيام)" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
+              <input id="vl-count" type="number" min="1" required placeholder="عدد العمال" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="vl-days" type="text" required placeholder="المدة (مثلاً 10 أيام)" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             </div>
-            <input id="vl-location" type="text" required placeholder="المحافظة ومكان الموقع" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <input id="vl-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <button id="vl-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">إرسال طلب عمالة VIP للإدارة</button>
+            <input id="vl-location" type="text" required placeholder="المحافظة ومكان الموقع" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <input id="vl-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button id="vl-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إرسال طلب عمالة VIP للإدارة</button>
           </form>
         </div>`;
     },
@@ -775,7 +799,7 @@
       container.innerHTML = `
         <div class="space-y-3.5">
           <div class="flex items-center justify-between gap-2">
-            <h2 class="text-sm font-black text-white"><i class="fa-solid fa-briefcase text-amber-400 me-1.5"></i> المشاريع والسجل والضمان</h2>
+            <h2 class="text-sm font-black text-white"><i class="fa-solid fa-briefcase text-amber-400 me-1.5"></i> السوق والموردين والضمان</h2>
             <button onclick="DamanProjects.openPostModal()" class="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[11px] flex items-center gap-1">
               <i class="fa-solid fa-plus"></i><span>انشر الآن</span>
             </button>
