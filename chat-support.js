@@ -5,16 +5,28 @@
     tickets: [],
     activeChatId: null,
     activeChatMeta: null,
+    activeChatDoc: null,
+    peerProfile: null,
     messages: [],
     agreements: [],
     aiHistory: [],
+    replyingTo: null,
     attachedUid: null,
     unsubChats: null,
     unsubChatDoc: null,
+    unsubPeer: null,
     unsubMsgs: null,
     unsubAgreements: null,
     unsubTickets: null,
     unsubCall: null,
+    unsubGlobalCall: null,
+    presenceTimer: null,
+    typingTimeout: null,
+    lastMsgCount: 0,
+
+    // Ringtone AudioContext
+    ringInterval: null,
+    audioCtx: null,
 
     // Voice Note Recorder State
     isRecordingVoice: false,
@@ -25,6 +37,7 @@
 
     // WebRTC Voice Call + 30-Day Auto-Recording State
     callState: null,
+    incomingGlobalCall: null,
     pc: null,
     localStream: null,
     remoteStream: null,
@@ -32,17 +45,75 @@
     callRecChunks: [],
     callStartTime: 0,
 
-    // Temporary image buffers
     tempDayPhoto: '',
     tempInvoicePhoto: '',
 
+    // ==================== SOUND ENGINE (RINGTONE & MESSAGE DING) ====================
+    getAudioCtx() {
+      if (!this.audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) this.audioCtx = new AC();
+      }
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
+      return this.audioCtx;
+    },
+
+    playTone(freq1, freq2, durMs) {
+      try {
+        const ctx = this.getAudioCtx();
+        if (!ctx) return;
+        const o1 = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        const g = ctx.createGain();
+        o1.frequency.value = freq1;
+        o2.frequency.value = freq2;
+        g.gain.value = 0.08;
+        o1.connect(g);
+        o2.connect(g);
+        g.connect(ctx.destination);
+        o1.start();
+        o2.start();
+        setTimeout(() => {
+          try { o1.stop(); o2.stop(); } catch (e) {}
+        }, durMs);
+      } catch (e) {}
+    },
+
+    startRingtone(isIncoming) {
+      this.stopRingtone();
+      const beat = () => {
+        if (isIncoming) {
+          this.playTone(523, 659, 320);
+          setTimeout(() => this.playTone(523, 659, 320), 420);
+        } else {
+          this.playTone(440, 480, 750);
+        }
+      };
+      beat();
+      this.ringInterval = setInterval(beat, 2200);
+    },
+
+    stopRingtone() {
+      if (this.ringInterval) {
+        clearInterval(this.ringInterval);
+        this.ringInterval = null;
+      }
+    },
+
+    playMsgDing() {
+      this.playTone(880, 1175, 110);
+    },
+
+    // ==================== GLOBAL BOOT (PRESENCE + FLOATING INCOMING CALLS) ====================
     initAiWelcome(isAr) {
       if (this.aiHistory.length) return;
       this.aiHistory.push({
         sender: 'ai',
         text: isAr
-          ? 'أهلاً بك في الدعم الفني الذكي لـ «ضمان سايت» 🏗️\nاسألني عن اتفاقات الموردين (B2B)، الاستلام الهندسي بضمان 3 أضعاف (3x)، اليوميات وتصفية الخميس أو كل 15 يوم، المستخلصات، طلب السلفة، تعديل أو فسخ العقد.'
-          : 'Welcome to DamanSite AI Support 🏗️\nAsk about B2B Supply Escrow, 3x Engineering Guarantee, Daily/15-Day Settlements, Abstracts, Advances, or Contract Termination.'
+          ? 'أهلاً بك في الدعم الفني الذكي لـ «ضمان سايت» 🏗️\nاسألني عن اتفاقات الموردين (B2B)، الاستلام الهندسي بضمان 3 أضعاف (3x)، اليوميات، المستخلصات، السلف، أو فسخ العقد.'
+          : 'Welcome to DamanSite AI Support 🏗️\nAsk about B2B Supply Escrow, 3x Engineering Guarantee, Settlements, or Contract Termination.'
       });
     },
 
@@ -56,8 +127,39 @@
       this.detachListeners();
       this.attachedUid = app.user.uid;
 
-      const lookupIds = app.hasAdminAccess() ? [app.user.uid, 'admin'] : [app.user.uid];
+      // 1. Online Presence Heartbeat (every 60s)
+      const beatPresence = () => {
+        if (app.user) {
+          app.db.collection('users').doc(app.user.uid).update({ lastSeen: Date.now() }).catch(() => {});
+        }
+      };
+      beatPresence();
+      this.presenceTimer = setInterval(beatPresence, 60000);
 
+      // 2. Global Incoming Call Listener (works on ANY tab!)
+      this.unsubGlobalCall = app.db.collection('incomingCalls').doc(app.user.uid).onSnapshot((snap) => {
+        if (!snap.exists) {
+          if (this.incomingGlobalCall) {
+            this.incomingGlobalCall = null;
+            this.stopRingtone();
+            this.renderGlobalCallOverlay();
+          }
+          return;
+        }
+        const d = snap.data();
+        if (d.status === 'ringing' && d.callerId !== app.user.uid && !this.callState) {
+          this.incomingGlobalCall = d;
+          this.startRingtone(true);
+          this.renderGlobalCallOverlay();
+        } else {
+          this.incomingGlobalCall = null;
+          this.stopRingtone();
+          this.renderGlobalCallOverlay();
+        }
+      }, () => {});
+
+      // 3. Chats List & Unread Badge
+      const lookupIds = app.hasAdminAccess() ? [app.user.uid, 'admin'] : [app.user.uid];
       this.unsubChats = app.db
         .collection('chats')
         .where('participants', 'array-contains-any', lookupIds)
@@ -67,6 +169,7 @@
             this.chats = snap.docs
               .map((d) => Object.assign({ id: d.id }, d.data()))
               .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
+            this.updateChatNavBadge(app);
             if (app.activeTab === 'chat' && !this.activeChatId) this.rerender();
           },
           (err) => console.error('chats error:', err)
@@ -87,10 +190,87 @@
       );
     },
 
+    updateChatNavBadge(app) {
+      const btn = document.querySelector('.nav-btn[data-tab="chat"]');
+      if (!btn || !app.user) return;
+      const unread = this.chats.filter((c) => c.lastSenderId && c.lastSenderId !== app.user.uid && !c.lastReadByPeer).length;
+      let badge = document.getElementById('daman-chat-unread-badge');
+      if (!badge) {
+        btn.style.position = 'relative';
+        badge = document.createElement('span');
+        badge.id = 'daman-chat-unread-badge';
+        badge.className = 'hidden absolute top-0.5 end-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center';
+        btn.appendChild(badge);
+      }
+      if (unread > 0) {
+        badge.textContent = unread > 9 ? '9+' : unread;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    },
+
+    renderGlobalCallOverlay() {
+      let box = document.getElementById('daman-global-call-overlay');
+      if (!this.incomingGlobalCall) {
+        if (box) box.remove();
+        return;
+      }
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'daman-global-call-overlay';
+        box.className = 'fixed inset-x-3 top-3 z-[90] max-w-md mx-auto bg-gradient-to-r from-emerald-900 to-slate-900 border-2 border-emerald-400 rounded-2xl p-3.5 shadow-2xl space-y-2';
+        document.body.appendChild(box);
+      }
+      const c = this.incomingGlobalCall;
+      const app = window.DamanApp;
+      box.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-10 h-10 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center animate-bounce shrink-0"><i class="fa-solid fa-phone-volume"></i></span>
+            <div class="min-w-0">
+              <div class="text-xs font-black text-white truncate">مكالمة واردة من ${app.esc(c.callerName || 'مستخدم')}</div>
+              <div class="text-[10px] text-amber-300">مسجّلة لحفظ الحقوق (30 يوم)</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="DamanChat.acceptGlobalCall()" class="px-3.5 py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">رد</button>
+            <button onclick="DamanChat.rejectGlobalCall()" class="px-3 py-2 rounded-xl bg-rose-500 text-white font-black text-xs">رفض</button>
+          </div>
+        </div>`;
+    },
+
+    async acceptGlobalCall() {
+      const c = this.incomingGlobalCall;
+      if (!c) return;
+      this.stopRingtone();
+      this.incomingGlobalCall = null;
+      this.renderGlobalCallOverlay();
+      const app = window.DamanApp;
+      this.subTab = 'chats';
+      app.switchTab('chat');
+      this.openChatRoom(c.chatId, { id: c.chatId, otherUid: c.callerId, otherName: c.callerName });
+      setTimeout(() => this.answerVoiceCall(), 350);
+    },
+
+    async rejectGlobalCall() {
+      const app = window.DamanApp;
+      const c = this.incomingGlobalCall;
+      this.stopRingtone();
+      this.incomingGlobalCall = null;
+      this.renderGlobalCallOverlay();
+      if (c && app.user) {
+        app.db.collection('incomingCalls').doc(app.user.uid).delete().catch(() => {});
+        app.db.collection('chats').doc(c.chatId).collection('calls').doc('active').update({ status: 'ended' }).catch(() => {});
+      }
+    },
+
     detachListeners() {
-      ['unsubChats', 'unsubChatDoc', 'unsubMsgs', 'unsubAgreements', 'unsubTickets', 'unsubCall'].forEach((k) => {
+      ['unsubChats', 'unsubChatDoc', 'unsubPeer', 'unsubMsgs', 'unsubAgreements', 'unsubTickets', 'unsubCall', 'unsubGlobalCall'].forEach((k) => {
         if (this[k]) { try { this[k](); } catch (e) {} this[k] = null; }
       });
+      if (this.presenceTimer) { clearInterval(this.presenceTimer); this.presenceTimer = null; }
+      this.stopRingtone();
       this.attachedUid = null;
       this.chats = [];
       this.tickets = [];
@@ -143,6 +323,8 @@
             projectId: projectId || '',
             projectTitle: projectTitle || '',
             frozen: false,
+            blockedBy: [],
+            hasActiveDeal: false,
             lastMessage: projectTitle ? `${isAr ? 'استفسار بخصوص:' : 'Inquiry:'} ${projectTitle}` : '',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -171,21 +353,37 @@
       const app = window.DamanApp;
       this.activeChatId = chatId;
       this.activeChatMeta = meta || { id: chatId };
+      this.activeChatDoc = null;
+      this.peerProfile = null;
+      this.replyingTo = null;
       this.messages = [];
       this.agreements = [];
+      this.lastMsgCount = 0;
 
-      ['unsubChatDoc', 'unsubMsgs', 'unsubAgreements', 'unsubCall'].forEach((k) => {
+      ['unsubChatDoc', 'unsubPeer', 'unsubMsgs', 'unsubAgreements', 'unsubCall'].forEach((k) => {
         if (this[k]) { try { this[k](); } catch (e) {} this[k] = null; }
       });
 
       this.unsubChatDoc = app.db.collection('chats').doc(chatId).onSnapshot((snap) => {
         if (snap.exists) {
           const d = snap.data();
+          this.activeChatDoc = d;
           this.activeChatMeta.frozen = !!d.frozen;
+          const other = (d.participants || []).find((x) => x !== app.user.uid) || 'admin';
+          this.activeChatMeta.otherUid = other;
           if (!this.activeChatMeta.otherName && d.participantNames) {
-            const other = (d.participants || []).find((x) => x !== app.user.uid) || 'admin';
-            this.activeChatMeta.otherUid = other;
             this.activeChatMeta.otherName = d.participantNames[other] || other;
+          }
+          if (other && other !== 'admin' && !this.unsubPeer) {
+            this.unsubPeer = app.db.collection('users').doc(other).onSnapshot((uSnap) => {
+              if (uSnap.exists) {
+                this.peerProfile = uSnap.data();
+                this.rerender();
+              }
+            }, () => {});
+          }
+          if (d.lastSenderId && d.lastSenderId !== app.user.uid && !d.lastReadByPeer) {
+            app.db.collection('chats').doc(chatId).update({ lastReadByPeer: true }).catch(() => {});
           }
           this.rerender();
         }
@@ -195,7 +393,19 @@
         .collection('chats').doc(chatId).collection('messages')
         .orderBy('createdAt', 'asc').limit(90)
         .onSnapshot((snap) => {
-          this.messages = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+          const newMsgs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+          if (this.lastMsgCount > 0 && newMsgs.length > this.lastMsgCount) {
+            const latest = newMsgs[newMsgs.length - 1];
+            if (latest && latest.senderId !== app.user.uid) this.playMsgDing();
+          }
+          this.lastMsgCount = newMsgs.length;
+          this.messages = newMsgs;
+
+          // Mark unread peer messages as read (✓✓ blue)
+          newMsgs.filter((m) => m.senderId !== app.user.uid && !m.read).forEach((m) => {
+            app.db.collection('chats').doc(chatId).collection('messages').doc(m.id).update({ read: true }).catch(() => {});
+          });
+
           this.rerender();
           setTimeout(() => {
             const box = document.getElementById('chat-msgs-scroll');
@@ -222,10 +432,12 @@
           const data = snap.data();
           if (data.status === 'ringing' && data.callerId !== app.user.uid && !this.callState) {
             this.callState = { status: 'incoming', isCaller: false, otherName: data.callerName || this.activeChatMeta.otherName };
+            this.startRingtone(true);
             this.rerender();
           } else if (data.status === 'ended' && this.callState) {
             this.cleanupCallLocal();
           } else if (data.status === 'answered' && data.answer && this.pc && this.callState?.isCaller && !this.pc.currentRemoteDescription) {
+            this.stopRingtone();
             this.pc.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(() => {});
             this.callState.status = 'connected';
             this.rerender();
@@ -239,12 +451,68 @@
       if (this.callState) this.endVoiceCall();
       this.activeChatId = null;
       this.activeChatMeta = null;
+      this.activeChatDoc = null;
+      this.peerProfile = null;
+      this.replyingTo = null;
       this.messages = [];
       this.agreements = [];
-      ['unsubChatDoc', 'unsubMsgs', 'unsubAgreements', 'unsubCall'].forEach((k) => {
+      ['unsubChatDoc', 'unsubPeer', 'unsubMsgs', 'unsubAgreements', 'unsubCall'].forEach((k) => {
         if (this[k]) { try { this[k](); } catch (e) {} this[k] = null; }
       });
       if (shouldRender) this.rerender();
+    },
+
+    formatPeerStatus() {
+      const otherUid = this.activeChatMeta?.otherUid;
+      if (otherUid === 'admin') return 'إدارة ضمان سايت — متاح للرد';
+      const typingMap = this.activeChatDoc?.typing || {};
+      if (otherUid && typingMap[otherUid] && Date.now() - typingMap[otherUid] < 4500) {
+        return '✍️ يكتب الآن...';
+      }
+      const ls = this.peerProfile?.lastSeen;
+      if (!ls) return 'غير متصل حالياً';
+      const diffSec = Math.floor((Date.now() - ls) / 1000);
+      if (diffSec < 120) return '🟢 نشط الآن';
+      if (diffSec < 3600) return `آخر ظهور منذ ${Math.floor(diffSec / 60)} دقيقة`;
+      return `آخر ظهور ${new Date(ls).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
+    },
+
+    onTypingInput() {
+      const app = window.DamanApp;
+      if (!this.activeChatId || !app.user) return;
+      if (this.typingTimeout) return;
+      const patch = {};
+      patch[`typing.${app.user.uid}`] = Date.now();
+      app.db.collection('chats').doc(this.activeChatId).update(patch).catch(() => {});
+      this.typingTimeout = setTimeout(() => { this.typingTimeout = null; }, 2500);
+    },
+
+    setReply(msgId) {
+      const m = this.messages.find((x) => x.id === msgId);
+      if (!m) return;
+      this.replyingTo = {
+        id: m.id,
+        senderName: m.senderName || '',
+        text: m.text || (m.imageBase64 ? '📷 صورة' : m.videoBase64 ? '🎬 فيديو' : m.fileName ? '📎 ' + m.fileName : m.audioBase64 ? '🎤 رسالة صوتية' : '📍 موقع')
+      };
+      this.rerender();
+      document.getElementById('chat-msg-input')?.focus();
+    },
+
+    async toggleBlockPeer() {
+      const app = window.DamanApp;
+      if (!this.activeChatId || !app.user) return;
+      const blocked = Array.isArray(this.activeChatDoc?.blockedBy) ? this.activeChatDoc.blockedBy : [];
+      const iBlocked = blocked.includes(app.user.uid);
+      if (!window.confirm(iBlocked ? 'فك الحظر عن هذا المستخدم؟' : 'حظر هذا المستخدم ومنعه من مراسلتك؟')) return;
+      try {
+        await app.db.collection('chats').doc(this.activeChatId).update({
+          blockedBy: iBlocked
+            ? firebase.firestore.FieldValue.arrayRemove(app.user.uid)
+            : firebase.firestore.FieldValue.arrayUnion(app.user.uid)
+        });
+        app.toast(iBlocked ? 'تم فك الحظر' : 'تم حظر المستخدم بنجاح', 'info');
+      } catch (e) { app.toast(e.message, 'error'); }
     },
 
     async notifyChatPeer(app, previewText) {
@@ -254,15 +522,23 @@
       if (target) await app.sendNotification(target, `رسالة جديدة من ${myName}`, previewText);
     },
 
-    // ==================== TEXT, IMAGE, LOCATION, VOICE NOTE ====================
+    // ==================== TEXT, IMAGE, FILE, VIDEO, LOCATION, VOICE NOTE ====================
+    isChatBlocked() {
+      const arr = this.activeChatDoc?.blockedBy || [];
+      return arr.length > 0;
+    },
+
     async sendChatMessage(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة مؤقتاً من الإدارة', 'error');
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة بين الطرفين', 'error');
       const inp = document.getElementById('chat-msg-input');
       const text = inp ? inp.value.trim() : '';
       if (!text || !this.activeChatId || !app.user) return;
       inp.value = '';
+      const replyObj = this.replyingTo;
+      this.replyingTo = null;
       try {
         const chatRef = app.db.collection('chats').doc(this.activeChatId);
         await chatRef.collection('messages').add({
@@ -270,9 +546,16 @@
           senderName: app.isAdmin() ? 'إدارة ضمان سايت' : (app.profile?.companyName || app.profile?.name || ''),
           isAdminIntervention: app.isAdmin() && !(this.activeChatMeta?.otherUid === 'admin'),
           text,
+          replyTo: replyObj || null,
+          read: false,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        await chatRef.update({ lastMessage: text.slice(0, 90), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        await chatRef.update({
+          lastMessage: text.slice(0, 90),
+          lastSenderId: app.user.uid,
+          lastReadByPeer: false,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
         await this.notifyChatPeer(app, text.slice(0, 80));
       } catch (err) { app.toast(err.message, 'error'); }
     },
@@ -300,7 +583,8 @@
 
     async sendChatImage(input) {
       const app = window.DamanApp;
-      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة', 'error');
       const file = input.files && input.files[0];
       if (!file || !this.activeChatId || !app.user) return;
       try {
@@ -311,17 +595,53 @@
           senderName: app.profile?.companyName || app.profile?.name || '',
           imageBase64: b64,
           text: '',
+          read: false,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        await chatRef.update({ lastMessage: '📷 صورة مرفقة', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        await chatRef.update({ lastMessage: '📷 صورة مرفقة', lastSenderId: app.user.uid, lastReadByPeer: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
         await this.notifyChatPeer(app, '📷 أرسل لك صورة جديدة');
       } catch (err) { app.toast('تعذر إرسال الصورة', 'error'); }
       input.value = '';
     },
 
+    async sendChatFileOrVideo(input) {
+      const app = window.DamanApp;
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة', 'error');
+      const file = input.files && input.files[0];
+      if (!file || !this.activeChatId || !app.user) return;
+      if (file.size > 720 * 1024) {
+        input.value = '';
+        return app.toast('الحد الأقصى لحجم الملف أو الفيديو حالياً 700 كيلوبايت (اضغط الفيديو أو أرسل ملفاً أصغر)', 'warning');
+      }
+      const isVideo = (file.type || '').startsWith('video/');
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const chatRef = app.db.collection('chats').doc(this.activeChatId);
+          const payload = {
+            senderId: app.user.uid,
+            senderName: app.profile?.companyName || app.profile?.name || '',
+            text: '',
+            read: false,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          if (isVideo) payload.videoBase64 = reader.result;
+          else { payload.fileBase64 = reader.result; payload.fileName = file.name; }
+          await chatRef.collection('messages').add(payload);
+          const preview = isVideo ? '🎬 فيديو مرفق' : `📎 ملف: ${file.name}`;
+          await chatRef.update({ lastMessage: preview, lastSenderId: app.user.uid, lastReadByPeer: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          await this.notifyChatPeer(app, preview);
+        } catch (err) { app.toast('تعذر إرسال الملف', 'error'); }
+      };
+      reader.readAsDataURL(file);
+      input.value = '';
+    },
+
     sendLocation() {
       const app = window.DamanApp;
-      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة', 'error');
       if (!navigator.geolocation) return app.toast('جهازك لا يدعم تحديد الموقع', 'error');
       app.toast('جارٍ تحديد موقعك (GPS)...', 'info');
       navigator.geolocation.getCurrentPosition(
@@ -333,9 +653,10 @@
               senderName: app.profile?.companyName || app.profile?.name || '',
               location: { lat: pos.coords.latitude, lng: pos.coords.longitude },
               text: '📍 اللوكيشن الحالي (GPS)',
+              read: false,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-            await chatRef.update({ lastMessage: '📍 موقع GPS', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            await chatRef.update({ lastMessage: '📍 موقع GPS', lastSenderId: app.user.uid, lastReadByPeer: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
             await this.notifyChatPeer(app, '📍 أرسل لك اللوكيشن (GPS)');
           } catch (e) { app.toast(e.message, 'error'); }
         },
@@ -346,7 +667,8 @@
 
     async toggleVoiceNote() {
       const app = window.DamanApp;
-      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة', 'error');
       if (this.isRecordingVoice) {
         if (this.voiceRecorder && this.voiceRecorder.state !== 'inactive') this.voiceRecorder.stop();
         return;
@@ -380,9 +702,10 @@
                 audioBase64: reader.result,
                 audioDuration: dur,
                 text: '',
+                read: false,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
               });
-              await chatRef.update({ lastMessage: `🎤 رسالة صوتية (${dur} ث)`, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+              await chatRef.update({ lastMessage: `🎤 رسالة صوتية (${dur} ث)`, lastSenderId: app.user.uid, lastReadByPeer: false, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
               await this.notifyChatPeer(app, `🎤 أرسل لك رسالة صوتية (${dur} ثانية)`);
             } catch (err) { app.toast(err.message, 'error'); }
           };
@@ -399,11 +722,12 @@
       } catch (err) { app.toast('يرجى السماح بصلاحية الميكروفون من المتصفح', 'error'); }
     },
 
-    // ==================== WEBRTC VOICE CALLS + 30-DAY AUTO-RECORDING ====================
+    // ==================== WEBRTC VOICE CALLS + REAL RING + 30-DAY AUTO-RECORDING ====================
     async startVoiceCall() {
       const app = window.DamanApp;
       if (app.appConfig?.disableCalls && !app.isAdmin()) return app.toast('المكالمات الصوتية متوقفة مؤقتاً من الإدارة', 'warning');
-      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة', 'error');
+      if (this.isChatBlocked() && !app.isAdmin()) return app.toast('المحادثة محظورة', 'error');
       if (!this.activeChatId || !app.user) return;
       try {
         this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -423,13 +747,21 @@
 
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
+        const myName = app.profile?.companyName || app.profile?.name || '';
         await callRef.set({
-          callerId: app.user.uid,
-          callerName: app.profile?.companyName || app.profile?.name || '',
-          offer: { type: offer.type, sdp: offer.sdp },
-          status: 'ringing',
+          callerId: app.user.uid, callerName: myName,
+          offer: { type: offer.type, sdp: offer.sdp }, status: 'ringing',
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+
+        // Trigger Global Floating Call Overlay on Peer's screen
+        const otherUid = this.activeChatMeta?.otherUid;
+        if (otherUid && otherUid !== 'admin') {
+          await app.db.collection('incomingCalls').doc(otherUid).set({
+            chatId: this.activeChatId, callerId: app.user.uid, callerName: myName, status: 'ringing',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        }
 
         callRef.collection('calleeCandidates').onSnapshot((snap) => {
           snap.docChanges().forEach((ch) => { if (ch.type === 'added' && this.pc) this.pc.addIceCandidate(new RTCIceCandidate(ch.doc.data())).catch(() => {}); });
@@ -437,7 +769,8 @@
 
         this.callState = { status: 'calling', isCaller: true, otherName: this.activeChatMeta?.otherName || '' };
         this.callStartTime = Date.now();
-        await this.notifyChatPeer(app, '📞 مكالمة صوتية واردة — افتح الدردشة للرد');
+        this.startRingtone(false);
+        await this.notifyChatPeer(app, '📞 مكالمة صوتية واردة — افتح التطبيق للرد');
         this.rerender();
       } catch (err) {
         app.toast('تعذر بدء المكالمة — تأكد من سماح الميكروفون', 'error');
@@ -448,6 +781,8 @@
     async answerVoiceCall() {
       const app = window.DamanApp;
       if (!this.activeChatId || !app.user) return;
+      this.stopRingtone();
+      app.db.collection('incomingCalls').doc(app.user.uid).delete().catch(() => {});
       try {
         const callRef = app.db.collection('chats').doc(this.activeChatId).collection('calls').doc('active');
         const callSnap = await callRef.get();
@@ -525,10 +860,14 @@
       if (this.activeChatId) {
         try { await app.db.collection('chats').doc(this.activeChatId).collection('calls').doc('active').update({ status: 'ended' }); } catch (e) {}
       }
+      const otherUid = this.activeChatMeta?.otherUid;
+      if (otherUid && otherUid !== 'admin') app.db.collection('incomingCalls').doc(otherUid).delete().catch(() => {});
+      if (app.user) app.db.collection('incomingCalls').doc(app.user.uid).delete().catch(() => {});
       this.cleanupCallLocal();
     },
 
     cleanupCallLocal() {
+      this.stopRingtone();
       if (this.callRecorder && this.callRecorder.state !== 'inactive') { try { this.callRecorder.stop(); } catch (e) {} }
       this.callRecorder = null;
       if (this.localStream) { this.localStream.getTracks().forEach((t) => t.stop()); this.localStream = null; }
@@ -555,6 +894,12 @@
     openAgreementModal() {
       const app = window.DamanApp;
       if (this.activeChatMeta?.frozen && !app.isAdmin()) return app.toast('المحادثة مجمدة من الإدارة', 'error');
+      if (app.appConfig?.requireKycForActions && app.profile?.kycStatus !== 'verified' && !app.isAdmin()) {
+        app.toast('يجب توثيق حسابك بالبطاقة/السجل التجاري أولاً قبل إنشاء اتفاق رسمي', 'warning');
+        if (window.DamanWallet) window.DamanWallet.openKycModal();
+        return;
+      }
+
       let modal = document.getElementById('daman-chat-agree-modal');
       if (!modal) {
         modal = document.createElement('div');
@@ -640,10 +985,7 @@
                 <option value="on_completion">100% عند انتهاء واستلام الشغل/التوريد</option>
                 <option value="monthly_pay">صرف راتب شهري ثابت</option>
               </select>
-              <div id="ag-sub-15d" class="hidden">
-                <label class="block text-[10px] text-amber-300 font-bold mb-1">تواريخ التصفية (كل 15 يوم)</label>
-                <input id="ag-15d-dates" type="text" value="يوم 1 ويوم 15 من كل شهر" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-              </div>
+              <div id="ag-sub-15d" class="hidden"><label class="block text-[10px] text-amber-300 font-bold mb-1">تواريخ التصفية (كل 15 يوم)</label><input id="ag-15d-dates" type="text" value="يوم 1 ويوم 15 من كل شهر" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
               <div id="ag-sub-ms" class="hidden space-y-2 pt-1">
                 <div class="grid grid-cols-2 gap-2">
                   <div><label class="block text-[10px] text-slate-300 mb-1">الدفعة الأولى الآن (%)</label><input id="ag-m1-pct" type="number" min="0" max="100" value="20" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
@@ -791,6 +1133,14 @@
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
+    async cancelProposedAgreement(agId) {
+      if (!window.confirm('هل تريد إلغاء وسحب هذا العرض المقترح؟')) return;
+      try {
+        await window.DamanApp.db.collection('chatAgreements').doc(agId).delete();
+        window.DamanApp.toast('تم إلغاء العرض بنجاح', 'info');
+      } catch (e) { window.DamanApp.toast(e.message, 'error'); }
+    },
+
     async acceptAgreement(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -837,8 +1187,8 @@
             timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'lock', label: isPartial ? `تغطية جزئية (${covPct}%)` : 'حجز كامل مبلغ الضمان (100%)', amount: lockNow, by: app.profile?.name || '' })
           });
         });
-
-        const msg = isPartial ? `⚠️ تم تفعيل الاتفاق ${ag.ticketNumber} بتغطية جزئية (${covPct}%). اطبع العقد نسختين وارفع الصورة الموقّعة هنا.` : `✅ تم حجز كامل الضمان للاتفاق ${ag.ticketNumber}. اطبع العقد نسختين وارفع الصورة الموقّعة هنا.`;
+        await app.db.collection('chats').doc(this.activeChatId).update({ hasActiveDeal: true }).catch(() => {});
+        const msg = isPartial ? `⚠️ تم تفعيل الاتفاق ${ag.ticketNumber} بتغطية جزئية (${covPct}%).` : `✅ تم حجز كامل الضمان للاتفاق ${ag.ticketNumber}.`;
         await app.sendNotification(ag.createdBy, `اعتماد الاتفاق ${ag.ticketNumber}`, msg);
         await app.sendNotification(app.user.uid, `اعتماد الاتفاق ${ag.ticketNumber}`, msg);
         app.toast(isPartial ? `تم الحجز بنسبة تغطية ${covPct}%` : 'تم حجز الضمان بنجاح!', 'success');
@@ -879,7 +1229,7 @@
             timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'topup', label: `تعزيز رصيد التغطية (وصلت لـ ${newCov}%)`, amount: amt, by: app.profile?.name || '' })
           });
         });
-        await app.sendNotification(ag.createdBy, `تم تعزيز رصيد الاتفاق ${ag.ticketNumber}`, `أضاف صاحب العمل ${app.fmtMoney(amt)} ج.م لاستمرار الشغل/التوريد.`);
+        await app.sendNotification(ag.createdBy, `تم تعزيز رصيد الاتفاق ${ag.ticketNumber}`, `أضاف صاحب العمل ${app.fmtMoney(amt)} ج.م.`);
         app.toast('تم رفع تغطية الرصيد بنجاح', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
@@ -901,7 +1251,6 @@
       input.value = '';
     },
 
-    // ==================== TERMINATE / CANCEL CONTRACT (إنهاء العمل وفسخ العقد) ====================
     async requestTermination(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -909,36 +1258,16 @@
       const rem = Number(ag.remainingEscrow || 0);
       const reason = window.prompt('سبب طلب إنهاء العمل / فسخ العقد:', 'إنهاء العمل بالتراضي');
       if (!reason) return;
-
-      const workerShare = parseFloat(window.prompt(
-        `المتبقي في الضمان حالياً: ${app.fmtMoney(rem)} ج.م.\nأدخل المبلغ المقترح صرفه للمنفّذ/العامل عن الشغل الذي تم تنفيذه حتى الآن (والباقي يرجع لصاحب العمل):`,
-        '0'
-      ));
-      if (isNaN(workerShare) || workerShare < 0 || workerShare > rem) {
-        return app.toast(`أدخل مبلغاً صحيحاً بين 0 و ${app.fmtMoney(rem)} ج.م`, 'error');
-      }
+      const workerShare = parseFloat(window.prompt(`المتبقي في الضمان: ${app.fmtMoney(rem)} ج.م.\nأدخل المبلغ المقترح صرفه للمنفّذ (والباقي يرجع لصاحب العمل):`, '0'));
+      if (isNaN(workerShare) || workerShare < 0 || workerShare > rem) return app.toast('أدخل مبلغاً صحيحاً', 'error');
       const clientRefund = Math.round((rem - workerShare) * 100) / 100;
-
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
-          pendingTermination: {
-            reason: reason.trim(),
-            workerShare,
-            clientRefund,
-            proposedByUid: app.user.uid,
-            proposedByName: app.profile?.name || '',
-            date: new Date().toISOString().slice(0, 10)
-          }
+          pendingTermination: { reason: reason.trim(), workerShare, clientRefund, proposedByUid: app.user.uid, proposedByName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) }
         });
         const peer = app.user.uid === ag.createdBy ? ag.payerUid : ag.createdBy;
-        if (peer) {
-          await app.sendNotification(
-            peer,
-            `طلب إنهاء عمل وفسخ العقد (${ag.ticketNumber})`,
-            `طلب ${app.profile?.name} فسخ العقد (${reason}) — للمنفّذ: ${app.fmtMoney(workerShare)} ج.م | يُرد للعميل: ${app.fmtMoney(clientRefund)} ج.م — ادخل للموافقة أو التحويل لنزاع.`
-          );
-        }
-        app.toast('تم إرسال طلب فسخ العقد للطرف الآخر للموافقة', 'info');
+        if (peer) await app.sendNotification(peer, `طلب فسخ العقد (${ag.ticketNumber})`, `${reason} — للمنفّذ: ${app.fmtMoney(workerShare)} | للعميل: ${app.fmtMoney(clientRefund)}`);
+        app.toast('تم إرسال طلب فسخ العقد للطرف الآخر', 'info');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -953,79 +1282,43 @@
         try {
           await app.db.collection('chatAgreements').doc(agId).update({ status: 'disputed', pendingTermination: null });
           await app.db.collection('disputes').add({
-            agreementId: agId,
-            contractNumber: ag.ticketNumber,
-            projectTitle: ag.title,
-            contractAmount: Number(ag.remainingEscrow || 0),
-            clientId: ag.payerUid || '',
-            providerId: ag.createdBy || '',
-            reason: `خلاف على إنهاء/فسخ العقد: ${tm.reason} (مقترح ${tm.proposedByName}: ${tm.workerShare} ج.م للمنفّذ)`,
-            status: 'open',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            agreementId: agId, contractNumber: ag.ticketNumber, projectTitle: ag.title, contractAmount: Number(ag.remainingEscrow || 0),
+            clientId: ag.payerUid || '', providerId: ag.createdBy || '', reason: `خلاف على فسخ العقد: ${tm.reason}`, status: 'open', createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
-          await app.sendNotification('ADMIN', `نزاع فسخ عقد جديد (${ag.ticketNumber})`, `${ag.title} — المتبقي بالضمان: ${app.fmtMoney(ag.remainingEscrow)} ج.م`);
-          const peer = tm.proposedByUid;
-          if (peer) await app.sendNotification(peer, `تم تحويل فسخ العقد لنزاع (${ag.ticketNumber})`, 'ستتولى إدارة ضمان سايت مراجعة المحادثة والفصل بين الطرفين.');
+          await app.sendNotification('ADMIN', `نزاع فسخ عقد جديد (${ag.ticketNumber})`, ag.title);
           app.toast('تم تحويل العقد لنزاع رسمي أمام الإدارة', 'warning');
         } catch (e) { app.toast(e.message, 'error'); }
         return;
       }
 
-      if (!window.confirm(`تأكيد الموافقة على فسخ العقد نهائياً؟\n• يُصرف للمنفّذ: ${app.fmtMoney(tm.workerShare)} ج.م\n• يُرد لصاحب العمل: ${app.fmtMoney(tm.clientRefund)} ج.م`)) return;
-
+      if (!window.confirm(`تأكيد فسخ العقد؟\n• للمنفّذ: ${app.fmtMoney(tm.workerShare)} ج.م\n• يُرد للعميل: ${app.fmtMoney(tm.clientRefund)} ج.م`)) return;
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
       const agRef = app.db.collection('chatAgreements').doc(agId);
-
       try {
         await app.db.runTransaction(async (tx) => {
           const [pDoc, wDoc, aDoc] = await Promise.all([tx.get(payerRef), tx.get(workerRef), tx.get(agRef)]);
-          const a = aDoc.data();
-          const curRem = Number(a.remainingEscrow || 0);
-          const pEsc = Number((pDoc.data() || {}).balanceEscrow || 0);
-          const pAvail = Number((pDoc.data() || {}).balanceAvailable || 0);
-          const wAvail = Number((wDoc.data() || {}).balanceAvailable || 0);
-
-          tx.update(payerRef, {
-            balanceEscrow: Math.max(0, Math.round((pEsc - curRem) * 100) / 100),
-            balanceAvailable: Math.round((pAvail + tm.clientRefund) * 100) / 100
-          });
-          if (tm.workerShare > 0) {
-            tx.update(workerRef, { balanceAvailable: Math.round((wAvail + tm.workerShare) * 100) / 100 });
-          }
-          tx.update(agRef, {
-            status: 'cancelled',
-            remainingEscrow: 0,
-            pendingTermination: null,
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: tm.date,
-              kind: 'cancelled',
-              label: `فسخ وإنهاء العقد بالتراضي (${tm.reason}) — للمنفّذ ${app.fmtMoney(tm.workerShare)} ج.م | رُد للعميل ${app.fmtMoney(tm.clientRefund)} ج.م`,
-              amount: tm.workerShare,
-              by: app.profile?.name || ''
-            })
-          });
+          const curRem = Number((aDoc.data() || {}).remainingEscrow || 0);
+          tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - curRem) * 100) / 100), balanceAvailable: Math.round((Number((pDoc.data() || {}).balanceAvailable || 0) + tm.clientRefund) * 100) / 100 });
+          if (tm.workerShare > 0) tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + tm.workerShare) * 100) / 100 });
+          tx.update(agRef, { status: 'cancelled', remainingEscrow: 0, pendingTermination: null, timeline: firebase.firestore.FieldValue.arrayUnion({ date: tm.date, kind: 'cancelled', label: `فسخ العقد بالتراضي (${tm.reason})`, amount: tm.workerShare, by: app.profile?.name || '' }) });
         });
-        await app.sendNotification(ag.createdBy, `تم فسخ وتصفية العقد ${ag.ticketNumber}`, `تم تحويل ${app.fmtMoney(tm.workerShare)} ج.م لمحفظتك.`);
-        await app.sendNotification(ag.payerUid, `تم فسخ وتصفية العقد ${ag.ticketNumber}`, `تم رد ${app.fmtMoney(tm.clientRefund)} ج.م لمحفظتك.`);
-        app.toast('تم فسخ العقد وتصفية المستحقات بالتراضي بنجاح ✅', 'success');
+        await app.db.collection('chats').doc(this.activeChatId).update({ hasActiveDeal: false }).catch(() => {});
+        app.toast('تم فسخ العقد وتصفية المستحقات بالتراضي ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== MUTUAL ADVANCE, AMENDMENT, DAILY HEADCOUNT, ABSTRACTS & MOVEMENTS ====================
     async requestAdvance(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
-      const amount = parseFloat(window.prompt(`أدخل مبلغ السلفة المطلوبة (المتبقي بالضمان: ${app.fmtMoney(ag.remainingEscrow)} ج.م):`, '500'));
+      const amount = parseFloat(window.prompt(`مبلغ السلفة المطلوبة (المتبقي بالضمان: ${app.fmtMoney(ag.remainingEscrow)} ج.م):`, '500'));
       if (!amount || amount <= 0) return;
-      const reason = window.prompt('سبب السلفة / المصروف:', 'سلفة تشغيل / مصاريف') || 'سلفة';
+      const reason = window.prompt('سبب السلفة:', 'سلفة تشغيل / مصاريف') || 'سلفة';
       try {
-        await app.db.collection('chatAgreements').doc(agId).update({
-          pendingAdvance: { amount, reason, byUid: app.user.uid, byName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) }
-        });
-        await app.sendNotification(ag.payerUid, `طلب سلفة جديدة (${app.fmtMoney(amount)} ج.م)`, `طلب ${app.profile?.name} سلفة (${reason}) من الاتفاق ${ag.ticketNumber}.`);
-        app.toast('تم إرسال طلب السلفة للمهندس/المشتري للموافقة', 'success');
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingAdvance: { amount, reason, byUid: app.user.uid, byName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) } });
+        await app.sendNotification(ag.payerUid, `طلب سلفة (${app.fmtMoney(amount)} ج.م)`, `${app.profile?.name}: ${reason}`);
+        app.toast('تم إرسال طلب السلفة للموافقة', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1036,11 +1329,9 @@
       const adv = ag.pendingAdvance;
       if (!approve) {
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAdvance: null });
-        await app.sendNotification(ag.createdBy, `تم رفض طلب السلفة (${app.fmtMoney(adv.amount)} ج.م)`, 'رفض المهندس/العميل صرف السلفة حالياً.');
         return app.toast('تم رفض طلب السلفة', 'info');
       }
-      if (Number(ag.remainingEscrow || 0) < Number(adv.amount)) return app.toast('الرصيد المتبقي بالضمان لا يكفي لصرف السلفة', 'error');
-
+      if (Number(ag.remainingEscrow || 0) < Number(adv.amount)) return app.toast('الرصيد المتبقي غير كافٍ', 'error');
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
       const agRef = app.db.collection('chatAgreements').doc(agId);
@@ -1048,16 +1339,13 @@
         await app.db.runTransaction(async (tx) => {
           const [pDoc, wDoc, aDoc] = await Promise.all([tx.get(payerRef), tx.get(workerRef), tx.get(agRef)]);
           const curRem = Number((aDoc.data() || {}).remainingEscrow || 0);
-          if (curRem < adv.amount) throw new Error('الرصيد المتبقي بالضمان غير كافٍ');
+          if (curRem < adv.amount) throw new Error('الرصيد غير كافٍ');
           tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - adv.amount) * 100) / 100) });
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + adv.amount) * 100) / 100 });
-          tx.update(agRef, {
-            remainingEscrow: Math.round((curRem - adv.amount) * 100) / 100, pendingAdvance: null,
-            timeline: firebase.firestore.FieldValue.arrayUnion({ date: adv.date, kind: 'advance_paid', label: `موافقة وصرف سلفة (${adv.reason})`, amount: adv.amount, by: app.profile?.name || '' })
-          });
+          tx.update(agRef, { remainingEscrow: Math.round((curRem - adv.amount) * 100) / 100, pendingAdvance: null, timeline: firebase.firestore.FieldValue.arrayUnion({ date: adv.date, kind: 'advance_paid', label: `صرف سلفة (${adv.reason})`, amount: adv.amount, by: app.profile?.name || '' }) });
         });
-        await app.sendNotification(ag.createdBy, 'تمت الموافقة وصرف السلفة ✅', `تم تحويل ${app.fmtMoney(adv.amount)} ج.م إلى محفظتك.`);
-        app.toast('تم صرف السلفة لمحفظة المنفّذ وخصمها أوتوماتيك ✅', 'success');
+        await app.sendNotification(ag.createdBy, 'تم صرف السلفة ✅', `${app.fmtMoney(adv.amount)} ج.م`);
+        app.toast('تم صرف السلفة لمحفظة المنفّذ ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1065,17 +1353,13 @@
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
-      const newTotal = parseFloat(window.prompt(`السعر الإجمالي الجديد للاتفاق (الحالي: ${app.fmtMoney(ag.totalAmount)} ج.م):`, ag.totalAmount));
+      const newTotal = parseFloat(window.prompt(`السعر الإجمالي الجديد (الحالي: ${app.fmtMoney(ag.totalAmount)} ج.م):`, ag.totalAmount));
       if (!newTotal || newTotal <= 0) return;
-      const note = window.prompt('تفاصيل التعديل المطلوب (زيادة أمتار / تعديل نظام الصرف / مد المدة):', '');
+      const note = window.prompt('تفاصيل التعديل المطلوب:', '');
       if (!note) return;
       try {
-        await app.db.collection('chatAgreements').doc(agId).update({
-          pendingAmendment: { newTotal, note: note.trim(), proposedByUid: app.user.uid, proposedByName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) }
-        });
-        const peer = app.user.uid === ag.createdBy ? ag.payerUid : ag.createdBy;
-        if (peer) await app.sendNotification(peer, `طلب تعديل الاتفاق ${ag.ticketNumber}`, `اقترح ${app.profile?.name} تعديل الإجمالي إلى ${app.fmtMoney(newTotal)} ج.م (${note}).`);
-        app.toast('تم إرسال طلب تعديل الاتفاق للطرف الآخر للموافقة', 'success');
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingAmendment: { newTotal, note: note.trim(), proposedByUid: app.user.uid, proposedByName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) } });
+        app.toast('تم إرسال طلب تعديل الاتفاق للطرف الآخر', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1086,8 +1370,7 @@
       const am = ag.pendingAmendment;
       if (!approve) {
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAmendment: null });
-        if (am.proposedByUid) await app.sendNotification(am.proposedByUid, `تم رفض تعديل الاتفاق ${ag.ticketNumber}`, 'يبقى الاتفاق الأصلي سارياً كما هو.');
-        return app.toast('تم رفض التعديل وإبقاء الاتفاق الأصلي', 'info');
+        return app.toast('تم رفض التعديل', 'info');
       }
       const rate = app.getCommissionRate();
       const newFee = Math.round(am.newTotal * rate * 100) / 100;
@@ -1096,10 +1379,9 @@
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
           totalAmount: am.newTotal, commissionFee: newFee, grandTotalWithFee: newGrand, coveragePercent: newCov, pendingAmendment: null,
-          timeline: firebase.firestore.FieldValue.arrayUnion({ date: am.date, kind: 'amendment', label: `ملحق تعديل معتمد: ${am.note} (الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م)`, amount: am.newTotal, by: app.profile?.name || '' })
+          timeline: firebase.firestore.FieldValue.arrayUnion({ date: am.date, kind: 'amendment', label: `ملحق تعديل معتمد: ${am.note}`, amount: am.newTotal, by: app.profile?.name || '' })
         });
-        if (am.proposedByUid) await app.sendNotification(am.proposedByUid, `تمت الموافقة على تعديل الاتفاق ${ag.ticketNumber} ✅`, `الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م`);
-        app.toast('تم اعتماد ملحق التعديل وتحديث العقد بنجاح ✅', 'success');
+        app.toast('تم اعتماد ملحق التعديل وتحديث العقد ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1117,18 +1399,11 @@
       modal.classList.remove('hidden');
       modal.innerHTML = `
         <div class="w-full max-w-sm bg-slate-900 border border-sky-500/40 rounded-2xl p-4 space-y-3 text-xs">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-sky-400">تأكيد حضور العمال والإنجاز اليومي</h3>
-            <button onclick="document.getElementById('daman-day-log-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
-          </div>
+          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-sky-400">تأكيد حضور العمال والإنجاز اليومي</h3><button onclick="document.getElementById('daman-day-log-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
           <form onsubmit="DamanChat.submitDailyLog(event,'${agId}')" class="space-y-2.5">
             <div><label class="block text-[11px] font-bold text-slate-300 mb-1">عدد العمال الفعلي الذين حضروا اليوم (المتفق عليه: ${ag.workers || 1})</label><input id="dl-count" type="number" min="1" required value="${ag.workers || 1}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">ملاحظة عن ما تم إنجازه اليوم (اختياري)</label><input id="dl-note" type="text" placeholder="مثال: شدة سقف الدور الثاني" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
-              <span class="font-bold text-emerald-300"><i class="fa-solid fa-camera me-1"></i> إرفاق صورة إثبات الإنجاز من الموقع (اختياري)</span>
-              <input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'day')" />
-              <div id="dl-photo-prev"></div>
-            </label>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">ملاحظة عن ما تم إنجازه اليوم</label><input id="dl-note" type="text" placeholder="مثال: شدة سقف الدور الثاني" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer"><span class="font-bold text-emerald-300"><i class="fa-solid fa-camera me-1"></i> صورة إثبات الإنجاز (اختياري)</span><input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'day')" /><div id="dl-photo-prev"></div></label>
             <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">إرسال للمهندس للاعتماد</button>
           </form>
         </div>`;
@@ -1139,15 +1414,8 @@
       if (!file) return;
       try {
         const b64 = await this.compressChatImage(file, 640);
-        if (target === 'day') {
-          this.tempDayPhoto = b64;
-          const p = document.getElementById('dl-photo-prev');
-          if (p) p.innerHTML = `<img src="${b64}" class="max-h-28 mx-auto rounded mt-2" />`;
-        } else {
-          this.tempInvoicePhoto = b64;
-          const p = document.getElementById('mv-photo-prev');
-          if (p) p.innerHTML = `<img src="${b64}" class="max-h-28 mx-auto rounded mt-2" />`;
-        }
+        if (target === 'day') { this.tempDayPhoto = b64; const p = document.getElementById('dl-photo-prev'); if (p) p.innerHTML = `<img src="${b64}" class="max-h-28 mx-auto rounded mt-2" />`; }
+        else { this.tempInvoicePhoto = b64; const p = document.getElementById('mv-photo-prev'); if (p) p.innerHTML = `<img src="${b64}" class="max-h-28 mx-auto rounded mt-2" />`; }
       } catch (e) {}
     },
 
@@ -1159,11 +1427,9 @@
       const actualWorkers = parseInt(document.getElementById('dl-count').value, 10) || 1;
       const note = document.getElementById('dl-note').value.trim();
       try {
-        await app.db.collection('chatAgreements').doc(agId).update({
-          pendingDayLog: { date: new Date().toISOString().slice(0, 10), actualWorkers, note, photoBase64: this.tempDayPhoto || '', byUid: app.user.uid, byName: app.profile?.name || '' }
-        });
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingDayLog: { date: new Date().toISOString().slice(0, 10), actualWorkers, note, photoBase64: this.tempDayPhoto || '', byUid: app.user.uid, byName: app.profile?.name || '' } });
         document.getElementById('daman-day-log-modal').classList.add('hidden');
-        await app.sendNotification(ag.payerUid || ag.otherUid, `تأكيد حضور اليوم (${actualWorkers} عامل)`, `سجّل ${app.profile?.name} حضور ${actualWorkers} فرد اليوم — ادخل للاعتماد.`);
+        await app.sendNotification(ag.payerUid || ag.otherUid, `تأكيد حضور اليوم (${actualWorkers} عامل)`, `سجّل ${app.profile?.name} حضور ${actualWorkers} فرد اليوم.`);
         app.toast('تم إرسال تأكيد اليوم للمهندس/صاحب العمل', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
     },
@@ -1174,12 +1440,9 @@
       if (!ag || !ag.pendingDayLog) return;
       const confirmedCount = parseInt(window.prompt(`اعتماد العدد الفعلي لعمال اليوم (المسجّل: ${ag.pendingDayLog.actualWorkers}):`, ag.pendingDayLog.actualWorkers), 10);
       if (!confirmedCount || confirmedCount <= 0) return;
-
       const dayCost = ag.type === 'daily' ? Math.round(confirmedCount * Number(ag.dailyRate || 0) * 100) / 100 : 0;
       const payNow = ag.payMode === 'daily_pay' && dayCost > 0;
       const newRem = Math.max(0, Math.round((Number(ag.remainingEscrow || 0) - dayCost) * 100) / 100);
-      const nextDays = Number(ag.confirmedDays || 0) + 1;
-
       try {
         if (payNow && Number(ag.remainingEscrow || 0) >= dayCost) {
           const payerRef = app.db.collection('users').doc(ag.payerUid);
@@ -1191,19 +1454,13 @@
           });
         }
         await app.db.collection('chatAgreements').doc(agId).update({
-          confirmedDays: nextDays, remainingEscrow: newRem, pendingDayLog: null,
-          timeline: firebase.firestore.FieldValue.arrayUnion({
-            date: ag.pendingDayLog.date, kind: 'day_confirmed',
-            label: `اعتماد يوم (${confirmedCount} عامل)${payNow ? ' + صرف فوري' : ''}${ag.pendingDayLog.note ? ' — ' + ag.pendingDayLog.note : ''}`,
-            amount: dayCost, photoBase64: ag.pendingDayLog.photoBase64 || '', by: app.profile?.name || ''
-          })
+          confirmedDays: Number(ag.confirmedDays || 0) + 1, remainingEscrow: newRem, pendingDayLog: null,
+          timeline: firebase.firestore.FieldValue.arrayUnion({ date: ag.pendingDayLog.date, kind: 'day_confirmed', label: `اعتماد يوم (${confirmedCount} عامل)${payNow ? ' + صرف فوري' : ''}`, amount: dayCost, photoBase64: ag.pendingDayLog.photoBase64 || '', by: app.profile?.name || '' })
         });
-        await app.sendNotification(ag.createdBy, `تم اعتماد يوم العمل (${confirmedCount} عامل)`, `بقيمة ${app.fmtMoney(dayCost)} ج.م${payNow ? ' وتم صرفها فوراً لمحفظتك ✅' : ''}.`);
         const tomorrowEst = Number(ag.dailyCost || dayCost || 0);
         if (tomorrowEst > 0 && newRem < tomorrowEst) {
-          await app.sendNotification(ag.createdBy, '⚠️ أمر وقف عمل مؤقت من ضمان سايت', `الرصيد المتبقي (${app.fmtMoney(newRem)} ج.م) لا يكفي ليومية الغد — يرجى وقف العمل لحين شحن حساب العميل.`);
-          await app.sendNotification(app.user.uid, '⚠️ تنبيه شحن رصيد عاجل', `رصيد الاتفاق ${ag.ticketNumber} لا يكفي ليومية الغد — يرجى تعزيز الرصيد الآن.`);
-          app.toast('⚠️ تنبيه: الرصيد لا يكفي ليومية الغد! تم إرسال إشعار وقف عمل مؤقت للطرفين', 'warning');
+          await app.sendNotification(ag.createdBy, '⚠️ أمر وقف عمل مؤقت من ضمان سايت', `الرصيد المتبقي لا يكفي ليومية الغد — يرجى وقف العمل لحين الشحن.`);
+          app.toast('⚠️ تنبيه: الرصيد لا يكفي ليومية الغد! تم إرسال إشعار وقف عمل مؤقت', 'warning');
         } else {
           app.toast(`تم اعتماد يوم العمل (${confirmedCount} فرد) بنجاح`, 'success');
         }
@@ -1211,13 +1468,8 @@
     },
 
     async clientRejectActualDay(agId) {
-      const app = window.DamanApp;
-      const ag = this.agreements.find((a) => a.id === agId);
-      if (!ag) return;
-      const reason = window.prompt('سبب طلب مراجعة حضور اليوم:', 'العدد الفعلي مختلف في الموقع') || '';
-      await app.db.collection('chatAgreements').doc(agId).update({ pendingDayLog: null });
-      await app.sendNotification(ag.createdBy, `طلب مراجعة حضور اليوم (${ag.ticketNumber})`, reason);
-      app.toast('تم إعادة الطلب للمراجعة', 'info');
+      await window.DamanApp.db.collection('chatAgreements').doc(agId).update({ pendingDayLog: null });
+      window.DamanApp.toast('تم إعادة الطلب للمراجعة', 'info');
     },
 
     async submitRunningAbstractOrSupply(agId) {
@@ -1225,17 +1477,15 @@
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
       const isSupply = ag.type === 'supply';
-      const qty = parseFloat(window.prompt(isSupply ? `الكمية المورّدة الآن (${ag.unitName || 'وحدة'}):` : 'الكمية / الأمتار المنفّذة في المستخلص الجاري:', ag.unitQty || 1));
+      const qty = parseFloat(window.prompt(isSupply ? `الكمية المورّدة (${ag.unitName || 'وحدة'}):` : 'الأمتار المنفّذة في المستخلص:', ag.unitQty || 1));
       if (!qty || qty <= 0) return;
-      const amount = parseFloat(window.prompt('القيمة المطلوب صرفها لهذا المستخلص / التوريد (ج.م):', Math.round(qty * Number(ag.unitPrice || 0)) || ag.remainingEscrow));
+      const amount = parseFloat(window.prompt('القيمة المطلوب صرفها (ج.م):', Math.round(qty * Number(ag.unitPrice || 0)) || ag.remainingEscrow));
       if (!amount || amount <= 0) return;
-      const note = window.prompt(isSupply ? 'رقم بوليصة الشحن / ملاحظة التوريد:' : 'رقم المستخلص والبيان:', isSupply ? 'تم الشحن والتسليم للموقع' : 'مستخلص جاري رقم 1') || '';
+      const note = window.prompt(isSupply ? 'رقم البوليصة / ملاحظة التوريد:' : 'رقم المستخلص والبيان:', isSupply ? 'تم الشحن والتسليم' : 'مستخلص جاري رقم 1') || '';
       try {
-        await app.db.collection('chatAgreements').doc(agId).update({
-          pendingAbstract: { qty, amount, note, isSupply, date: new Date().toISOString().slice(0, 10), byName: app.profile?.name || '' }
-        });
-        await app.sendNotification(ag.payerUid, isSupply ? `إشعار تسليم بضاعة وتوريد (${ag.ticketNumber})` : `مستخلص جاري جديد (${ag.ticketNumber})`, `${note} — بقيمة ${app.fmtMoney(amount)} ج.م.`);
-        app.toast(isSupply ? 'تم إرسال إشعار تسليم التوريد للمشتري' : 'تم رفع المستخلص الجاري للمهندس', 'success');
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingAbstract: { qty, amount, note, isSupply, date: new Date().toISOString().slice(0, 10), byName: app.profile?.name || '' } });
+        await app.sendNotification(ag.payerUid, isSupply ? 'إشعار تسليم بضاعة وتوريد' : 'مستخلص جاري جديد', `${note} — ${app.fmtMoney(amount)} ج.م`);
+        app.toast('تم الإرسال للفحص والاعتماد', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1245,13 +1495,10 @@
       if (!ag || !ag.pendingAbstract) return;
       const ab = ag.pendingAbstract;
       if (!approve) {
-        const reason = window.prompt(ab.isSupply ? 'ملاحظة النقص أو سبب رفض البضاعة:' : 'سبب رفض المستخلص:', 'يوجد ملاحظات فنية / نقص كمية') || '';
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAbstract: null });
-        await app.sendNotification(ag.createdBy, ab.isSupply ? 'ملاحظة نقص / رفض استلام توريد' : 'تم إعادة المستخلص للمراجعة', reason);
         return app.toast('تم إرسال الملاحظة للطرف الآخر', 'info');
       }
-      if (Number(ag.remainingEscrow || 0) < Number(ab.amount)) return app.toast('الرصيد المتبقي بالضمان أقل من قيمة المستخلص/التوريد', 'error');
-
+      if (Number(ag.remainingEscrow || 0) < Number(ab.amount)) return app.toast('الرصيد المتبقي بالضمان غير كافٍ', 'error');
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
       const agRef = app.db.collection('chatAgreements').doc(agId);
@@ -1259,16 +1506,12 @@
         await app.db.runTransaction(async (tx) => {
           const [pDoc, wDoc, aDoc] = await Promise.all([tx.get(payerRef), tx.get(workerRef), tx.get(agRef)]);
           const curRem = Number((aDoc.data() || {}).remainingEscrow || 0);
-          if (curRem < ab.amount) throw new Error('الرصيد المتبقي غير كافٍ');
+          if (curRem < ab.amount) throw new Error('الرصيد غير كافٍ');
           tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - ab.amount) * 100) / 100) });
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + ab.amount) * 100) / 100 });
-          tx.update(agRef, {
-            remainingEscrow: Math.round((curRem - ab.amount) * 100) / 100, pendingAbstract: null,
-            timeline: firebase.firestore.FieldValue.arrayUnion({ date: ab.date, kind: 'abstract_paid', label: `${ab.isSupply ? 'اعتماد استلام توريد' : 'اعتماد مستخلص جاري'}: ${ab.note} (كمية ${ab.qty})`, amount: ab.amount, by: app.profile?.name || '' })
-          });
+          tx.update(agRef, { remainingEscrow: Math.round((curRem - ab.amount) * 100) / 100, pendingAbstract: null, timeline: firebase.firestore.FieldValue.arrayUnion({ date: ab.date, kind: 'abstract_paid', label: `${ab.isSupply ? 'اعتماد توريد' : 'اعتماد مستخلص'}: ${ab.note}`, amount: ab.amount, by: app.profile?.name || '' }) });
         });
-        await app.sendNotification(ag.createdBy, ab.isSupply ? 'تم تأكيد استلام التوريد وتحرير المبلغ ✅' : 'تم اعتماد المستخلص الجاري وتحرير المبلغ ✅', `تم تحويل ${app.fmtMoney(ab.amount)} ج.م إلى محفظتك.`);
-        app.toast('تم الاعتماد وتحرير المبلغ بنجاح ✅', 'success');
+        app.toast('تم الاعتماد وتحرير المبلغ ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1288,19 +1531,12 @@
       const isPayer = ag.payerUid === app.user.uid;
       modal.innerHTML = `
         <div class="w-full max-w-sm bg-slate-900 border border-sky-500/50 rounded-2xl p-4 space-y-3 text-xs">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-sky-400">تسجيل حركة مالية / فاتورة خامات</h3>
-            <button onclick="document.getElementById('daman-chat-move-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
-          </div>
+          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-sky-400">تسجيل حركة مالية / فاتورة خامات</h3><button onclick="document.getElementById('daman-chat-move-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
           <form onsubmit="DamanChat.submitMovement(event,'${agId}')" class="space-y-2.5">
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">نوع الحركة</label><select id="mv-kind" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 font-bold text-white"><option value="materials">عُهدة شراء خامات / بضاعة + إرفاق فاتورة</option>${isPayer ? `<option value="payout">صرف دفعة / راتب / مصاريف من الضمان لمحفظة المنفّذ</option>` : ''}<option value="deduction">تسجيل خصم / جزاء / تلفيات (مع السبب)</option></select></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ (ج.م)</label><input id="mv-amt" type="number" min="1" step="any" required placeholder="أدخل المبلغ بالجنيه" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">البيان / السبب</label><input id="mv-note" type="text" required placeholder="مثال: فاتورة شراء مسامير وأسلاك / راتب شهر نوفمبر" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <label class="block p-2 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer">
-              <span class="font-bold text-amber-300"><i class="fa-solid fa-receipt me-1"></i> إرفاق صورة الفاتورة أو الإيصال (اختياري)</span>
-              <input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'inv')" />
-              <div id="mv-photo-prev"></div>
-            </label>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">نوع الحركة</label><select id="mv-kind" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 font-bold text-white"><option value="materials">عُهدة شراء خامات / بضاعة + إرفاق فاتورة</option>${isPayer ? `<option value="payout">صرف دفعة / راتب من الضمان لمحفظة المنفّذ</option>` : ''}<option value="deduction">تسجيل خصم / جزاء / تلفيات</option></select></div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ (ج.م)</label><input id="mv-amt" type="number" min="1" step="any" required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white" /></div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">البيان / السبب</label><input id="mv-note" type="text" required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <label class="block p-2 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer"><span class="font-bold text-amber-300"><i class="fa-solid fa-receipt me-1"></i> صورة الفاتورة (اختياري)</span><input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'inv')" /><div id="mv-photo-prev"></div></label>
             <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">حفظ وتوثيق الحركة</button>
           </form>
         </div>`;
@@ -1315,32 +1551,23 @@
       const amount = parseFloat(document.getElementById('mv-amt').value) || 0;
       const note = document.getElementById('mv-note').value.trim();
       if (amount <= 0) return;
-
-      const labels = { materials: 'شراء خامات / فاتورة بضاعة', payout: 'صرف دفعة من الضمان', deduction: 'خصم / جزاء / تلفيات' };
+      const labels = { materials: 'شراء خامات / فاتورة', payout: 'صرف دفعة من الضمان', deduction: 'خصم / جزاء' };
       const agRef = app.db.collection('chatAgreements').doc(agId);
-
       try {
         if (kind === 'payout' && ag.payerUid === app.user.uid) {
-          if (Number(ag.remainingEscrow || 0) < amount) return app.toast('المبلغ أكبر من الرصيد المتبقي بالضمان', 'error');
+          if (Number(ag.remainingEscrow || 0) < amount) return app.toast('الرصيد المتبقي غير كافٍ', 'error');
           const payerRef = app.db.collection('users').doc(ag.payerUid);
           const workerRef = app.db.collection('users').doc(ag.createdBy);
           await app.db.runTransaction(async (tx) => {
             const [pDoc, wDoc, aDoc] = await Promise.all([tx.get(payerRef), tx.get(workerRef), tx.get(agRef)]);
             const curRem = Number((aDoc.data() || {}).remainingEscrow || 0);
-            if (curRem < amount) throw new Error('الرصيد المتبقي بالضمان غير كافٍ');
+            if (curRem < amount) throw new Error('الرصيد غير كافٍ');
             tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - amount) * 100) / 100) });
             tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + amount) * 100) / 100 });
-            tx.update(agRef, {
-              remainingEscrow: Math.round((curRem - amount) * 100) / 100,
-              timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' })
-            });
+            tx.update(agRef, { remainingEscrow: Math.round((curRem - amount) * 100) / 100, timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' }) });
           });
-          await app.sendNotification(ag.createdBy, 'تم صرف دفعة في محفظتك ✅', `تم تحويل ${app.fmtMoney(amount)} ج.م (${note})`);
         } else {
-          await agRef.update({
-            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' })
-          });
-          await this.notifyChatPeer(app, `🧾 ${labels[kind]}: ${app.fmtMoney(amount)} ج.م — ${note}`);
+          await agRef.update({ timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' }) });
         }
         document.getElementById('daman-chat-move-modal').classList.add('hidden');
         app.toast('تم توثيق الحركة بنجاح', 'success');
@@ -1352,7 +1579,7 @@
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag || ag.payerUid !== app.user.uid) return;
       const rem = Number(ag.remainingEscrow || 0);
-      if (!window.confirm(`تأكيد الاستلام النهائي وتحرير باقي المستحق (${app.fmtMoney(rem)} ج.م) لمحفظة المنفّذ/المورّد وإغلاق الاتفاق؟`)) return;
+      if (!window.confirm(`تأكيد الاستلام النهائي وتحرير باقي المستحق (${app.fmtMoney(rem)} ج.م) وإغلاق الاتفاق؟`)) return;
 
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
@@ -1364,23 +1591,75 @@
           const a = aDoc.data();
           const curRem = Number(a.remainingEscrow || 0);
           const feeDiff = Math.max(0, Math.round((Number(a.lockedAmount || 0) - Number(a.totalAmount || 0)) * 100) / 100);
-          const totalEscOut = Math.round((curRem + feeDiff) * 100) / 100;
-
-          tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - totalEscOut) * 100) / 100) });
+          tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - (curRem + feeDiff)) * 100) / 100) });
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + curRem) * 100) / 100 });
-          tx.update(agRef, {
-            status: 'completed', remainingEscrow: 0, completedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'completed', label: 'تأكيد الاستلام النهائي وتصفية الحساب', amount: curRem, by: app.profile?.name || '' })
-          });
+          tx.update(agRef, { status: 'completed', remainingEscrow: 0, completedAt: firebase.firestore.FieldValue.serverTimestamp(), timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'completed', label: 'تأكيد الاستلام النهائي وتصفية الحساب', amount: curRem, by: app.profile?.name || '' }) });
           if (Number(a.commissionFee || 0) > 0) {
-            tx.set(app.db.collection('platformFees').doc(), {
-              agreementId: agId, type: 'escrow_35', ticketNumber: a.ticketNumber, amount: Number(a.commissionFee || 0), createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            tx.set(app.db.collection('platformFees').doc(), { agreementId: agId, type: 'escrow_35', ticketNumber: a.ticketNumber, amount: Number(a.commissionFee || 0), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
           }
         });
+        await app.db.collection('chats').doc(this.activeChatId).update({ hasActiveDeal: false }).catch(() => {});
         await app.sendNotification(ag.createdBy, `تم الاستلام النهائي وتصفية الاتفاق ${ag.ticketNumber} ✅`, `تم تحويل باقي المستحق (${app.fmtMoney(rem)} ج.م) لمحفظتك.`);
-        app.toast('تم الاستلام النهائي وتحرير المستحقات بنجاح ✅', 'success');
+        app.toast('تم الاستلام النهائي وتحرير المستحقات ✅', 'success');
+        // Open Auto-Rating Modal
+        this.openAutoRatingModal(ag.createdBy, ag.createdByName, ag.title);
       } catch (e) { app.toast(e.message, 'error'); }
+    },
+
+    openAutoRatingModal(targetUid, targetName, title) {
+      let modal = document.getElementById('daman-rate-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'daman-rate-modal';
+        modal.className = 'fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(modal);
+      }
+      modal.classList.remove('hidden');
+      modal.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-xs">
+          <h3 class="text-sm font-black text-amber-400 text-center">⭐ قيّم تجربتك مع ${window.DamanApp.esc(targetName)}</h3>
+          <p class="text-[11px] text-slate-300 text-center">بند العمل: ${window.DamanApp.esc(title)}</p>
+          <form onsubmit="DamanChat.submitRating(event,'${targetUid}')" class="space-y-2.5">
+            <select id="rt-stars" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-400 font-black text-center">
+              <option value="5">★★★★★ (5 - ممتاز جداً)</option>
+              <option value="4">★★★★☆ (4 - جيد جداً)</option>
+              <option value="3">★★★☆☆ (3 - مقبول)</option>
+              <option value="2">★★☆☆☆ (2 - ضعيف)</option>
+              <option value="1">★☆☆☆☆ (1 - سيء)</option>
+            </select>
+            <textarea id="rt-comment" rows="2" required placeholder="اكتب رأيك في الجودة والالتزام بالمواعيد..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <div class="flex gap-2">
+              <button type="submit" class="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">إرسال التقييم</button>
+              <button type="button" onclick="document.getElementById('daman-rate-modal').classList.add('hidden')" class="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold">تخطي</button>
+            </div>
+          </form>
+        </div>`;
+    },
+
+    async submitRating(e, targetUid) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      const rating = parseInt(document.getElementById('rt-stars').value, 10) || 5;
+      const comment = document.getElementById('rt-comment').value.trim();
+      try {
+        await app.db.collection('reviews').add({
+          targetUserId: targetUid, fromUserId: app.user.uid, fromName: app.profile?.companyName || app.profile?.name || '',
+          rating, comment, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        const uRef = app.db.collection('users').doc(targetUid);
+        await app.db.runTransaction(async (tx) => {
+          const uDoc = await tx.get(uRef);
+          if (!uDoc.exists) return;
+          const d = uDoc.data();
+          const oldC = Number(d.ratingCount || 0);
+          const oldAvg = Number(d.ratingAvg || 0);
+          const newC = oldC + 1;
+          const newAvg = Math.round(((oldAvg * oldC + rating) / newC) * 10) / 10;
+          tx.update(uRef, { ratingCount: newC, ratingAvg: newAvg });
+        });
+        document.getElementById('daman-rate-modal').classList.add('hidden');
+        app.toast('شكراً لك! تم إضافة تقييمك بنجاح ⭐', 'success');
+      } catch (err) { app.toast(err.message, 'error'); }
     },
 
     openTimelineModal(agId) {
@@ -1397,23 +1676,16 @@
       modal.classList.remove('hidden');
       const tl = ag.timeline || [];
       const ms = ag.milestones || [];
-
       modal.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-2xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-amber-400">سجل الاتفاق والفواتير (${app.esc(ag.ticketNumber)})</h3>
-            <button onclick="document.getElementById('daman-chat-tl-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-          ${ms.length ? `<div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1"><div class="font-extrabold text-sky-300">جدول الدفعات المتفق عليها:</div>${ms.map((m) => `<div class="flex justify-between text-[11px]"><span>• ${app.esc(m.label)} (${app.esc(m.when)})</span><b class="text-emerald-400">${app.fmtMoney(m.amount)} ج.م</b></div>`).join('')}</div>` : ''}
+          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">سجل الاتفاق (${app.esc(ag.ticketNumber)})</h3><button onclick="document.getElementById('daman-chat-tl-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          ${ms.length ? `<div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1"><div class="font-extrabold text-sky-300">جدول الدفعات:</div>${ms.map((m) => `<div class="flex justify-between text-[11px]"><span>• ${app.esc(m.label)} (${app.esc(m.when)})</span><b class="text-emerald-400">${app.fmtMoney(m.amount)} ج.م</b></div>`).join('')}</div>` : ''}
           ${ag.signedContractBase64 ? `<div class="p-2 rounded-xl bg-slate-950 border border-emerald-500/40 space-y-1"><div class="text-[11px] font-bold text-emerald-300">العقد الموقّع المرفوع:</div><img src="${ag.signedContractBase64}" onclick="window.open('${ag.signedContractBase64}','_blank')" class="w-full max-h-40 object-contain rounded cursor-pointer" /></div>` : ''}
           <div class="space-y-1.5">
-            <div class="font-extrabold text-white">سجل الحركات والصور (${tl.length}):</div>
+            <div class="font-extrabold text-white">سجل الحركات (${tl.length}):</div>
             ${!tl.length ? '<div class="text-center text-slate-400 py-4">لا توجد حركات بعد</div>' : tl.slice().reverse().map((it) => `
               <div class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5">
-                <div class="flex justify-between gap-2">
-                  <div><div class="font-bold text-white">${app.esc(it.label)}</div><div class="text-[10px] text-slate-400">${app.esc(it.date)} — ${app.esc(it.by || '')}</div></div>
-                  <span class="font-black ${it.kind === 'deduction' || it.kind === 'cancelled' ? 'text-rose-400' : 'text-emerald-400'} shrink-0">${it.amount ? app.fmtMoney(it.amount) + ' ج.م' : ''}</span>
-                </div>
+                <div class="flex justify-between gap-2"><div><div class="font-bold text-white">${app.esc(it.label)}</div><div class="text-[10px] text-slate-400">${app.esc(it.date)} — ${app.esc(it.by || '')}</div></div><span class="font-black ${it.kind === 'deduction' || it.kind === 'cancelled' ? 'text-rose-400' : 'text-emerald-400'} shrink-0">${it.amount ? app.fmtMoney(it.amount) + ' ج.م' : ''}</span></div>
                 ${it.photoBase64 ? `<img src="${it.photoBase64}" onclick="window.open('${it.photoBase64}','_blank')" class="max-h-32 rounded border border-slate-700 cursor-pointer" />` : ''}
               </div>`).join('')}
           </div>
@@ -1427,24 +1699,18 @@
       const win = window.open('', '_blank');
       if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
       const d = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-      const specDetail = ag.type === 'supply'
-        ? `توريد بضاعة/خامات: ${ag.unitQty} ${app.esc(ag.unitName || 'وحدة')} × ${app.fmtMoney(ag.unitPrice)} ج.م | مكان التسليم: ${app.esc(ag.supplyLocation || '-')} | الموعد: ${app.esc(ag.supplyDate || '-')}`
-        : ag.type === 'meter' ? `بالمتر: ${ag.unitQty} متر × ${app.fmtMoney(ag.unitPrice)} ج.م`
-        : ag.type === 'daily' ? `باليومية: ${ag.workers} عمال × ${app.fmtMoney(ag.dailyRate)} ج.م × ${ag.totalDays} أيام`
-        : ag.type === 'monthly' ? `راتب شهري ثابت: ${app.fmtMoney(ag.totalAmount)} ج.م (${app.esc(ag.settlementSchedule || '')})`
-        : this.typeLabel(ag.type);
-      const msHtml = (ag.milestones && ag.milestones.length) ? `<tr><th>جدول الدفعات</th><td colspan="3">${ag.milestones.map((m) => `• ${app.esc(m.label)} (${app.fmtMoney(m.amount)} ج.م) — ${app.esc(m.when)}`).join('<br/>')}</td></tr>` : '';
-
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>عقد ضمان سايت ${ag.ticketNumber}</title><style>@page{size:A4 portrait;margin:13mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11.5px;line-height:1.6;}.box{border:2px solid #000;padding:16px 18px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:10px;}th,td{border:1px solid #000;padding:5px 7px;text-align:right;}th{background:#f2f2f2;width:22%;}.clauses{border:1px solid #000;padding:8px 10px;margin:10px 0;font-size:11px;}.verify{border:1px dashed #000;padding:6px;text-align:center;font-weight:700;margin-bottom:10px;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;text-align:center;}.sig{border:1px solid #000;padding:8px 8px 44px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة العقد نسختين (A4 PDF)</button><div class="box"><div class="hdr"><div><h2 style="margin:0">عقد اتفاق وتعاقد رسمي — ضمان سايت</h2><div>DamanSite Official Escrow & B2B Contract</div></div><div><div><b>كود التحقق الرسمي:</b> ${ag.ticketNumber}</div><div><b>التاريخ:</b> ${d}</div></div></div><div class="verify">للتحقق من صحة وسريان هذا العقد أدخل الكود (${ag.ticketNumber}) في أداة «فحص عقد» داخل تطبيق ضمان سايت</div><table><tr><th>الطرف الأول (صاحب العمل / المشتري)</th><td>${app.esc(ag.payerName || ag.otherName)}</td><th>الرقم القومي</th><td>${app.esc(ag.payerNationalId || 'موثّق بالمنصة')}</td></tr><tr><th>الطرف الثاني (المنفّذ / المورّد)</th><td>${app.esc(ag.createdByName)}</td><th>الرقم القومي</th><td>${app.esc(ag.createdByNationalId || 'موثّق بالمنصة')}</td></tr></table><table><tr><th>بند العمل / التوريد</th><td colspan="3"><b>${app.esc(ag.title)}</b></td></tr><tr><th>التفاصيل</th><td colspan="3">${specDetail}</td></tr><tr><th>نظام الصرف</th><td>${this.payModeLabel(ag.payMode)}</td><th>مواعيد التصفية</th><td>${app.esc(ag.settlementSchedule || '-')}</td></tr>${msHtml}<tr><th>إجمالي الاتفاق</th><td><b>${app.fmtMoney(ag.totalAmount)} ج.م</b></td><th>عمولة الضمان (3.5%)</th><td>${app.fmtMoney(ag.commissionFee)} ج.م</td></tr></table><div class="clauses"><b>شروط ضمان سايت الملزمة للطرفين:</b><br/>1. يُطبع هذا العقد <b>نسختين أصليتين</b> ويوقّع الطرفان وتُرفع صورة العقد الموقّع داخل المحادثة لاعتماده وتفعيل الضمان.<br/>2. أي تعديل أو إنهاء/فسخ للعقد يتم بموافقة الطرفين داخل التطبيق، وفي حال الخلاف يُحال الأمر لإدارة ضمان سايت للفصل العادل.<br/>3. المحادثات والمكالمات (المحتفظ بها 30 يوماً) خاضعة لمراجعة الإدارة عند النزاع لحفظ الحقوق.</div><div class="sigs"><div class="sig">توقيع الطرف الأول (صاحب العمل / المشتري)</div><div class="sig">توقيع الطرف الثاني (المقاول / المورّد)</div></div></div></body></html>`);
+      const specDetail = ag.type === 'supply' ? `توريد: ${ag.unitQty} ${app.esc(ag.unitName || 'وحدة')} × ${app.fmtMoney(ag.unitPrice)} ج.م` : ag.type === 'meter' ? `بالمتر: ${ag.unitQty} متر × ${app.fmtMoney(ag.unitPrice)} ج.م` : ag.type === 'daily' ? `باليومية: ${ag.workers} عمال × ${app.fmtMoney(ag.dailyRate)} ج.م × ${ag.totalDays} أيام` : this.typeLabel(ag.type);
+      const msHtml = (ag.milestones && ag.milestones.length) ? `<tr><th>جدول الدفعات</th><td colspan="3">${ag.milestones.map((m) => `• ${app.esc(m.label)} (${app.fmtMoney(m.amount)} ج.م)`).join('<br/>')}</td></tr>` : '';
+      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>عقد ضمان سايت ${ag.ticketNumber}</title><style>@page{size:A4 portrait;margin:13mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11.5px;line-height:1.6;}.box{border:2px solid #000;padding:16px 18px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:10px;}th,td{border:1px solid #000;padding:5px 7px;text-align:right;}th{background:#f2f2f2;width:22%;}.clauses{border:1px solid #000;padding:8px 10px;margin:10px 0;font-size:11px;}.verify{border:1px dashed #000;padding:6px;text-align:center;font-weight:700;margin-bottom:10px;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;text-align:center;}.sig{border:1px solid #000;padding:8px 8px 44px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة العقد نسختين (A4 PDF)</button><div class="box"><div class="hdr"><div><h2 style="margin:0">عقد اتفاق وتعاقد رسمي — ضمان سايت</h2><div>DamanSite Official Contract</div></div><div><div><b>كود التحقق:</b> ${ag.ticketNumber}</div><div><b>التاريخ:</b> ${d}</div></div></div><div class="verify">للتحقق من صحة هذا العقد أدخل الكود (${ag.ticketNumber}) في أداة «فحص عقد» داخل تطبيق ضمان سايت</div><table><tr><th>الطرف الأول</th><td>${app.esc(ag.payerName || ag.otherName)}</td><th>الرقم القومي</th><td>${app.esc(ag.payerNationalId || 'موثّق')}</td></tr><tr><th>الطرف الثاني</th><td>${app.esc(ag.createdByName)}</td><th>الرقم القومي</th><td>${app.esc(ag.createdByNationalId || 'موثّق')}</td></tr></table><table><tr><th>بند العمل</th><td colspan="3"><b>${app.esc(ag.title)}</b></td></tr><tr><th>التفاصيل</th><td colspan="3">${specDetail}</td></tr>${msHtml}<tr><th>إجمالي الاتفاق</th><td><b>${app.fmtMoney(ag.totalAmount)} ج.م</b></td><th>عمولة الضمان (3.5%)</th><td>${app.fmtMoney(ag.commissionFee)} ج.م</td></tr></table><div class="clauses">1. يُطبع العقد نسختين وتُرفع صورة العقد الموقّع في الشات لتفعيل الضمان.<br/>2. أي تعديل أو فسخ يتم بموافقة الطرفين أو بفصل إدارة ضمان سايت عند النزاع.</div><div class="sigs"><div class="sig">توقيع الطرف الأول</div><div class="sig">توقيع الطرف الثاني</div></div></div></body></html>`);
       win.document.close();
     },
 
-    // ==================== AI SUPPORT & TICKETS ====================
+    // ==================== AI & TICKETS ====================
     getAiReply(rawText, isAr) {
       const q = (rawText || '').toLowerCase();
-      if (/مورد|توريد|خامات|بضاعة|b2b/.test(q)) return { text: isAr ? '🚚 افتح محادثة مع المورّد واضغط **«اتفاق»** ← اختر **«توريد خامات / بضاعة»** لحجز المبلغ حتى استلام وفحص البضاعة.' : '🚚 Use B2B Supply Escrow inside any chat.', action: null };
-      if (/3x|ثلاث|أضعاف|اضعاف|استلام|شدة|سقف|محارة/.test(q)) return { text: isAr ? '🛡️ نستلم الشدات والأسقف والمحارة والتشطيبات بضمان مادي يصل لـ **3 أضعاف قيمة الخدمة**.' : '🛡️ 3x Financial Warranty on Consultant Engineering Handovers.', action: { label: isAr ? 'اطلب استلام 3x الآن' : 'Request 3x', fn: "if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects')" } };
-      return { text: isAr ? 'تقدر تسألني عن تعاملات الموردين (B2B)، الضمان 3 أضعاف، اليوميات، فسخ العقد، أو تتواصل مع **إدارة ضمان سايت**.' : 'Ask about B2B Suppliers, 3x Guarantee, Settlements, or chat with Admin.', action: { label: isAr ? 'كلّم الإدارة مباشرة' : 'Chat with Admin', fn: "DamanChat.openDirectChat('admin','إدارة ضمان سايت')" } };
+      if (/مورد|توريد|خامات|b2b/.test(q)) return { text: isAr ? '🚚 افتح محادثة مع المورّد واضغط **«اتفاق»** ← اختر **«توريد خامات / بضاعة»**.' : '🚚 Use B2B Supply Escrow inside any chat.', action: null };
+      if (/3x|ثلاث|استلام|شدة|سقف/.test(q)) return { text: isAr ? '🛡️ نستلم الشدات والأسقف والمحارة بضمان مادي يصل لـ **3 أضعاف قيمة الخدمة**.' : '🛡️ 3x Financial Warranty.', action: { label: isAr ? 'اطلب استلام 3x' : 'Request 3x', fn: "if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects')" } };
+      return { text: isAr ? 'تقدر تسألني عن الموردين B2B، الضمان 3 أضعاف، اليوميات، أو تتواصل مع **إدارة ضمان سايت**.' : 'Ask about B2B Suppliers, 3x Guarantee, or chat with Admin.', action: { label: isAr ? 'كلّم الإدارة مباشرة' : 'Chat with Admin', fn: "DamanChat.openDirectChat('admin','إدارة ضمان سايت')" } };
     },
 
     askAi(presetText) {
@@ -1465,14 +1731,10 @@
       if (!app.user || !app.profile) return app.openAuthModal('login');
       const subj = document.getElementById('tk-subject').value.trim();
       try {
-        await app.db.collection('supportTickets').add({
-          userId: app.user.uid, userName: app.profile.companyName || app.profile.name || '', userEmail: app.profile.email || app.user.email || '',
-          subject: subj, message: document.getElementById('tk-message').value.trim(), status: 'open', adminReply: '',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        await app.db.collection('supportTickets').add({ userId: app.user.uid, userName: app.profile.companyName || app.profile.name || '', userEmail: app.profile.email || app.user.email || '', subject: subj, message: document.getElementById('tk-message').value.trim(), status: 'open', adminReply: '', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
         await app.sendNotification('ADMIN', 'تذكرة دعم جديدة', subj);
         e.target.reset();
-        app.toast('تم إرسال تذكرة الدعم للإدارة بنجاح', 'success');
+        app.toast('تم إرسال تذكرة الدعم بنجاح', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
@@ -1501,6 +1763,8 @@
     },
 
     renderAgreementsBar(app) {
+      // Hide agreements bar in pure Admin Support chats
+      if (this.activeChatMeta?.otherUid === 'admin' || (app.isAdmin() && !this.agreements.length)) return '';
       if (!this.agreements.length) return '';
       const ag = this.agreements[0];
       const myUid = app.user?.uid;
@@ -1557,43 +1821,11 @@
               </div>
             </div>
 
-            <!-- PENDING TERMINATION / CANCELLATION CARD -->
-            ${ag.pendingTermination ? `
-              <div class="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500 space-y-1.5 text-[10px]">
-                <div class="font-black text-rose-300">⚠️ طلب إنهاء العمل وفسخ العقد من ${app.esc(ag.pendingTermination.proposedByName)}</div>
-                <div class="text-white">السبب: ${app.esc(ag.pendingTermination.reason)}</div>
-                <div class="text-amber-200">التصفية المقترحة: للمنفّذ <b>${app.fmtMoney(ag.pendingTermination.workerShare)} ج.م</b> | يُرد للعميل <b>${app.fmtMoney(ag.pendingTermination.clientRefund)} ج.م</b></div>
-                ${ag.pendingTermination.proposedByUid !== myUid ? `
-                  <div class="flex gap-1.5 pt-1">
-                    <button onclick="DamanChat.respondTermination('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة على الفسخ والتصفية</button>
-                    <button onclick="DamanChat.respondTermination('${ag.id}',false)" class="flex-1 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض وتحويل لنزاع</button>
-                  </div>` : `<div class="text-slate-300">بانتظار رد الطرف الآخر على طلب الفسخ...</div>`}
-              </div>` : ''}
-
-            ${ag.pendingAdvance ? `
-              <div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/50 space-y-1.5 text-[10px]">
-                <div class="font-bold text-amber-200">💰 طلب سلفة (${app.fmtMoney(ag.pendingAdvance.amount)} ج.م) — ${app.esc(ag.pendingAdvance.reason)}</div>
-                ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAdvance('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة وصرف فوري</button><button onclick="DamanChat.respondAdvance('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار موافقة المهندس/المشتري...</div>`}
-              </div>` : ''}
-
-            ${ag.pendingAmendment ? `
-              <div class="p-2 rounded-xl bg-purple-500/15 border border-purple-500/50 space-y-1.5 text-[10px]">
-                <div class="font-bold text-purple-200">📝 طلب تعديل الاتفاق من ${app.esc(ag.pendingAmendment.proposedByName)}: الإجمالي الجديد <b>${app.fmtMoney(ag.pendingAmendment.newTotal)} ج.م</b> (${app.esc(ag.pendingAmendment.note)})</div>
-                ${ag.pendingAmendment.proposedByUid !== myUid ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAmendment('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة وتعديل العقد</button><button onclick="DamanChat.respondAmendment('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار موافقة الطرف الآخر على التعديل...</div>`}
-              </div>` : ''}
-
-            ${ag.pendingAbstract ? `
-              <div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/50 space-y-1.5 text-[10px]">
-                <div class="font-bold text-emerald-200">${ag.pendingAbstract.isSupply ? '🚚 إشعار تسليم بضاعة وتوريد' : '📑 مستخلص جاري جديد'}: ${app.esc(ag.pendingAbstract.note)} — الكمية: ${ag.pendingAbstract.qty} | القيمة: <b>${app.fmtMoney(ag.pendingAbstract.amount)} ج.م</b></div>
-                ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ تأكيد الاستلام وصرف المبلغ</button><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">نقص / رفض</button></div>` : `<div class="text-slate-300">بانتظار الفحص والاعتماد...</div>`}
-              </div>` : ''}
-
-            ${ag.pendingDayLog ? `
-              <div class="p-2 rounded-xl bg-sky-500/15 border border-sky-500/40 space-y-1.5 text-[10px]">
-                <div class="font-bold text-sky-200">👷 حضور اليوم (${app.esc(ag.pendingDayLog.date)}): <b>${ag.pendingDayLog.actualWorkers} عامل</b> ${ag.pendingDayLog.note ? '— ' + app.esc(ag.pendingDayLog.note) : ''}</div>
-                ${ag.pendingDayLog.photoBase64 ? `<img src="${ag.pendingDayLog.photoBase64}" onclick="window.open('${ag.pendingDayLog.photoBase64}','_blank')" class="max-h-24 rounded cursor-pointer" />` : ''}
-                ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.clientApproveActualDay('${ag.id}')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ اعتماد العدد واليوم</button><button onclick="DamanChat.clientRejectActualDay('${ag.id}')" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold">مراجعة</button></div>` : `<div class="text-slate-300">بانتظار اعتماد المهندس...</div>`}
-              </div>` : ''}
+            ${ag.pendingTermination ? `<div class="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500 space-y-1.5 text-[10px]"><div class="font-black text-rose-300">⚠️ طلب فسخ العقد من ${app.esc(ag.pendingTermination.proposedByName)}</div><div class="text-white">${app.esc(ag.pendingTermination.reason)} — للمنفّذ ${app.fmtMoney(ag.pendingTermination.workerShare)} | للعميل ${app.fmtMoney(ag.pendingTermination.clientRefund)}</div>${ag.pendingTermination.proposedByUid !== myUid ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondTermination('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة وتصفية</button><button onclick="DamanChat.respondTermination('${ag.id}',false)" class="flex-1 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض وتحويل لنزاع</button></div>` : `<div class="text-slate-300">بانتظار رد الطرف الآخر...</div>`}</div>` : ''}
+            ${ag.pendingAdvance ? `<div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/50 space-y-1.5 text-[10px]"><div class="font-bold text-amber-200">💰 طلب سلفة (${app.fmtMoney(ag.pendingAdvance.amount)} ج.م) — ${app.esc(ag.pendingAdvance.reason)}</div>${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAdvance('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة وصرف</button><button onclick="DamanChat.respondAdvance('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار الموافقة...</div>`}</div>` : ''}
+            ${ag.pendingAmendment ? `<div class="p-2 rounded-xl bg-purple-500/15 border border-purple-500/50 space-y-1.5 text-[10px]"><div class="font-bold text-purple-200">📝 طلب تعديل: ${app.fmtMoney(ag.pendingAmendment.newTotal)} ج.م (${app.esc(ag.pendingAmendment.note)})</div>${ag.pendingAmendment.proposedByUid !== myUid ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAmendment('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة</button><button onclick="DamanChat.respondAmendment('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار الموافقة...</div>`}</div>` : ''}
+            ${ag.pendingAbstract ? `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/50 space-y-1.5 text-[10px]"><div class="font-bold text-emerald-200">${ag.pendingAbstract.isSupply ? '🚚 تسليم توريد' : '📑 مستخلص جاري'}: ${app.esc(ag.pendingAbstract.note)} (${app.fmtMoney(ag.pendingAbstract.amount)} ج.م)</div>${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">اعتماد وصرف</button><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">نقص/رفض</button></div>` : `<div class="text-slate-300">بانتظار الفحص...</div>`}</div>` : ''}
+            ${ag.pendingDayLog ? `<div class="p-2 rounded-xl bg-sky-500/15 border border-sky-500/40 space-y-1.5 text-[10px]"><div class="font-bold text-sky-200">👷 حضور اليوم: <b>${ag.pendingDayLog.actualWorkers} عامل</b></div>${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.clientApproveActualDay('${ag.id}')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">اعتماد</button><button onclick="DamanChat.clientRejectActualDay('${ag.id}')" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold">مراجعة</button></div>` : `<div class="text-slate-300">بانتظار الاعتماد...</div>`}</div>` : ''}
 
             <div class="grid grid-cols-3 gap-1">
               ${isCreator && ag.type === 'daily' && !ag.pendingDayLog ? `<button onclick="DamanChat.openDailyLogModal('${ag.id}')" class="py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[9.5px]">تأكيد عمال اليوم</button>` : ''}
@@ -1607,24 +1839,15 @@
             </div>
           ` : ag.status === 'proposed' ? `
             <div class="flex gap-1.5">
-              ${!isCreator ? `<button onclick="DamanChat.acceptAgreement('${ag.id}')" class="flex-1 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة وحجز الضمان (${app.fmtMoney(ag.grandTotalWithFee)} ج.م)</button>` : `<div class="flex-1 text-[10px] text-amber-300 py-1">بانتظار موافقة الطرف الآخر وحجز الضمان...</div>`}
+              ${!isCreator ? `<button onclick="DamanChat.acceptAgreement('${ag.id}')" class="flex-1 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة وحجز الضمان (${app.fmtMoney(ag.grandTotalWithFee)} ج.م)</button>` : `<button onclick="DamanChat.cancelProposedAgreement('${ag.id}')" class="flex-1 py-2 rounded-lg bg-rose-500/20 text-rose-300 font-black text-[10px]">إلغاء العرض</button>`}
               <button onclick="DamanChat.printAgreementA4('${ag.id}')" class="px-3 py-2 rounded-lg bg-white text-slate-950 font-black text-[10px]">معاينة العقد</button>
             </div>
           ` : ag.status === 'cancelled' ? `
-            <div class="flex items-center justify-between text-[10px] text-rose-300 font-bold">
-              <span>❌ تم إنهاء وفسخ العقد وتصفية المستحقات</span>
-              <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button>
-            </div>
+            <div class="flex items-center justify-between text-[10px] text-rose-300 font-bold"><span>❌ تم فسخ العقد وتصفية المستحقات</span><button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button></div>
           ` : ag.status === 'disputed' ? `
-            <div class="flex items-center justify-between text-[10px] text-amber-300 font-bold">
-              <span>⚖️ العقد قيد النزاع — بانتظار فصل إدارة ضمان سايت</span>
-              <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button>
-            </div>
+            <div class="flex items-center justify-between text-[10px] text-amber-300 font-bold"><span>⚖️ العقد قيد النزاع أمام الإدارة</span><button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button></div>
           ` : `
-            <div class="flex items-center justify-between text-[10px] text-emerald-300 font-bold">
-              <span>✅ تم تنفيذ وتصفية الاتفاق بالكامل</span>
-              <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">عرض السجل</button>
-            </div>
+            <div class="flex items-center justify-between text-[10px] text-emerald-300 font-bold"><span>✅ تم تنفيذ وتصفية الاتفاق بالكامل</span><button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">عرض السجل</button></div>
           `}
         </div>`;
     },
@@ -1633,6 +1856,9 @@
       const isAr = app.lang === 'ar';
       const meta = this.activeChatMeta || {};
       const isFrozen = !!meta.frozen;
+      const isSupportChat = meta.otherUid === 'admin';
+      const iBlocked = (this.activeChatDoc?.blockedBy || []).includes(app.user?.uid);
+
       return `
         <div class="space-y-2">
           <div class="glass-card rounded-2xl p-2.5 flex items-center justify-between gap-2">
@@ -1642,52 +1868,70 @@
               </button>
               <div class="min-w-0">
                 <div class="text-xs font-black text-white truncate">${app.esc(meta.otherName || 'Chat')}</div>
-                <div class="text-[9px] text-slate-400 truncate">خاضعة لمراجعة الإدارة عند النزاع لحفظ الحقوق</div>
+                <div class="text-[9.5px] text-emerald-400 font-bold truncate">${this.formatPeerStatus()}</div>
               </div>
             </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <button onclick="DamanChat.openAgreementModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black"><i class="fa-solid fa-file-signature me-1"></i>اتفاق</button>
+            <div class="flex items-center gap-1 shrink-0">
+              ${!isSupportChat ? `<button onclick="DamanChat.openAgreementModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black"><i class="fa-solid fa-file-signature me-1"></i>اتفاق</button>` : ''}
               <button onclick="DamanChat.startVoiceCall()" class="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center"><i class="fa-solid fa-phone"></i></button>
+              ${!isSupportChat ? `<button onclick="DamanChat.toggleBlockPeer()" title="${iBlocked ? 'فك الحظر' : 'حظر'}" class="w-8 h-8 rounded-xl ${iBlocked ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400'} flex items-center justify-center"><i class="fa-solid fa-ban text-xs"></i></button>` : ''}
             </div>
           </div>
 
-          ${isFrozen ? `<div class="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/50 text-center text-[11px] font-bold text-rose-200"><i class="fa-solid fa-lock me-1"></i> تم تجميد هذه المحادثة من قِبل الإدارة</div>` : ''}
+          ${isFrozen ? `<div class="p-2 rounded-xl bg-rose-500/20 border border-rose-500/50 text-center text-[11px] font-bold text-rose-200"><i class="fa-solid fa-lock me-1"></i> تم تجميد هذه المحادثة من الإدارة</div>` : ''}
           ${this.renderCallBanner(app)}
           ${this.renderAgreementsBar(app)}
 
-          <div id="chat-msgs-scroll" class="glass-card rounded-2xl p-3 space-y-2 h-[280px] overflow-y-auto">
+          <div id="chat-msgs-scroll" class="glass-card rounded-2xl p-3 space-y-2 h-[285px] overflow-y-auto">
             ${!this.messages.length
-              ? `<div class="text-center text-xs text-slate-400 py-10">ابدأ المحادثة أو اضغط «اتفاق» لإرسال عرض عمل أو توريد...</div>`
+              ? `<div class="text-center text-xs text-slate-400 py-10">ابدأ المحادثة...</div>`
               : this.messages.map((m) => {
                   const mine = app.user && m.senderId === app.user.uid;
                   const adminMsg = !!m.isAdminIntervention;
                   return `
                     <div class="flex ${adminMsg ? 'justify-center' : mine ? 'justify-end' : 'justify-start'}">
                       <div class="max-w-[85%] rounded-2xl px-3 py-2 text-xs space-y-1 ${adminMsg ? 'bg-purple-900/80 border border-amber-400 text-amber-100' : mine ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800 text-white border border-slate-700'}">
-                        ${adminMsg ? `<div class="text-[9px] text-amber-300 font-black"><i class="fa-solid fa-crown me-1"></i>تدخل إدارة ضمان سايت</div>` : (!mine ? `<div class="text-[9px] text-amber-300 font-extrabold">${app.esc(m.senderName || '')}</div>` : '')}
+                        <div class="flex items-center justify-between gap-2">
+                          ${adminMsg ? `<span class="text-[9px] text-amber-300 font-black">👑 تدخل الإدارة</span>` : (!mine ? `<span class="text-[9px] text-amber-300 font-extrabold">${app.esc(m.senderName || '')}</span>` : '<span></span>')}
+                          <button onclick="DamanChat.setReply('${m.id}')" class="text-[9px] opacity-60 hover:opacity-100" title="رد على الرسالة"><i class="fa-solid fa-reply"></i></button>
+                        </div>
+                        ${m.replyTo ? `<div class="p-1.5 rounded-lg bg-black/20 border-s-2 border-white/60 text-[10px] opacity-90 truncate"><b>${app.esc(m.replyTo.senderName)}:</b> ${app.esc(m.replyTo.text)}</div>` : ''}
                         ${m.imageBase64 ? `<img src="${m.imageBase64}" onclick="window.open('${m.imageBase64}','_blank')" class="max-h-44 rounded-xl border border-black/20 cursor-pointer" />` : ''}
+                        ${m.videoBase64 ? `<video controls src="${m.videoBase64}" class="max-h-44 rounded-xl w-full"></video>` : ''}
+                        ${m.fileBase64 ? `<a href="${m.fileBase64}" download="${app.esc(m.fileName || 'file')}" class="inline-flex items-center gap-1.5 p-2 rounded-xl bg-black/20 underline font-black text-[11px]"><i class="fa-solid fa-file-arrow-down"></i> ${app.esc(m.fileName || 'ملف مرفق')}</a>` : ''}
                         ${m.audioBase64 ? `<audio controls src="${m.audioBase64}" class="w-48 h-8"></audio>` : ''}
                         ${m.location ? `<a href="https://maps.google.com/?q=${m.location.lat},${m.location.lng}" target="_blank" class="inline-flex items-center gap-1 underline font-black"><i class="fa-solid fa-location-dot"></i> فتح الموقع على خرائط جوجل</a>` : ''}
                         ${m.text ? `<div class="leading-relaxed whitespace-pre-line">${app.esc(m.text)}</div>` : ''}
+                        ${mine ? `<div class="text-end text-[9px] ${m.read ? 'text-sky-900 font-black' : 'opacity-60'}">${m.read ? '✓✓ تم القراءة' : '✓'}</div>` : ''}
                       </div>
                     </div>`;
                 }).join('')}
           </div>
 
-          <form onsubmit="DamanChat.sendChatMessage(event)" class="flex items-center gap-1.5">
-            <label class="w-9 h-9 shrink-0 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center cursor-pointer" title="صورة">
-              <i class="fa-solid fa-image"></i>
+          ${this.replyingTo ? `
+            <div class="px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/40 flex items-center justify-between text-[10px] text-slate-300">
+              <span class="truncate"><i class="fa-solid fa-reply text-amber-400 me-1"></i>الرد على <b>${app.esc(this.replyingTo.senderName)}:</b> ${app.esc(this.replyingTo.text)}</span>
+              <button onclick="DamanChat.replyingTo=null; DamanChat.rerender()" class="text-rose-400 ms-2"><i class="fa-solid fa-xmark"></i></button>
+            </div>` : ''}
+
+          <form onsubmit="DamanChat.sendChatMessage(event)" class="flex items-center gap-1">
+            <label class="w-8 h-8 shrink-0 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center cursor-pointer" title="صورة">
+              <i class="fa-solid fa-image text-xs"></i>
               <input type="file" accept="image/*" class="hidden" onchange="DamanChat.sendChatImage(this)" />
             </label>
-            <button type="button" onclick="DamanChat.sendLocation()" class="w-9 h-9 shrink-0 rounded-xl bg-slate-800 text-sky-400 flex items-center justify-center" title="لوكيشن GPS">
-              <i class="fa-solid fa-location-dot"></i>
+            <label class="w-8 h-8 shrink-0 rounded-xl bg-slate-800 text-purple-400 flex items-center justify-center cursor-pointer" title="ملف أو فيديو قصير">
+              <i class="fa-solid fa-paperclip text-xs"></i>
+              <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,video/*" class="hidden" onchange="DamanChat.sendChatFileOrVideo(this)" />
+            </label>
+            <button type="button" onclick="DamanChat.sendLocation()" class="w-8 h-8 shrink-0 rounded-xl bg-slate-800 text-sky-400 flex items-center justify-center" title="لوكيشن GPS">
+              <i class="fa-solid fa-location-dot text-xs"></i>
             </button>
-            <button type="button" onclick="DamanChat.toggleVoiceNote()" class="w-9 h-9 shrink-0 rounded-xl ${this.isRecordingVoice ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-800 text-emerald-400'} flex items-center justify-center" title="رسالة صوتية">
-              <i class="fa-solid ${this.isRecordingVoice ? 'fa-stop' : 'fa-microphone'}"></i>
-              ${this.isRecordingVoice ? `<span id="voice-rec-sec" class="text-[9px] ms-0.5">${this.voiceSeconds}s</span>` : ''}
+            <button type="button" onclick="DamanChat.toggleVoiceNote()" class="w-8 h-8 shrink-0 rounded-xl ${this.isRecordingVoice ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-800 text-emerald-400'} flex items-center justify-center" title="رسالة صوتية">
+              <i class="fa-solid ${this.isRecordingVoice ? 'fa-stop' : 'fa-microphone'} text-xs"></i>
+              ${this.isRecordingVoice ? `<span id="voice-rec-sec" class="text-[8px] ms-0.5">${this.voiceSeconds}s</span>` : ''}
             </button>
-            <input id="chat-msg-input" type="text" placeholder="اكتب رسالتك..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
-            <button type="submit" class="px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs"><i class="fa-solid fa-paper-plane"></i></button>
+            <input id="chat-msg-input" oninput="DamanChat.onTypingInput()" type="text" placeholder="اكتب رسالتك..." class="flex-1 px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
+            <button type="submit" class="px-3 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs"><i class="fa-solid fa-paper-plane"></i></button>
           </form>
         </div>`;
     },
@@ -1708,13 +1952,20 @@
             : `<div class="space-y-2">${this.chats.map((c) => {
                 const otherUid = (c.participants || []).find((id) => id !== app.user.uid) || 'admin';
                 const otherName = (c.participantNames && c.participantNames[otherUid]) || (otherUid === 'admin' ? 'إدارة ضمان سايت' : 'مستخدم');
+                const isUnread = c.lastSenderId && c.lastSenderId !== app.user.uid && !c.lastReadByPeer;
                 return `
                   <div onclick="DamanChat.openChatRoom('${c.id}',{id:'${c.id}',otherUid:'${otherUid}',otherName:'${app.esc(otherName).replace(/'/g, "\\'")}',projectTitle:'${app.esc(c.projectTitle || '').replace(/'/g, "\\'")}',frozen:${!!c.frozen}})"
-                    class="glass-card rounded-2xl p-3 flex items-center gap-3 cursor-pointer hover:border-amber-500/40">
+                    class="glass-card rounded-2xl p-3 flex items-center gap-3 cursor-pointer ${isUnread ? 'border-amber-500/70 bg-amber-500/5' : 'hover:border-amber-500/40'}">
                     <div class="w-10 h-10 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center font-black text-sm shrink-0">${app.esc(otherName.charAt(0).toUpperCase())}</div>
                     <div class="min-w-0 flex-1">
-                      <div class="text-xs font-extrabold text-white truncate">${app.esc(otherName)} ${c.frozen ? '🔒' : ''}</div>
-                      <div class="text-[11px] text-slate-400 truncate mt-0.5">${app.esc(c.lastMessage || '')}</div>
+                      <div class="flex items-center justify-between gap-1">
+                        <div class="text-xs font-extrabold text-white truncate">${app.esc(otherName)} ${c.frozen ? '🔒' : ''}</div>
+                        <div class="flex items-center gap-1 shrink-0">
+                          ${c.hasActiveDeal ? `<span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-black">عقد نشط</span>` : ''}
+                          ${isUnread ? `<span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>` : ''}
+                        </div>
+                      </div>
+                      <div class="text-[11px] ${isUnread ? 'text-white font-bold' : 'text-slate-400'} truncate mt-0.5">${app.esc(c.lastMessage || '')}</div>
                     </div>
                   </div>`;
               }).join('')}</div>`}
@@ -1734,9 +1985,7 @@
                 </div>
               </div>`).join('')}
           </div>
-          <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
-            ${quickChips.map((q) => `<button type="button" onclick="DamanChat.askAi('${q}')" class="shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-200">${q}</button>`).join('')}
-          </div>
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1">${quickChips.map((q) => `<button type="button" onclick="DamanChat.askAi('${q}')" class="shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-200">${q}</button>`).join('')}</div>
           <form onsubmit="event.preventDefault(); DamanChat.askAi();" class="flex gap-2">
             <input id="ai-chat-input" type="text" placeholder="اكتب سؤالك هنا..." class="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
             <button type="submit" class="px-4 py-2.5 rounded-xl bg-purple-500 text-white font-black text-xs"><i class="fa-solid fa-paper-plane"></i></button>
@@ -1754,12 +2003,7 @@
             <textarea id="tk-message" rows="3" required placeholder="تفاصيل المشكلة..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"></textarea>
             <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black text-xs">إرسال التذكرة</button>
           </form>
-          ${this.tickets.map((t) => `
-            <div class="glass-card rounded-2xl p-3 space-y-1">
-              <div class="flex justify-between text-xs font-extrabold"><span class="text-white">${app.esc(t.subject)}</span><span class="text-[10px] text-amber-300">${app.esc(t.status)}</span></div>
-              <p class="text-[11px] text-slate-300">${app.esc(t.message)}</p>
-              ${t.adminReply ? `<div class="p-2 rounded-lg bg-emerald-500/10 text-[11px] text-emerald-200"><b>رد الإدارة:</b> ${app.esc(t.adminReply)}</div>` : ''}
-            </div>`).join('')}
+          ${this.tickets.map((t) => `<div class="glass-card rounded-2xl p-3 space-y-1"><div class="flex justify-between text-xs font-extrabold"><span class="text-white">${app.esc(t.subject)}</span><span class="text-[10px] text-amber-300">${app.esc(t.status)}</span></div><p class="text-[11px] text-slate-300">${app.esc(t.message)}</p>${t.adminReply ? `<div class="p-2 rounded-lg bg-emerald-500/10 text-[11px] text-emerald-200"><b>رد الإدارة:</b> ${app.esc(t.adminReply)}</div>` : ''}</div>`).join('')}
         </div>`;
     },
 
@@ -1780,4 +2024,11 @@
 
   window.DamanChat = ChatMod;
   if (window.DamanApp) window.DamanApp.registerModule('chat', ChatMod);
+
+  // Auto-start global presence & incoming call listener as soon as user logs in
+  setInterval(() => {
+    if (window.DamanApp && window.DamanApp.user && ChatMod.attachedUid !== window.DamanApp.user.uid) {
+      ChatMod.ensureListeners(window.DamanApp);
+    }
+  }, 2000);
 })();
