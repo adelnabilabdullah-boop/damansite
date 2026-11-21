@@ -115,7 +115,6 @@
       return lang === 'ar' ? c.ar : c.en;
     },
 
-    // Zero-Firebase-Reads Demo Ads Engine (Hiring + Seeking + B2B Suppliers)
     getDemoAdsForCategory(catId) {
       const app = window.DamanApp;
       if (app.appConfig && app.appConfig.hideDemoAds) return [];
@@ -660,7 +659,6 @@
 
       return `
         <div class="space-y-3">
-          <!-- 4-Way Market Filter: All / Hiring / Seeking / B2B Suppliers -->
           <div class="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
             <button onclick="DamanProjects.setPostTypeFilter('all')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">الكل</button>
             <button onclick="DamanProjects.setPostTypeFilter('hiring')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'hiring' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">أصحاب أعمال</button>
@@ -726,7 +724,7 @@
         <div class="space-y-3.5">
           <div class="rounded-2xl p-4 bg-gradient-to-br from-amber-900/50 to-slate-950 border border-amber-500/40 space-y-1">
             <div class="text-xs font-black text-amber-300"><i class="fa-solid fa-people-group me-1"></i> طلب عمالة VIP مضمونة من ضمان سايت</div>
-            <p class="text-[11px] text-slate-300">للشركات والمهندسين والأفراد — نوفر فرق عمل مضمونة في كل القطاعات.</p>
+            <p class="text-[11px] text-slate-300">نوفر لك فرق عمل مضمونة في كل القطاعات (عمولة توفير وإشراف VIP: 10% تُضاف على التكلفة عند التسعير).</p>
           </div>
           <form onsubmit="DamanProjects.submitVipLabor(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
             <select id="vl-cat" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
@@ -741,6 +739,30 @@
             <input id="vl-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             <button id="vl-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إرسال طلب عمالة VIP للإدارة</button>
           </form>
+
+          ${this.myVipLabor.length ? `
+            <div class="glass-card rounded-2xl p-3.5 space-y-2">
+              <h4 class="text-xs font-extrabold text-amber-400">طلبات عمالة VIP الخاصة بي (${this.myVipLabor.length})</h4>
+              ${this.myVipLabor.map((r) => `
+                <div class="p-3 rounded-xl bg-slate-950/90 border ${r.status === 'funded' ? 'border-emerald-500/50' : 'border-slate-800'} text-xs space-y-1.5">
+                  <div class="flex justify-between font-bold">
+                    <span class="text-white">${app.esc(r.trade)} (${r.workersCount} عامل)</span>
+                    <span class="text-[10px] ${r.status === 'funded' ? 'text-emerald-400' : 'text-amber-300'}">${r.status === 'funded' ? 'تم الحجز بنجاح ✅' : r.status === 'quoted' ? 'تم التسعير' : 'قيد المراجعة'}</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400">${app.esc(r.location)} • المدة: ${app.esc(r.duration)}</div>
+                  ${r.totalPrice ? `
+                    <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] space-y-0.5">
+                      <div>تكلفة العمالة: <b>${app.fmtMoney(r.baseCost)} ج.م</b></div>
+                      <div>عمولة توفير VIP (10%): <b>${app.fmtMoney(r.vipCommission)} ج.م</b></div>
+                      <div class="text-emerald-400 font-black">الإجمالي المطلوب حجزه: ${app.fmtMoney(r.totalPrice)} ج.م</div>
+                      ${r.adminNote ? `<div class="text-[10px] text-amber-200 pt-1">ملاحظة الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
+                    </div>` : ''}
+                  ${r.status === 'quoted' ? `
+                    <button onclick="DamanProjects.acceptAndFundVipLabor('${r.id}')" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">
+                      ✓ موافقة وحجز المبلغ من المحفظة (${app.fmtMoney(r.totalPrice)} ج.م)
+                    </button>` : ''}
+                </div>`).join('')}
+            </div>` : ''}
         </div>`;
     },
 
@@ -786,6 +808,57 @@
         e.target.reset();
         app.toast('تم إرسال طلب عمالة VIP للإدارة بنجاح', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
+    },
+
+    async acceptAndFundVipLabor(reqId) {
+      const app = window.DamanApp;
+      const req = this.myVipLabor.find((x) => x.id === reqId);
+      if (!req || !req.totalPrice) return;
+
+      const total = Number(req.totalPrice);
+      const avail = Number(app.profile?.balanceAvailable || 0);
+      if (avail < total) {
+        const diff = Math.round((total - avail) * 100) / 100;
+        if (window.confirm(`رصيدك المتاح (${app.fmtMoney(avail)} ج.م) أقل من الإجمالي (${app.fmtMoney(total)} ج.م).\nهل تريد الانتقال لشحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+          if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(diff);
+        }
+        return;
+      }
+
+      if (!window.confirm(`تأكيد الموافقة وحجز ${app.fmtMoney(total)} ج.م (شامل عمولة VIP 10%) من محفظتك لبدء توفير العمالة؟`)) return;
+
+      const userRef = app.db.collection('users').doc(app.user.uid);
+      const reqRef = app.db.collection('vipLaborRequests').doc(reqId);
+      try {
+        await app.db.runTransaction(async (tx) => {
+          const [uDoc, rDoc] = await Promise.all([tx.get(userRef), tx.get(reqRef)]);
+          const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+          const curEsc = Number((uDoc.data() || {}).balanceEscrow || 0);
+          if (curAvail < total) throw new Error('الرصيد المتاح غير كافٍ');
+          if ((rDoc.data() || {}).status === 'funded') throw new Error('تم حجز هذا الطلب بالفعل');
+
+          tx.update(userRef, {
+            balanceAvailable: Math.round((curAvail - total) * 100) / 100,
+            balanceEscrow: Math.round((curEsc + total) * 100) / 100
+          });
+          tx.update(reqRef, {
+            status: 'funded',
+            fundedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          if (Number(req.vipCommission || 0) > 0) {
+            tx.set(app.db.collection('platformFees').doc(), {
+              vipLaborId: reqId,
+              type: 'vip_labor_10pct',
+              amount: Number(req.vipCommission),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+        });
+        await app.sendNotification('ADMIN', 'تم حجز ودفع طلب عمالة VIP ✅', `${req.trade} (${req.workersCount} عامل) — الإجمالي: ${app.fmtMoney(total)} ج.م (عمولتك 10%: ${app.fmtMoney(req.vipCommission)} ج.م)`);
+        app.toast('تم حجز المبلغ بنجاح ✅ ستتواصل معك الإدارة فوراً لتنزيل العمالة', 'success');
+      } catch (err) {
+        app.toast(err.message, 'error');
+      }
     },
 
     render(container, app) {
