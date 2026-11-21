@@ -1,7 +1,9 @@
 (function () {
   const AdminMod = {
-    subTab: 'overview', // overview | chats | contracts | posts | wallet | kyc | vip | users | companies | security | settings
+    subTab: 'overview', // overview | profits | chats | contracts | posts | wallet | kyc | vip | users | companies | security | settings
     stats: { users: 0, companies: 0, suppliers: 0, avail: 0, escrow: 0, held: 0, fees: 0, pendingPosts: 0, pendingWallet: 0, pendingKyc: 0, pendingContracts: 0, openDisputes: 0, openTickets: 0 },
+    feesList: [],
+    expensesList: [],
     posts: [],
     walletReqs: [],
     kycReqs: [],
@@ -50,8 +52,8 @@
       if (!this.hasAccess(app)) return;
       const db = app.db;
       try {
-        if (this.subTab === 'overview' || force) {
-          const [uSnap, pSnap, wSnap, kSnap, aSnap, dSnap, tSnap, fSnap] = await Promise.all([
+        if (this.subTab === 'overview' || this.subTab === 'profits' || force) {
+          const [uSnap, pSnap, wSnap, kSnap, aSnap, dSnap, tSnap, fSnap, expSnap] = await Promise.all([
             db.collection('users').limit(180).get(),
             db.collection('projects').limit(120).get(),
             db.collection('walletRequests').limit(80).get(),
@@ -59,10 +61,15 @@
             db.collection('chatAgreements').limit(80).get(),
             db.collection('disputes').limit(50).get(),
             db.collection('supportTickets').limit(50).get(),
-            this.isSuper(app) ? db.collection('platformFees').limit(100).get() : Promise.resolve({ docs: [] })
+            this.isSuper(app) ? db.collection('platformFees').limit(150).get() : Promise.resolve({ docs: [] }),
+            this.isSuper(app) ? db.collection('platformExpenses').limit(100).get() : Promise.resolve({ docs: [] })
           ]);
           const uArr = uSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
           this.users = uArr;
+          this.agreements = aSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+          this.feesList = fSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+          this.expensesList = expSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
           this.stats = {
             users: uArr.length,
             companies: uArr.filter((u) => u.accountType === 'company').length,
@@ -70,11 +77,11 @@
             avail: uArr.reduce((s, u) => s + Number(u.balanceAvailable || 0), 0),
             escrow: uArr.reduce((s, u) => s + Number(u.balanceEscrow || 0), 0),
             held: uArr.reduce((s, u) => s + Number(u.balanceHeld || 0), 0),
-            fees: fSnap.docs.reduce((s, d) => s + Number(d.data().amount || 0), 0),
+            fees: this.feesList.reduce((s, f) => s + Number(f.amount || 0), 0),
             pendingPosts: pSnap.docs.filter((d) => d.data().status === 'pending_review').length,
             pendingWallet: wSnap.docs.filter((d) => d.data().status === 'pending').length,
             pendingKyc: kSnap.docs.filter((d) => d.data().status === 'pending').length,
-            pendingContracts: aSnap.docs.filter((d) => d.data().contractStatus === 'pending_admin').length,
+            pendingContracts: this.agreements.filter((a) => a.contractStatus === 'pending_admin').length,
             openDisputes: dSnap.docs.filter((d) => d.data().status === 'open').length,
             openTickets: tSnap.docs.filter((d) => d.data().status === 'open').length
           };
@@ -85,10 +92,7 @@
             db.collection('chats').limit(60).get(),
             db.collection('callRecordings').limit(50).get()
           ]);
-          this.allChats = cSnap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
-
+          this.allChats = cSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
           const now = Date.now();
           const validRecs = [];
           for (const d of rSnap.docs) {
@@ -107,12 +111,8 @@
             db.collection('chatAgreements').limit(60).get(),
             db.collection('siteLedger').limit(60).get()
           ]);
-          this.agreements = aSnap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-          this.ledgers = lSnap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.entryDate || '').localeCompare(a.entryDate || ''));
+          this.agreements = aSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+          this.ledgers = lSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.entryDate || '').localeCompare(a.entryDate || ''));
         }
 
         if (this.subTab === 'posts' || force) {
@@ -120,17 +120,17 @@
             db.collection('projects').limit(60).get(),
             db.collection('reviews').limit(50).get()
           ]);
-          this.posts = pSnap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+          this.posts = pSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
           this.reviews = revSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
         }
 
         if (this.subTab === 'wallet' || force) {
-          const snap = await db.collection('walletRequests').limit(60).get();
-          this.walletReqs = snap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+          const [wSnap, aSnap] = await Promise.all([
+            db.collection('walletRequests').limit(60).get(),
+            db.collection('chatAgreements').limit(80).get()
+          ]);
+          this.walletReqs = wSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+          this.agreements = aSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
         }
 
         if (this.subTab === 'kyc' || force) {
@@ -203,6 +203,67 @@
       this.loadTabData(window.DamanApp);
     },
 
+    // ==================== PROFIT VAULT (أرباحك لوحدك vs فلوس الناس) ====================
+    calcProfitBreakdown() {
+      let escrow35 = 0, vip10 = 0, subs = 0, featured = 0, insp3x = 0, other = 0;
+      this.feesList.forEach((f) => {
+        const a = Number(f.amount || 0);
+        const t = String(f.type || '');
+        if (t === 'vip_labor_10pct') vip10 += a;
+        else if (t === 'subscription') subs += a;
+        else if (t === 'featured_ad') featured += a;
+        else if (t === 'inspection_3x') insp3x += a;
+        else if (f.agreementId || t === 'escrow_35') escrow35 += a;
+        else other += a;
+      });
+      const grossProfit = escrow35 + vip10 + subs + featured + insp3x + other;
+      const totalExpenses = this.expensesList.filter((e) => e.kind === 'expense').reduce((s, e) => s + Number(e.amount || 0), 0);
+      const ownerWithdrawals = this.expensesList.filter((e) => e.kind === 'owner_withdraw').reduce((s, e) => s + Number(e.amount || 0), 0);
+      const netAvailableProfit = Math.round((grossProfit - totalExpenses - ownerWithdrawals) * 100) / 100;
+      return { escrow35, vip10, subs, featured, insp3x, other, grossProfit, totalExpenses, ownerWithdrawals, netAvailableProfit };
+    },
+
+    async addProfitExpenseOrWithdraw(e) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      if (!this.isSuper(app)) return app.toast('صلاحية مالية لمدير المنصة فقط', 'error');
+      const kind = document.getElementById('pv-kind').value; // expense | owner_withdraw | manual_revenue
+      const amount = parseFloat(document.getElementById('pv-amt').value) || 0;
+      const note = document.getElementById('pv-note').value.trim();
+      if (amount <= 0) return;
+
+      try {
+        if (kind === 'manual_revenue') {
+          await app.db.collection('platformFees').add({
+            type: document.getElementById('pv-rev-type')?.value || 'subscription',
+            amount, note, date: new Date().toISOString().slice(0, 10),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          app.toast('تم إضافة الإيراد لخزنة أرباحك ✅', 'success');
+        } else {
+          await app.db.collection('platformExpenses').add({
+            kind, amount, note, date: new Date().toISOString().slice(0, 10),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          app.toast(kind === 'owner_withdraw' ? 'تم تسجيل سحب من أرباحك الصافية ✅' : 'تم تسجيل المصروف التشغيلي ✅', 'success');
+        }
+        e.target.reset();
+        await this.logAction(app, 'PROFIT_VAULT_' + kind.toUpperCase(), `${amount} EGP - ${note}`);
+        this.loadTabData(app, true);
+      } catch (err) { app.toast(err.message, 'error'); }
+    },
+
+    printProfitVaultA4() {
+      const app = window.DamanApp;
+      const b = this.calcProfitBreakdown();
+      const s = this.stats;
+      const usersTrustTotal = s.avail + s.escrow + s.held;
+      const win = window.open('', '_blank');
+      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
+      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>كشف فصل الخزنة والأرباح — ضمان سايت</title><style>@page{size:A4 portrait;margin:14mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;font-size:12px;}.box{border:2px solid #000;padding:18px;}h2{margin:0 0 6px;border-bottom:2px solid #000;padding-bottom:8px;}h3{margin:14px 0 6px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #000;padding:7px;text-align:right;}th{background:#f0f0f0;width:55%;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ كشف الأرباح PDF (A4)</button><div class="box"><h2>كشف فصل الخزنة: أمانات الناس vs أرباح ضمان سايت</h2><div>تاريخ الكشف: ${new Date().toLocaleString('ar-EG')}</div><h3>أولاً: خزنة أمانات المستخدمين (فلوس الناس — لا تُمس)</h3><table><tr><th>الأرصدة المتاحة للمستخدمين</th><td>${app.fmtMoney(s.avail)} ج.م</td></tr><tr><th>أرصدة الضمان النشطة (Escrow)</th><td>${app.fmtMoney(s.escrow)} ج.م</td></tr><tr><th>الأرصدة المحجوزة إدارياً</th><td>${app.fmtMoney(s.held)} ج.م</td></tr><tr><th>إجمالي أمانات الناس</th><td><b>${app.fmtMoney(usersTrustTotal)} ج.م</b></td></tr></table><h3>ثانياً: خزنة أرباح المنصة (أرباحك الصافية)</h3><table><tr><th>عمولات الضمان (3.5%)</th><td>${app.fmtMoney(b.escrow35)} ج.م</td></tr><tr><th>عمولات عمالة VIP (10%)</th><td>${app.fmtMoney(b.vip10)} ج.م</td></tr><tr><th>أرباح الاستلام الهندسي (3x)</th><td>${app.fmtMoney(b.insp3x)} ج.م</td></tr><tr><th>اشتراكات الباقات وتمييز الإعلانات</th><td>${app.fmtMoney(b.subs + b.featured + b.other)} ج.م</td></tr><tr><th>إجمالي الأرباح قبل المصاريف</th><td><b>${app.fmtMoney(b.grossProfit)} ج.م</b></td></tr><tr><th>مصروفات المنصة (إعلانات وتشغيل)</th><td>-${app.fmtMoney(b.totalExpenses)} ج.م</td></tr><tr><th>مسحوباتك السابقة من الأرباح</th><td>-${app.fmtMoney(b.ownerWithdrawals)} ج.م</td></tr><tr style="background:#e5e5e5"><th>صافي أرباحك المتاحة حالياً</th><td><b>${app.fmtMoney(b.netAvailableProfit)} ج.م</b></td></tr></table></div></body></html>`);
+      win.document.close();
+    },
+
     // ==================== 1. CSV EXPORT & A4 FINANCIAL REPORT ====================
     exportCsv(kind) {
       const app = window.DamanApp;
@@ -230,15 +291,6 @@
       app.toast('تم تنزيل ملف Excel (CSV) بنجاح', 'success');
     },
 
-    printFinancialSummaryA4() {
-      const app = window.DamanApp;
-      const s = this.stats;
-      const win = window.open('', '_blank');
-      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>التقرير المالي العام — ضمان سايت</title><style>@page{size:A4 portrait;margin:14mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;font-size:12px;}.box{border:2px solid #000;padding:18px;}h2{margin:0 0 8px;border-bottom:2px solid #000;padding-bottom:8px;}table{width:100%;border-collapse:collapse;margin-top:12px;}th,td{border:1px solid #000;padding:7px;text-align:right;}th{background:#f0f0f0;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ PDF (A4)</button><div class="box"><h2>التقرير المالي والإداري العام — منصة ضمان سايت | DamanSite</h2><div>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</div><table><tr><th>إجمالي المستخدمين</th><td>${s.users}</td><th>الشركات / الموردين B2B</th><td>${s.companies} شركة / ${s.suppliers} مورّد</td></tr><tr><th>إجمالي الأرصدة المتاحة</th><td>${app.fmtMoney(s.avail)} ج.م</td><th>إجمالي أرصدة الضمان (Escrow)</th><td>${app.fmtMoney(s.escrow)} ج.م</td></tr><tr><th>الأرصدة المحجوزة إدارياً</th><td>${app.fmtMoney(s.held)} ج.م</td><th>إجمالي عمولات المنصة (3.5% + VIP 10%)</th><td><b>${app.fmtMoney(s.fees)} ج.م</b></td></tr><tr><th>منشورات معلّقة</th><td>${s.pendingPosts}</td><th>عقود موقّعة بانتظار الاعتماد</th><td>${s.pendingContracts}</td></tr><tr><th>طلبات محفظة معلّقة</th><td>${s.pendingWallet}</td><th>نزاعات مفتوحة</th><td>${s.openDisputes}</td></tr></table></div></body></html>`);
-      win.document.close();
-    },
-
     // ==================== 2. SURVEILLANCE: INSPECT ANY CHAT, INTERVENE, DELETE, FREEZE ====================
     inspectChat(chatId) {
       const app = window.DamanApp;
@@ -264,10 +316,7 @@
       try {
         const cid = this.activeInspectChat.id;
         await app.db.collection('chats').doc(cid).collection('messages').add({
-          senderId: app.user.uid,
-          senderName: 'إدارة ضمان سايت',
-          isAdminIntervention: true,
-          text,
+          senderId: app.user.uid, senderName: 'إدارة ضمان سايت', isAdminIntervention: true, text,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         await app.db.collection('chats').doc(cid).update({ lastMessage: '👑 الإدارة: ' + text.slice(0, 70), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
@@ -319,7 +368,7 @@
       } catch (e) { window.DamanApp.toast(e.message, 'error'); }
     },
 
-    // ==================== 3. CONTRACTS APPROVAL, FORCE SETTLE & STOP-WORK/SUPPLY ====================
+    // ==================== 3. CONTRACTS, POSTS, REVIEWS ====================
     async handleContractReview(agId, decision) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -348,11 +397,7 @@
         if (ag.payerUid) await app.sendNotification(ag.payerUid, `⚠️ أمر وقف عمل/توريد فوري من الإدارة (${ag.ticketNumber})`, reason);
         await app.db.collection('chatAgreements').doc(agId).update({
           timeline: firebase.firestore.FieldValue.arrayUnion({
-            date: new Date().toISOString().slice(0, 10),
-            kind: 'admin_stop',
-            label: 'أمر وقف عمل/توريد إداري: ' + reason,
-            amount: 0,
-            by: 'إدارة ضمان سايت'
+            date: new Date().toISOString().slice(0, 10), kind: 'admin_stop', label: 'أمر وقف عمل/توريد إداري: ' + reason, amount: 0, by: 'إدارة ضمان سايت'
           })
         });
         await this.logAction(app, 'ADMIN_STOP_WORK', `${ag.ticketNumber}: ${reason}`);
@@ -372,9 +417,7 @@
       if (!uid || !window.confirm(`تحويل باقي الضمان (${app.fmtMoney(rem)} ج.م) إدارياً إلى ${target === 'worker' ? 'المنفّذ / المورّد' : 'صاحب العمل / المشتري'}؟`)) return;
       try {
         await app.db.collection('users').doc(uid).update({ balanceAvailable: firebase.firestore.FieldValue.increment(rem) });
-        if (ag.payerUid) {
-          await app.db.collection('users').doc(ag.payerUid).update({ balanceEscrow: firebase.firestore.FieldValue.increment(-rem) });
-        }
+        if (ag.payerUid) await app.db.collection('users').doc(ag.payerUid).update({ balanceEscrow: firebase.firestore.FieldValue.increment(-rem) });
         await app.db.collection('chatAgreements').doc(agId).update({ status: 'completed', remainingEscrow: 0 });
         await app.sendNotification(uid, `تحويل إداري من الاتفاق ${ag.ticketNumber}`, `تم إضافة ${app.fmtMoney(rem)} ج.م لمحفظتك بقرار إدارة ضمان سايت.`);
         await this.logAction(app, 'ADMIN_SETTLE_AGREEMENT', `${ag.ticketNumber} -> ${target} (${rem})`);
@@ -383,7 +426,6 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== 4. POSTS & REVIEWS MODERATION ====================
     async approvePost(postId) {
       const app = window.DamanApp;
       const p = this.posts.find((x) => x.id === postId);
@@ -447,7 +489,7 @@
       } catch (e) { window.DamanApp.toast(e.message, 'error'); }
     },
 
-    // ==================== 5. WALLET, KYC, FLEXIBLE DISPUTES, VIP 10% & TICKETS ====================
+    // ==================== 4. WALLET, KYC, DISPUTES, VIP 10% & 3X COLLECTION ====================
     async handleWalletReq(reqId, decision) {
       const app = window.DamanApp;
       if (!this.isSuper(app)) return app.toast('الموافقات المالية مقصورة على مدير المنصة فقط', 'error');
@@ -549,36 +591,47 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
+    async collectInspectionFee(reqId) {
+      const app = window.DamanApp;
+      if (!this.isSuper(app)) return app.toast('للمدير العام فقط', 'error');
+      const r = this.inspReqs.find((x) => x.id === reqId);
+      if (!r || !r.quotedPrice) return app.toast('سعّر الطلب أولاً', 'warning');
+      if (!window.confirm(`تأكيد تحصيل مبلغ ${app.fmtMoney(r.quotedPrice)} ج.م وإضافته إلى خزنة أرباحك (بند الاستلام الهندسي 3x)؟`)) return;
+      try {
+        await app.db.collection('vipRequests').doc(reqId).update({ status: 'collected' });
+        await app.db.collection('platformFees').add({
+          type: 'inspection_3x',
+          amount: Number(r.quotedPrice),
+          note: `${r.packageLabel} — ${r.userName}`,
+          date: new Date().toISOString().slice(0, 10),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await this.logAction(app, 'COLLECT_3X_FEE', `${r.quotedPrice} EGP`);
+        app.toast('تم إضافة المبلغ إلى خزنة أرباحك بنجاح ✅', 'success');
+        this.loadTabData(app, true);
+      } catch (e) { app.toast(e.message, 'error'); }
+    },
+
     async replyVipLabor(reqId, userId) {
       const app = window.DamanApp;
       const baseCost = parseFloat(window.prompt('أدخل تكلفة العمالة الأساسية (ج.م):', ''));
       if (!baseCost || baseCost <= 0) return;
-      const vipCommission = Math.round(baseCost * 0.10 * 100) / 100; // عمولة الإدارة 10%
+      const vipCommission = Math.round(baseCost * 0.10 * 100) / 100;
       const totalPrice = Math.round((baseCost + vipCommission) * 100) / 100;
       const note = window.prompt(
         `التكلفة: ${app.fmtMoney(baseCost)} ج.م + عمولة VIP (10%): ${app.fmtMoney(vipCommission)} ج.م\nالإجمالي للعميل: ${app.fmtMoney(totalPrice)} ج.م\n\nاكتب ملاحظة أو موعد التوفير للعميل:`,
         'العمالة جاهزة للنزول فور حجز المبلغ من المحفظة'
       ) || '';
       try {
-        await app.db.collection('vipLaborRequests').doc(reqId).update({
-          baseCost,
-          vipCommission,
-          totalPrice,
-          adminNote: note,
-          status: 'quoted'
-        });
-        await app.sendNotification(
-          userId,
-          'تم تسعير طلب عمالة VIP ✅',
-          `التكلفة: ${app.fmtMoney(baseCost)} + عمولة 10% (${app.fmtMoney(vipCommission)}) = الإجمالي ${app.fmtMoney(totalPrice)} ج.م — ادخل للموافقة والحجز.`
-        );
+        await app.db.collection('vipLaborRequests').doc(reqId).update({ baseCost, vipCommission, totalPrice, adminNote: note, status: 'quoted' });
+        await app.sendNotification(userId, 'تم تسعير طلب عمالة VIP ✅', `التكلفة: ${app.fmtMoney(baseCost)} + عمولة 10% (${app.fmtMoney(vipCommission)}) = الإجمالي ${app.fmtMoney(totalPrice)} ج.م — ادخل للموافقة والحجز.`);
         await this.logAction(app, 'QUOTE_VIP_LABOR', `${reqId}: ${totalPrice} EGP (10% = ${vipCommission})`);
         app.toast('تم إرسال التسعيرة بعمولة 10% وإشعار العميل ✅', 'success');
         this.loadTabData(app);
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== 6. FULL USER & COMPANY/SUPPLIER HR CONTROLS ====================
+    // ==================== 5. FULL USER, COMPANY, SECURITY & SETTINGS ====================
     async editUserBalances3(uid) {
       const app = window.DamanApp;
       if (!this.isSuper(app)) return app.toast('صلاحية مالية لمدير المنصة فقط', 'error');
@@ -690,8 +743,7 @@
           app.db.collection('companyChats').doc(companyUid).collection('messages').orderBy('createdAt', 'desc').limit(25).get()
         ]);
         this.selectedCompanyHr = {
-          companyUid,
-          companyName,
+          companyUid, companyName,
           attendance: aSnap.docs.map((d) => d.data()),
           payrolls: pSnap.docs.map((d) => d.data()),
           custody: cSnap.docs.map((d) => d.data()),
@@ -701,7 +753,6 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== 7. BLACKLIST, PROMO CODES, ADS, DAILY NOTIFS & EMERGENCY SETTINGS ====================
     async addBlacklistItem(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -720,10 +771,7 @@
 
     async deleteBlacklistItem(id) {
       if (!this.isSuper(window.DamanApp)) return;
-      try {
-        await window.DamanApp.db.collection('blacklist').doc(id).delete();
-        this.loadTabData(window.DamanApp);
-      } catch (e) {}
+      try { await window.DamanApp.db.collection('blacklist').doc(id).delete(); this.loadTabData(window.DamanApp); } catch (e) {}
     },
 
     async addPromoCode(e) {
@@ -736,10 +784,7 @@
       const maxUses = parseInt(document.getElementById('pr-max').value, 10) || 100;
       if (!code) return;
       try {
-        await app.db.collection('promoCodes').doc(code).set({
-          code, rewardType, value, maxUses, usedCount: 0, usedBy: [], active: true,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        await app.db.collection('promoCodes').doc(code).set({ code, rewardType, value, maxUses, usedCount: 0, usedBy: [], active: true, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
         e.target.reset();
         app.toast(`تم إنشاء كود الهدية (${code}) بنجاح`, 'success');
         this.loadTabData(app);
@@ -748,10 +793,7 @@
 
     async deletePromoCode(code) {
       if (!this.isSuper(window.DamanApp)) return;
-      try {
-        await window.DamanApp.db.collection('promoCodes').doc(code).delete();
-        this.loadTabData(window.DamanApp);
-      } catch (e) {}
+      try { await window.DamanApp.db.collection('promoCodes').doc(code).delete(); this.loadTabData(window.DamanApp); } catch (e) {}
     },
 
     async addSliderAd(e) {
@@ -759,16 +801,7 @@
       const app = window.DamanApp;
       if (!this.isSuper(app)) return app.toast('للمدير العام فقط', 'error');
       const ads = (app.appConfig?.ads && app.appConfig.ads.length ? app.appConfig.ads : window.DAMAN_DEFAULT_ADS).slice();
-      ads.unshift({
-        id: 'ad_' + Date.now(),
-        badgeAr: document.getElementById('ad-badge').value.trim() || 'إعلان مميز',
-        titleAr: document.getElementById('ad-title').value.trim(),
-        descAr: document.getElementById('ad-desc').value.trim(),
-        linkUrl: document.getElementById('ad-link').value.trim(),
-        actionTab: 'projects',
-        gradient: 'from-amber-600 via-orange-600 to-amber-800',
-        active: true
-      });
+      ads.unshift({ id: 'ad_' + Date.now(), badgeAr: document.getElementById('ad-badge').value.trim() || 'إعلان مميز', titleAr: document.getElementById('ad-title').value.trim(), descAr: document.getElementById('ad-desc').value.trim(), linkUrl: document.getElementById('ad-link').value.trim(), actionTab: 'projects', gradient: 'from-amber-600 via-orange-600 to-amber-800', active: true });
       try {
         await app.db.collection('settings').doc('appConfig').set({ ads }, { merge: true });
         await app.loadAppConfig(true);
@@ -850,17 +883,36 @@
     // ==================== RENDER TABS ====================
     renderOverviewTab(app) {
       const s = this.stats;
+      const b = this.calcProfitBreakdown();
+      const usersTrust = s.avail + s.escrow + s.held;
+
+      // Smart Leads: Users who deposited money (>0) but have 0 agreements yet
+      const activeUids = new Set();
+      this.agreements.forEach((a) => { if (a.createdBy) activeUids.add(a.createdBy); if (a.payerUid) activeUids.add(a.payerUid); });
+      const hotLeads = this.users.filter((u) => Number(u.balanceAvailable || 0) > 0 && !activeUids.has(u.id)).slice(0, 6);
+
+      // Top Performers: Highest rated / most active contractors & suppliers
+      const topPerformers = this.users.filter((u) => u.accountType === 'contractor' || u.accountType === 'supplier' || u.accountType === 'company')
+        .sort((a, b2) => (b2.ratingAvg || 0) - (a.ratingAvg || 0) || (b2.referralsCount || 0) - (a.referralsCount || 0)).slice(0, 5);
+
       return `
         <div class="space-y-3">
+          <!-- SEPARATED VAULTS SUMMARY -->
           <div class="grid grid-cols-2 gap-2 text-center">
-            <div class="p-3 rounded-2xl bg-slate-950 border border-emerald-500/40"><div class="text-[10px] text-slate-400">إجمالي السيولة بالمنصة</div><div class="text-sm font-black text-emerald-400 mt-0.5">${app.fmtMoney(s.avail + s.escrow + s.held)} ج.م</div></div>
-            <div class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40"><div class="text-[10px] text-slate-400">إجمالي عمولاتك (3.5% + VIP 10%)</div><div class="text-sm font-black text-amber-400 mt-0.5">${app.fmtMoney(s.fees)} ج.م</div></div>
-            <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">مستخدمين / شركات / موردين</div><div class="text-xs font-black text-white">${s.users} / ${s.companies} / ${s.suppliers}</div></div>
-            <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">أرصدة الضمان (Escrow)</div><div class="text-xs font-black text-sky-400">${app.fmtMoney(s.escrow)} ج.م</div></div>
+            <div onclick="DamanAdmin.setSubTab('profits')" class="p-3 rounded-2xl bg-gradient-to-br from-amber-900/50 to-slate-950 border border-amber-500/60 cursor-pointer">
+              <div class="text-[10px] text-amber-200 font-bold">💰 خزنة أرباحك الصافية</div>
+              <div class="text-sm font-black text-amber-400 mt-0.5">${app.fmtMoney(b.netAvailableProfit)} ج.م</div>
+              <div class="text-[9px] text-slate-300">اضغط للتفاصيل والسحب</div>
+            </div>
+            <div class="p-3 rounded-2xl bg-slate-950 border border-sky-500/40">
+              <div class="text-[10px] text-sky-300 font-bold">🏦 أمانات المستخدمين (فلوس الناس)</div>
+              <div class="text-sm font-black text-white mt-0.5">${app.fmtMoney(usersTrust)} ج.م</div>
+              <div class="text-[9px] text-slate-400">متاح ${app.fmtMoney(s.avail)} | ضمان ${app.fmtMoney(s.escrow)}</div>
+            </div>
           </div>
 
           <div class="glass-card rounded-2xl p-3 space-y-2 text-xs">
-            <div class="font-black text-amber-400">مهام بانتظار قرارك الآن:</div>
+            <div class="font-black text-amber-400">مهام بانتظار قرارك الآن (${s.users} مستخدم • ${s.companies} شركة • ${s.suppliers} مورّد):</div>
             <div class="grid grid-cols-3 gap-1.5 text-center text-[10px]">
               <button onclick="DamanAdmin.setSubTab('contracts')" class="p-2 rounded-xl bg-purple-500/15 border border-purple-500/40 text-purple-200 font-bold">عقود موقّعة<br/><b class="text-sm">${s.pendingContracts}</b></button>
               <button onclick="DamanAdmin.setSubTab('wallet')" class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 font-bold">طلبات محفظة<br/><b class="text-sm">${s.pendingWallet}</b></button>
@@ -871,14 +923,106 @@
             </div>
           </div>
 
+          ${hotLeads.length ? `
+            <div class="glass-card rounded-2xl p-3 space-y-1.5 text-xs border-emerald-500/30">
+              <div class="font-black text-emerald-400"><i class="fa-solid fa-fire me-1"></i> عملاء ساخنون (شحنوا رصيد ولم يبدؤوا اتفاقاً بعد):</div>
+              ${hotLeads.map((u) => `
+                <div class="flex items-center justify-between p-2 rounded-lg bg-slate-950 text-[11px]">
+                  <div><b>${app.esc(u.companyName || u.name)}</b> <span class="text-emerald-400">(${app.fmtMoney(u.balanceAvailable)} ج.م)</span></div>
+                  <button onclick="DamanAdmin.sendPrivateNotif('${u.id}','${app.esc(u.name || '').replace(/'/g, "\\'")}')" class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[10px]">متابعة</button>
+                </div>`).join('')}
+            </div>` : ''}
+
+          ${topPerformers.length ? `
+            <div class="glass-card rounded-2xl p-3 space-y-1.5 text-xs">
+              <div class="font-black text-amber-300"><i class="fa-solid fa-trophy me-1"></i> أفضل المقاولين والموردين بالمنصة:</div>
+              ${topPerformers.map((u, idx) => `
+                <div class="flex items-center justify-between p-2 rounded-lg bg-slate-950 text-[11px]">
+                  <span>${idx + 1}. <b>${app.esc(u.companyName || u.name)}</b> (${app.getRoleLabel(u.accountType)})</span>
+                  <button onclick="DamanAdmin.grantCustomPlan('${u.id}')" class="px-2 py-1 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px]">مكافأة 🎁</button>
+                </div>`).join('')}
+            </div>` : ''}
+
           <div class="glass-card rounded-2xl p-3 space-y-2">
-            <div class="text-xs font-black text-white">تصدير التقارير والنسخ الاحتياطي (Excel CSV / PDF):</div>
+            <div class="text-xs font-black text-white">تصدير التقارير (Excel CSV / PDF):</div>
             <div class="grid grid-cols-2 gap-1.5 text-[10px]">
-              <button onclick="DamanAdmin.printFinancialSummaryA4()" class="py-2 rounded-xl bg-white text-slate-950 font-black"><i class="fa-solid fa-print me-1"></i>تقرير مالي A4 PDF</button>
-              <button onclick="DamanAdmin.exportCsv('users')" class="py-2 rounded-xl bg-emerald-500/20 text-emerald-300 font-black">تصدير المستخدمين Excel</button>
-              <button onclick="DamanAdmin.exportCsv('wallet')" class="py-2 rounded-xl bg-sky-500/20 text-sky-300 font-black">تصدير المحفظة Excel</button>
-              <button onclick="DamanAdmin.exportCsv('agreements')" class="py-2 rounded-xl bg-amber-500/20 text-amber-300 font-black">تصدير العقود Excel</button>
+              <button onclick="DamanAdmin.printProfitVaultA4()" class="py-2 rounded-xl bg-white text-slate-950 font-black"><i class="fa-solid fa-print me-1"></i>كشف الأرباح A4</button>
+              <button onclick="DamanAdmin.exportCsv('users')" class="py-2 rounded-xl bg-emerald-500/20 text-emerald-300 font-black">المستخدمين Excel</button>
+              <button onclick="DamanAdmin.exportCsv('wallet')" class="py-2 rounded-xl bg-sky-500/20 text-sky-300 font-black">المحفظة Excel</button>
+              <button onclick="DamanAdmin.exportCsv('agreements')" class="py-2 rounded-xl bg-amber-500/20 text-amber-300 font-black">العقود Excel</button>
             </div>
+          </div>
+        </div>`;
+    },
+
+    renderProfitsTab(app) {
+      if (!this.isSuper(app)) return `<div class="p-6 text-center text-xs text-rose-400">خزنة الأرباح مقصورة على مدير المنصة فقط</div>`;
+      const b = this.calcProfitBreakdown();
+      const s = this.stats;
+      const usersTrust = s.avail + s.escrow + s.held;
+
+      return `
+        <div class="space-y-3.5 text-xs">
+          <!-- BOX 1: USERS TRUST VAULT -->
+          <div class="p-3.5 rounded-2xl bg-slate-950 border border-sky-500/50 space-y-2">
+            <div class="flex justify-between items-center">
+              <span class="font-black text-sky-300"><i class="fa-solid fa-vault me-1"></i> 1. خزنة أمانات الناس (لا تُمس)</span>
+              <span class="text-sm font-black text-white">${app.fmtMoney(usersTrust)} ج.م</span>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+              <div class="p-2 rounded-xl bg-slate-900">متاح للناس<br/><b class="text-emerald-400">${app.fmtMoney(s.avail)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-900">ضمان Escrow<br/><b class="text-amber-400">${app.fmtMoney(s.escrow)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-900">محجوز إدارياً<br/><b class="text-rose-400">${app.fmtMoney(s.held)}</b></div>
+            </div>
+          </div>
+
+          <!-- BOX 2: PLATFORM PROFIT VAULT -->
+          <div class="p-3.5 rounded-2xl bg-gradient-to-br from-amber-900/40 via-slate-900 to-slate-950 border border-amber-500/60 space-y-2.5">
+            <div class="flex justify-between items-center">
+              <span class="font-black text-amber-400"><i class="fa-solid fa-coins me-1"></i> 2. خزنة أرباحك الصافية (فلوسك لوحدك)</span>
+              <button onclick="DamanAdmin.printProfitVaultA4()" class="px-2.5 py-1 rounded-lg bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>كشف A4</button>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+              <div class="p-2 rounded-xl bg-slate-950/80 flex justify-between"><span>عمولة الضمان 3.5%:</span><b class="text-emerald-400">${app.fmtMoney(b.escrow35)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-950/80 flex justify-between"><span>عمالة VIP 10%:</span><b class="text-emerald-400">${app.fmtMoney(b.vip10)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-950/80 flex justify-between"><span>الاستلام الهندسي 3x:</span><b class="text-emerald-400">${app.fmtMoney(b.insp3x)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-950/80 flex justify-between"><span>باقات وتمييز:</span><b class="text-emerald-400">${app.fmtMoney(b.subs + b.featured + b.other)}</b></div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5 text-center text-[10px] pt-1 border-t border-slate-800">
+              <div class="p-2 rounded-xl bg-slate-950">مصروفات تشغيل<br/><b class="text-rose-400">-${app.fmtMoney(b.totalExpenses)}</b></div>
+              <div class="p-2 rounded-xl bg-slate-950">مسحوباتك<br/><b class="text-sky-400">-${app.fmtMoney(b.ownerWithdrawals)}</b></div>
+              <div class="p-2 rounded-xl bg-amber-500/20 border border-amber-500/50">الصافي المتاح ليك<br/><b class="text-amber-300 text-xs">${app.fmtMoney(b.netAvailableProfit)} ج.م</b></div>
+            </div>
+          </div>
+
+          <!-- ADD EXPENSE / OWNER WITHDRAWAL / MANUAL REVENUE -->
+          <form onsubmit="DamanAdmin.addProfitExpenseOrWithdraw(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
+            <div class="font-black text-white">تسجيل حركة على خزنة أرباحك:</div>
+            <select id="pv-kind" onchange="document.getElementById('pv-rev-type').classList.toggle('hidden', this.value!=='manual_revenue')" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
+              <option value="owner_withdraw">💸 سحب مبلغ من أرباحي الصافية لنفسي (-)</option>
+              <option value="expense">📢 مصروف تشغيل / إعلانات فيسبوك / رواتب (-)</option>
+              <option value="manual_revenue">➕ إضافة إيراد يدوي (اشتراك / تمييز / استشارة) (+)</option>
+            </select>
+            <select id="pv-rev-type" class="hidden w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-emerald-300">
+              <option value="subscription">اشتراك باقة أفراد / شركات</option>
+              <option value="featured_ad">تمييز إعلان ★</option>
+              <option value="inspection_3x">استلام هندسي 3x</option>
+              <option value="vip_labor_10pct">عمولة عمالة VIP 10%</option>
+            </select>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="pv-amt" type="number" min="1" step="any" required placeholder="المبلغ (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+              <input id="pv-note" type="text" required placeholder="البيان (مثال: حملة فيسبوك)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ في خزنة الأرباح</button>
+          </form>
+
+          <div class="glass-card rounded-2xl p-3 space-y-1.5">
+            <div class="font-bold text-slate-300">آخر حركات المصروفات ومسحوباتك (${this.expensesList.length}):</div>
+            ${!this.expensesList.length ? '<div class="text-slate-500 text-center py-2">لا توجد حركات بعد</div>' : this.expensesList.slice(0, 15).map((e) => `
+              <div class="p-2 rounded-lg bg-slate-950 flex justify-between text-[11px]">
+                <span>${e.kind === 'owner_withdraw' ? '💸 سحب أرباح' : '📢 مصروف'} — ${app.esc(e.note)} <small class="text-slate-500">(${app.esc(e.date || '')})</small></span>
+                <b class="text-rose-400">-${app.fmtMoney(e.amount)} ج.م</b>
+              </div>`).join('')}
           </div>
         </div>`;
     },
@@ -1023,8 +1167,14 @@
     },
 
     renderWalletTab(app) {
-      return `<div class="space-y-2.5">${this.walletReqs.map((r) => `
-        <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2 text-xs">
+      const activeUids = new Set();
+      this.agreements.forEach((a) => { if (a.createdBy) activeUids.add(a.createdBy); if (a.payerUid) activeUids.add(a.payerUid); });
+
+      return `<div class="space-y-2.5">${this.walletReqs.map((r) => {
+        const fraudFlag = r.type === 'withdraw' && r.status === 'pending' && !activeUids.has(r.userId);
+        return `
+        <div class="p-3 rounded-xl bg-slate-950/90 border ${fraudFlag ? 'border-rose-500' : 'border-slate-800'} space-y-2 text-xs">
+          ${fraudFlag ? `<div class="text-[10px] font-black text-rose-300 bg-rose-500/15 px-2 py-1 rounded-lg">⚠️ تنبيه أمان مالي: طلب سحب لحساب لم يُنفّذ أي اتفاقات بعد — راجعه جيداً</div>` : ''}
           <div class="flex justify-between font-black"><span class="${r.type === 'deposit' ? 'text-emerald-400' : 'text-sky-400'}">${r.type === 'deposit' ? 'إيداع' : 'سحب'} — ${app.fmtMoney(r.amount)} ج.م</span><span class="text-[10px] text-amber-300">${app.esc(r.status)}</span></div>
           <div class="text-[10px] text-slate-400">${app.esc(r.userName)} | ${app.esc(r.method)}</div>
           ${r.receiptBase64 ? `<img src="${r.receiptBase64}" onclick="window.open('${r.receiptBase64}','_blank')" class="w-full max-h-32 object-contain rounded border border-slate-700 cursor-pointer" />` : ''}
@@ -1032,7 +1182,8 @@
             ${r.status === 'pending' ? `<button onclick="DamanAdmin.handleWalletReq('${r.id}','approved')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة</button><button onclick="DamanAdmin.handleWalletReq('${r.id}','rejected')" class="flex-1 py-1.5 rounded-lg bg-rose-500 text-white font-black text-[10px]">رفض</button>` : ''}
             ${r.status === 'approved' ? `<button onclick="DamanAdmin.handleWalletReq('${r.id}','reversed')" class="w-full py-1.5 rounded-lg bg-purple-500/20 text-purple-300 font-black text-[10px]">تراجع (Reverse)</button>` : ''}
           </div>
-        </div>`).join('') || '<div class="text-center text-xs text-slate-400 py-5">لا توجد طلبات</div>'}</div>`;
+        </div>`;
+      }).join('') || '<div class="text-center text-xs text-slate-400 py-5">لا توجد طلبات</div>'}</div>`;
     },
 
     renderKycTab(app) {
@@ -1055,7 +1206,15 @@
 
           <div class="space-y-2">
             <h4 class="text-xs font-extrabold text-emerald-400">الاستلام الهندسي 3x (${this.inspReqs.length})</h4>
-            ${this.inspReqs.map((r) => `<div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-xs"><div class="font-bold text-white">${app.esc(r.packageLabel)}</div><div class="text-[10px] text-slate-400">${app.esc(r.area)} | ${app.esc(r.location)} | ${app.esc(r.phone)}</div><button onclick="DamanAdmin.quoteInspection('${r.id}','${r.userId}')" class="w-full py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">تسعير (${r.quotedPrice ? app.fmtMoney(r.quotedPrice) + ' ج.م' : 'بانتظار السعر'})</button></div>`).join('')}
+            ${this.inspReqs.map((r) => `
+              <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-xs">
+                <div class="flex justify-between font-bold"><span class="text-white">${app.esc(r.packageLabel)}</span><span class="text-[10px] text-emerald-400">${r.status === 'collected' ? 'تم التحصيل للأرباح ✅' : app.esc(r.status)}</span></div>
+                <div class="text-[10px] text-slate-400">${app.esc(r.area)} | ${app.esc(r.location)} | ${app.esc(r.phone)}</div>
+                <div class="flex gap-1.5">
+                  <button onclick="DamanAdmin.quoteInspection('${r.id}','${r.userId}')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">تسعير (${r.quotedPrice ? app.fmtMoney(r.quotedPrice) + ' ج.م' : 'جديد'})</button>
+                  ${r.quotedPrice && r.status !== 'collected' ? `<button onclick="DamanAdmin.collectInspectionFee('${r.id}')" class="flex-1 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">تحصيل وإضافة لأرباحي</button>` : ''}
+                </div>
+              </div>`).join('')}
           </div>
 
           <div class="space-y-2">
@@ -1116,22 +1275,18 @@
           <div class="space-y-3 text-xs">
             <button onclick="DamanAdmin.selectedCompanyHr=null; DamanAdmin.rerender()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-white font-bold">← رجوع لقائمة الشركات والموردين</button>
             <h4 class="font-black text-sky-400">مراقبة HR والرواتب والعُهد وجروب: ${app.esc(h.companyName)}</h4>
-
             <div class="space-y-1.5">
               <div class="font-bold text-emerald-400">الحضور والانصراف (${h.attendance.length}):</div>
               ${h.attendance.map((a) => `<div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2">${a.checkInSelfie ? `<img src="${a.checkInSelfie}" onclick="window.open('${a.checkInSelfie}','_blank')" class="w-8 h-8 rounded object-cover cursor-pointer" />` : ''}<div><b>${app.esc(a.memberName)}</b> (${app.esc(a.date)} • ${app.esc(a.siteName || '')}) — حضور ${a.checkInTime || '-'} / انصراف ${a.checkOutTime || '-'}</div></div>`).join('') || '<div class="text-slate-400">لا يوجد</div>'}
             </div>
-
             <div class="space-y-1.5">
               <div class="font-bold text-sky-300">كشوف الرواتب المصروفة (${h.payrolls.length}):</div>
               ${h.payrolls.map((p) => `<div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between"><span>${app.esc(p.memberName)} (${app.esc(p.monthKey)}) — ${app.esc(p.method)}</span><b class="text-emerald-400">${app.fmtMoney(p.netSalary)} ج.م</b></div>`).join('') || '<div class="text-slate-400">لا يوجد</div>'}
             </div>
-
             <div class="space-y-1.5">
               <div class="font-bold text-amber-400">سجل العُهد والفواتير (${h.custody.length}):</div>
               ${h.custody.map((c) => `<div class="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center"><span>${app.esc(c.notes)} (${app.esc(c.byName)}) ${c.invoiceBase64 ? `<a href="${c.invoiceBase64}" target="_blank" class="text-sky-400 underline ms-1">فاتورة</a>` : ''}</span><b>${app.fmtMoney(c.amount)} ج.م</b></div>`).join('') || '<div class="text-slate-400">لا يوجد</div>'}
             </div>
-
             <div class="space-y-1.5">
               <div class="font-bold text-purple-300">آخر رسائل جروب الشركة الداخلي (${h.groupMsgs.length}):</div>
               ${h.groupMsgs.map((m) => `<div class="p-2 rounded-lg bg-slate-950 border border-slate-800"><b class="text-amber-300">${app.esc(m.senderName)}:</b> ${app.esc(m.text)}</div>`).join('') || '<div class="text-slate-400">لا توجد رسائل</div>'}
@@ -1259,6 +1414,7 @@
 
       const tabs = [
         { id: 'overview', label: 'الإحصائيات' },
+        { id: 'profits', label: 'خزنة الأرباح' },
         { id: 'chats', label: 'شات ومكالمات' },
         { id: 'contracts', label: 'العقود والسجل' },
         { id: 'posts', label: 'المنشورات' },
@@ -1273,6 +1429,7 @@
 
       const body =
         this.subTab === 'overview' ? this.renderOverviewTab(app)
+        : this.subTab === 'profits' ? this.renderProfitsTab(app)
         : this.subTab === 'chats' ? this.renderChatsAndCallsTab(app)
         : this.subTab === 'contracts' ? this.renderContractsTab(app)
         : this.subTab === 'posts' ? this.renderPostsTab(app)
