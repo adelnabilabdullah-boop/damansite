@@ -235,7 +235,7 @@
       const s = this.stats;
       const win = window.open('', '_blank');
       if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>التقرير المالي العام — ضمان سايت</title><style>@page{size:A4 portrait;margin:14mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;font-size:12px;}.box{border:2px solid #000;padding:18px;}h2{margin:0 0 8px;border-bottom:2px solid #000;padding-bottom:8px;}table{width:100%;border-collapse:collapse;margin-top:12px;}th,td{border:1px solid #000;padding:7px;text-align:right;}th{background:#f0f0f0;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ PDF (A4)</button><div class="box"><h2>التقرير المالي والإداري العام — منصة ضمان سايت | DamanSite</h2><div>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</div><table><tr><th>إجمالي المستخدمين</th><td>${s.users}</td><th>الشركات / الموردين B2B</th><td>${s.companies} شركة / ${s.suppliers} مورّد</td></tr><tr><th>إجمالي الأرصدة المتاحة</th><td>${app.fmtMoney(s.avail)} ج.م</td><th>إجمالي أرصدة الضمان (Escrow)</th><td>${app.fmtMoney(s.escrow)} ج.م</td></tr><tr><th>الأرصدة المحجوزة إدارياً</th><td>${app.fmtMoney(s.held)} ج.م</td><th>إجمالي عمولات المنصة (3.5%)</th><td><b>${app.fmtMoney(s.fees)} ج.م</b></td></tr><tr><th>منشورات معلّقة</th><td>${s.pendingPosts}</td><th>عقود موقّعة بانتظار الاعتماد</th><td>${s.pendingContracts}</td></tr><tr><th>طلبات محفظة معلّقة</th><td>${s.pendingWallet}</td><th>نزاعات مفتوحة</th><td>${s.openDisputes}</td></tr></table></div></body></html>`);
+      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>التقرير المالي العام — ضمان سايت</title><style>@page{size:A4 portrait;margin:14mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;font-size:12px;}.box{border:2px solid #000;padding:18px;}h2{margin:0 0 8px;border-bottom:2px solid #000;padding-bottom:8px;}table{width:100%;border-collapse:collapse;margin-top:12px;}th,td{border:1px solid #000;padding:7px;text-align:right;}th{background:#f0f0f0;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ PDF (A4)</button><div class="box"><h2>التقرير المالي والإداري العام — منصة ضمان سايت | DamanSite</h2><div>تاريخ التقرير: ${new Date().toLocaleString('ar-EG')}</div><table><tr><th>إجمالي المستخدمين</th><td>${s.users}</td><th>الشركات / الموردين B2B</th><td>${s.companies} شركة / ${s.suppliers} مورّد</td></tr><tr><th>إجمالي الأرصدة المتاحة</th><td>${app.fmtMoney(s.avail)} ج.م</td><th>إجمالي أرصدة الضمان (Escrow)</th><td>${app.fmtMoney(s.escrow)} ج.م</td></tr><tr><th>الأرصدة المحجوزة إدارياً</th><td>${app.fmtMoney(s.held)} ج.م</td><th>إجمالي عمولات المنصة (3.5% + VIP 10%)</th><td><b>${app.fmtMoney(s.fees)} ج.م</b></td></tr><tr><th>منشورات معلّقة</th><td>${s.pendingPosts}</td><th>عقود موقّعة بانتظار الاعتماد</th><td>${s.pendingContracts}</td></tr><tr><th>طلبات محفظة معلّقة</th><td>${s.pendingWallet}</td><th>نزاعات مفتوحة</th><td>${s.openDisputes}</td></tr></table></div></body></html>`);
       win.document.close();
     },
 
@@ -447,7 +447,7 @@
       } catch (e) { window.DamanApp.toast(e.message, 'error'); }
     },
 
-    // ==================== 5. WALLET, KYC, FLEXIBLE DISPUTES & TICKETS ====================
+    // ==================== 5. WALLET, KYC, FLEXIBLE DISPUTES, VIP 10% & TICKETS ====================
     async handleWalletReq(reqId, decision) {
       const app = window.DamanApp;
       if (!this.isSuper(app)) return app.toast('الموافقات المالية مقصورة على مدير المنصة فقط', 'error');
@@ -551,12 +551,29 @@
 
     async replyVipLabor(reqId, userId) {
       const app = window.DamanApp;
-      const note = window.prompt('رد الإدارة على طلب عمالة VIP:', '');
-      if (!note) return;
+      const baseCost = parseFloat(window.prompt('أدخل تكلفة العمالة الأساسية (ج.م):', ''));
+      if (!baseCost || baseCost <= 0) return;
+      const vipCommission = Math.round(baseCost * 0.10 * 100) / 100; // عمولة الإدارة 10%
+      const totalPrice = Math.round((baseCost + vipCommission) * 100) / 100;
+      const note = window.prompt(
+        `التكلفة: ${app.fmtMoney(baseCost)} ج.م + عمولة VIP (10%): ${app.fmtMoney(vipCommission)} ج.م\nالإجمالي للعميل: ${app.fmtMoney(totalPrice)} ج.م\n\nاكتب ملاحظة أو موعد التوفير للعميل:`,
+        'العمالة جاهزة للنزول فور حجز المبلغ من المحفظة'
+      ) || '';
       try {
-        await app.db.collection('vipLaborRequests').doc(reqId).update({ adminNote: note, status: 'replied' });
-        await app.sendNotification(userId, 'رد الإدارة على طلب عمالة VIP', note);
-        app.toast('تم إرسال الرد وإشعار العميل', 'success');
+        await app.db.collection('vipLaborRequests').doc(reqId).update({
+          baseCost,
+          vipCommission,
+          totalPrice,
+          adminNote: note,
+          status: 'quoted'
+        });
+        await app.sendNotification(
+          userId,
+          'تم تسعير طلب عمالة VIP ✅',
+          `التكلفة: ${app.fmtMoney(baseCost)} + عمولة 10% (${app.fmtMoney(vipCommission)}) = الإجمالي ${app.fmtMoney(totalPrice)} ج.م — ادخل للموافقة والحجز.`
+        );
+        await this.logAction(app, 'QUOTE_VIP_LABOR', `${reqId}: ${totalPrice} EGP (10% = ${vipCommission})`);
+        app.toast('تم إرسال التسعيرة بعمولة 10% وإشعار العميل ✅', 'success');
         this.loadTabData(app);
       } catch (e) { app.toast(e.message, 'error'); }
     },
@@ -837,7 +854,7 @@
         <div class="space-y-3">
           <div class="grid grid-cols-2 gap-2 text-center">
             <div class="p-3 rounded-2xl bg-slate-950 border border-emerald-500/40"><div class="text-[10px] text-slate-400">إجمالي السيولة بالمنصة</div><div class="text-sm font-black text-emerald-400 mt-0.5">${app.fmtMoney(s.avail + s.escrow + s.held)} ج.م</div></div>
-            <div class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40"><div class="text-[10px] text-slate-400">إجمالي عمولاتك (3.5%)</div><div class="text-sm font-black text-amber-400 mt-0.5">${app.fmtMoney(s.fees)} ج.م</div></div>
+            <div class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40"><div class="text-[10px] text-slate-400">إجمالي عمولاتك (3.5% + VIP 10%)</div><div class="text-sm font-black text-amber-400 mt-0.5">${app.fmtMoney(s.fees)} ج.م</div></div>
             <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">مستخدمين / شركات / موردين</div><div class="text-xs font-black text-white">${s.users} / ${s.companies} / ${s.suppliers}</div></div>
             <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800"><div class="text-[10px] text-slate-400">أرصدة الضمان (Escrow)</div><div class="text-xs font-black text-sky-400">${app.fmtMoney(s.escrow)} ج.م</div></div>
           </div>
@@ -1035,14 +1052,26 @@
             <h4 class="text-xs font-extrabold text-rose-400">النزاعات (فصل كامل أو بنسبة مئوية) (${this.disputes.length})</h4>
             ${this.disputes.map((d) => `<div class="p-3 rounded-xl bg-rose-950/30 border border-rose-500/40 space-y-1.5 text-xs"><div class="font-bold text-white">${app.esc(d.projectTitle)} (${app.fmtMoney(d.contractAmount)} ج.م)</div><div class="text-[10px] text-rose-200">${app.esc(d.reason)}</div>${d.status === 'open' ? `<div class="grid grid-cols-3 gap-1"><button onclick="DamanAdmin.resolveDispute('${d.id}','client')" class="py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[9px]">100% عميل</button><button onclick="DamanAdmin.resolveDispute('${d.id}','split')" class="py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[9px]">تقسيم %</button><button onclick="DamanAdmin.resolveDispute('${d.id}','provider')" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[9px]">100% منفّذ</button></div>` : `<div class="text-[10px] text-emerald-300">تم الفصل (${app.esc(d.resolution)})</div>`}</div>`).join('')}
           </div>
+
           <div class="space-y-2">
             <h4 class="text-xs font-extrabold text-emerald-400">الاستلام الهندسي 3x (${this.inspReqs.length})</h4>
             ${this.inspReqs.map((r) => `<div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-xs"><div class="font-bold text-white">${app.esc(r.packageLabel)}</div><div class="text-[10px] text-slate-400">${app.esc(r.area)} | ${app.esc(r.location)} | ${app.esc(r.phone)}</div><button onclick="DamanAdmin.quoteInspection('${r.id}','${r.userId}')" class="w-full py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">تسعير (${r.quotedPrice ? app.fmtMoney(r.quotedPrice) + ' ج.م' : 'بانتظار السعر'})</button></div>`).join('')}
           </div>
+
           <div class="space-y-2">
-            <h4 class="text-xs font-extrabold text-amber-400">عمالة VIP (${this.vipLaborReqs.length})</h4>
-            ${this.vipLaborReqs.map((r) => `<div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-xs"><div class="font-bold text-white">${app.esc(r.trade)} (${r.workersCount} عامل)</div><div class="text-[10px] text-slate-400">${app.esc(r.location)} | ${app.esc(r.phone)}</div><button onclick="DamanAdmin.replyVipLabor('${r.id}','${r.userId}')" class="w-full py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">رد الإدارة</button></div>`).join('')}
+            <h4 class="text-xs font-extrabold text-amber-400">عمالة VIP (عمولة 10%) (${this.vipLaborReqs.length})</h4>
+            ${this.vipLaborReqs.map((r) => `
+              <div class="p-3 rounded-xl bg-slate-950/90 border ${r.status === 'funded' ? 'border-emerald-500/60' : 'border-slate-800'} space-y-1.5 text-xs">
+                <div class="flex justify-between font-bold">
+                  <span class="text-white">${app.esc(r.trade)} (${r.workersCount} عامل)</span>
+                  <span class="text-[10px] ${r.status === 'funded' ? 'text-emerald-400' : 'text-amber-300'}">${r.status === 'funded' ? 'تم الحجز والدفع ✅' : r.status === 'quoted' ? 'بانتظار موافقة العميل' : 'طلب جديد'}</span>
+                </div>
+                <div class="text-[10px] text-slate-400">${app.esc(r.location)} | ${app.esc(r.duration)} | ${app.esc(r.phone)}</div>
+                ${r.totalPrice ? `<div class="text-[10px] text-emerald-300 font-bold">أساسي: ${app.fmtMoney(r.baseCost)} + عمولتك 10%: ${app.fmtMoney(r.vipCommission)} = <b>${app.fmtMoney(r.totalPrice)} ج.م</b></div>` : ''}
+                ${r.status !== 'funded' ? `<button onclick="DamanAdmin.replyVipLabor('${r.id}','${r.userId}')" class="w-full py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">${r.totalPrice ? 'تعديل التسعيرة (10%)' : 'تسعير الطلب وإضافة عمولة 10%'}</button>` : ''}
+              </div>`).join('')}
           </div>
+
           <div class="space-y-2">
             <h4 class="text-xs font-extrabold text-sky-400">تذاكر الدعم (${this.tickets.length})</h4>
             ${this.tickets.map((t) => `<div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-xs"><div class="font-bold text-white">${app.esc(t.subject)}</div><div class="text-[10px] text-slate-400">${app.esc(t.userName)}: ${app.esc(t.message)}</div><button onclick="DamanAdmin.replyTicket('${t.id}','${t.userId}')" class="w-full py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px]">رد وإغلاق</button></div>`).join('')}
