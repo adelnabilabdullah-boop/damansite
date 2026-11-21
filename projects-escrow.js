@@ -1,99 +1,109 @@
 (function () {
   const ProjectsMod = {
-    subTab: 'browse', // 'browse' | 'ledger' | 'inspection' | 'vip_labor'
-    postTypeFilter: 'all', // 'all' | 'hiring' | 'seeking' | 'supplier'
+    subTab: 'market', // 'market' | 'ledger' | 'inspection' | 'viplabor'
+    marketFilter: 'all', // 'all' | 'project' | 'worker' | 'supplier' | 'favorites'
+    selectedCategory: 'all',
+    searchQuery: '',
+
     projects: [],
     ledgerEntries: [],
-    ledgerSiteFilter: 'all',
-    myInspections: [],
-    myVipLabor: [],
-    currentProposals: [],
-    activeProjectId: null,
-    activeDemoItem: null,
-    postPhotoBase64: '',
-    demoCache: {},
-    unsubProjects: null,
-    unsubProposals: null,
-    unsubLedger: null,
-    unsubInspections: null,
-    unsubVipLabor: null,
+    inspectionReqs: [],
+    vipLaborReqs: [],
+
     attachedUid: null,
+    unsubProjects: null,
+    unsubLedger: null,
+    unsubInspect: null,
+    unsubVipLabor: null,
+
+    viewedSession: new Set(),
+    tempPostPhoto: '',
 
     ensureListeners(app) {
+      // Market projects feed (public approved + user's own posts)
       if (!this.unsubProjects) {
         this.unsubProjects = app.db
           .collection('projects')
-          .orderBy('createdAt', 'desc')
-          .limit(70)
-          .onSnapshot(
-            (snap) => {
-              this.projects = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-              if (app.activeTab === 'projects') this.rerender();
-              if (this.activeProjectId) this.refreshDetailModal();
-            },
-            (err) => console.error('projects listener error:', err)
-          );
-      }
-
-      if (!app.user) {
-        this.detachUserListeners();
-        return;
-      }
-
-      if (this.attachedUid !== app.user.uid) {
-        this.detachUserListeners();
-        this.attachedUid = app.user.uid;
-
-        this.unsubLedger = app.db
-          .collection('siteLedger')
-          .where('ownerUid', '==', app.user.uid)
           .limit(120)
           .onSnapshot(
             (snap) => {
-              this.ledgerEntries = snap.docs
+              this.projects = snap.docs
                 .map((d) => Object.assign({ id: d.id }, d.data()))
-                .sort((a, b) => (b.entryDate || '').localeCompare(a.entryDate || '') || (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-              if (app.activeTab === 'projects' && this.subTab === 'ledger') this.rerender();
-            },
-            () => {}
-          );
-
-        this.unsubInspections = app.db
-          .collection('vipRequests')
-          .where('userId', '==', app.user.uid)
-          .onSnapshot(
-            (snap) => {
-              this.myInspections = snap.docs
-                .map((d) => Object.assign({ id: d.id }, d.data()))
-                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-              if (app.activeTab === 'projects' && this.subTab === 'inspection') this.rerender();
-            },
-            () => {}
-          );
-
-        this.unsubVipLabor = app.db
-          .collection('vipLaborRequests')
-          .where('userId', '==', app.user.uid)
-          .onSnapshot(
-            (snap) => {
-              this.myVipLabor = snap.docs
-                .map((d) => Object.assign({ id: d.id }, d.data()))
-                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-              if (app.activeTab === 'projects' && this.subTab === 'vip_labor') this.rerender();
+                .sort((a, b) => {
+                  const aBoost = Number(a.boostedUntil || 0) > Date.now() ? 1 : 0;
+                  const bBoost = Number(b.boostedUntil || 0) > Date.now() ? 1 : 0;
+                  if (bBoost !== aBoost) return bBoost - aBoost;
+                  return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+                });
+              if (app.activeTab === 'projects' && this.subTab === 'market') this.rerender();
             },
             () => {}
           );
       }
+
+      const curUid = app.user ? app.user.uid : null;
+      if (this.attachedUid === curUid) return;
+      this.detachUserListeners();
+      this.attachedUid = curUid;
+      if (!curUid) return;
+
+      this.unsubLedger = app.db
+        .collection('siteLedger')
+        .where('ownerId', '==', curUid)
+        .limit(150)
+        .onSnapshot(
+          (snap) => {
+            this.ledgerEntries = snap.docs
+              .map((d) => Object.assign({ id: d.id }, d.data()))
+              .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            if (app.activeTab === 'projects' && this.subTab === 'ledger') this.rerender();
+          },
+          () => {}
+        );
+
+      this.unsubInspect = app.db
+        .collection('vipRequests')
+        .where('userId', '==', curUid)
+        .limit(40)
+        .onSnapshot(
+          (snap) => {
+            this.inspectionReqs = snap.docs
+              .map((d) => Object.assign({ id: d.id }, d.data()))
+              .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            if (app.activeTab === 'projects' && this.subTab === 'inspection') this.rerender();
+          },
+          () => {}
+        );
+
+      this.unsubVipLabor = app.db
+        .collection('vipLaborRequests')
+        .where('userId', '==', curUid)
+        .limit(40)
+        .onSnapshot(
+          (snap) => {
+            this.vipLaborReqs = snap.docs
+              .map((d) => Object.assign({ id: d.id }, d.data()))
+              .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            if (app.activeTab === 'projects' && this.subTab === 'viplabor') this.rerender();
+          },
+          () => {}
+        );
     },
 
     detachUserListeners() {
-      if (this.unsubLedger) { this.unsubLedger(); this.unsubLedger = null; }
-      if (this.unsubInspections) { this.unsubInspections(); this.unsubInspections = null; }
-      if (this.unsubVipLabor) { this.unsubVipLabor(); this.unsubVipLabor = null; }
+      ['unsubLedger', 'unsubInspect', 'unsubVipLabor'].forEach((k) => {
+        if (this[k]) { try { this[k](); } catch (e) {} this[k] = null; }
+      });
       this.attachedUid = null;
       this.ledgerEntries = [];
-      this.myInspections = [];
-      this.myVipLabor = [];
+      this.inspectionReqs = [];
+      this.vipLaborReqs = [];
+    },
+
+    detachListeners() {
+      this.detachUserListeners();
+      if (this.unsubProjects) { try { this.unsubProjects(); } catch (e) {} this.unsubProjects = null; }
+      this.projects = [];
     },
 
     rerender() {
@@ -103,785 +113,809 @@
       }
     },
 
-    setSubTab(tab) { this.subTab = tab; this.rerender(); },
-    setPostTypeFilter(t) { this.subTab = 'browse'; this.postTypeFilter = t || 'all'; this.rerender(); },
-    setFilter(catId) { window.DamanApp.selectedMainCat = catId || 'all'; this.rerender(); },
-    setGovFilter(gov) { window.DamanApp.selectedGov = gov || 'all'; this.rerender(); },
-    setSearch(val) { window.DamanApp.searchQuery = (val || '').trim(); this.rerender(); },
-
-    getCatLabel(catId, lang) {
-      const c = window.DAMAN_CATEGORIES.find((x) => x.id === catId);
-      if (!c) return catId || '-';
-      return lang === 'ar' ? c.ar : c.en;
+    setSubTab(t) {
+      this.subTab = t;
+      this.rerender();
     },
 
-    getDemoAdsForCategory(catId) {
-      const app = window.DamanApp;
-      if (app.appConfig && app.appConfig.hideDemoAds) return [];
-
-      const cats = catId === 'all' ? window.DAMAN_CATEGORIES.slice(0, 6) : window.DAMAN_CATEGORIES.filter((c) => c.id === catId);
-      const govs = window.DAMAN_GOVERNORATES;
-      const providers = [
-        { name: 'مجموعة النيل للمقاولات والإنشاءات', role: 'company', phone: '01000001021', rating: 4.9, count: 18 },
-        { name: 'الشركة المصرية لتوريد مواد البناء (B2B)', role: 'supplier', phone: '01100002032', rating: 4.9, count: 27 },
-        { name: 'شركة الرواد للتوريدات والشدات المعدنية', role: 'supplier', phone: '01200003043', rating: 4.8, count: 22 },
-        { name: 'مقاول تنفيذ معتمد — محمود حسن', role: 'contractor', phone: '01000004054', rating: 4.6, count: 9 },
-        { name: 'المتحدة لتوريد الحديد والأسمنت والخرسانة', role: 'supplier', phone: '01500005065', rating: 4.9, count: 31 },
-        { name: 'فريق الإتقان الفني المتخصص', role: 'contractor', phone: '01000006076', rating: 4.7, count: 11 },
-        { name: 'مكتب الصفا الهندسي والتشطيبات', role: 'company', phone: '01100007087', rating: 4.8, count: 16 },
-        { name: 'شركة الأفق لتوريد السيراميك والرخام', role: 'supplier', phone: '01200008098', rating: 4.8, count: 19 },
-        { name: 'م. طارق عبد الرحمن — إشراف وتنفيذ', role: 'contractor', phone: '01000009109', rating: 4.9, count: 25 }
-      ];
-
-      const list = [];
-      cats.forEach((cat, cIdx) => {
-        const perCat = catId === 'all' ? 3 : 9;
-        for (let i = 0; i < perCat; i++) {
-          const prov = providers[(cIdx + i) % providers.length];
-          const gov = govs[(cIdx * 3 + i * 2) % govs.length];
-          const mod = i % 3;
-          const postType = mod === 0 ? 'hiring' : mod === 1 ? 'seeking' : 'supplier';
-          const id = `demo_${cat.id}_${i}`;
-          const item = {
-            id,
-            isDemo: true,
-            isFeatured: i === 0,
-            postType,
-            mainCategory: cat.id,
-            title: postType === 'supplier'
-              ? `توريد خامات ومعدات ${cat.ar} بأسعار الجملة — ${gov}`
-              : postType === 'hiring'
-              ? `مطلوب تنفيذ / عمالة في ${cat.ar} — ${gov}`
-              : `متاح للتنفيذ والعمل في ${cat.ar} (${prov.name})`,
-            location: gov,
-            budget: postType === 'supplier' ? (i + 1) * 18500 : (i + 2) * 12500,
-            description: postType === 'supplier'
-              ? `توريد فوري ومباشر للمواقع والشركات والموردين في قطاع ${cat.ar} داخل ${gov} وجميع المحافظات. يتم حجز المبلغ في محفظة ضمان سايت (B2B Escrow) ولا يُفرج عنه إلا بعد وصول البضاعة وفحصها واستلامها في الموقع.`
-              : postType === 'hiring'
-              ? `مطلوب فريق عمل أو شركة متخصصة لتنفيذ أعمال ${cat.ar} في ${gov}. التعاقد وحجز الدفعات عبر محفظة ضمان سايت (3.5%) لضمان حق الطرفين.`
-              : `فريق ومقاول جاهز للتنفيذ الفوري في قطاع ${cat.ar} داخل ${gov} وجميع المحافظات بأعلى جودة والتزام تام بالمواعيد.`,
-            clientId: `demo_user_${(cIdx + i) % providers.length}`,
-            clientName: prov.name,
-            clientPhone: prov.phone,
-            clientAccountType: postType === 'supplier' ? 'supplier' : prov.role,
-            clientRating: prov.rating,
-            clientRatingCount: prov.count,
-            status: 'open',
-            proposalsCount: (i % 5) + 1,
-            demoReviews: [
-              { fromName: 'عميل موثّق', rating: 5, comment: 'التزام ممتاز بالمواعيد ومطابقة كاملة للمواصفات.' },
-              { fromName: 'م. كريم عادل', rating: 4, comment: 'تعامل محترم وسعر مناسب جداً.' }
-            ]
-          };
-          this.demoCache[id] = item;
-          list.push(item);
-        }
-      });
-      return list;
+    setMarketFilter(f) {
+      this.marketFilter = f;
+      this.rerender();
     },
 
-    statusBadge(status, isAr) {
-      const map = {
-        pending_review: { cls: 'bg-purple-500/20 text-purple-300', ar: 'قيد مراجعة الإدارة', en: 'Pending Review' },
-        open: { cls: 'bg-emerald-500/20 text-emerald-300', ar: 'مفتوح', en: 'Open' },
-        pending_funding: { cls: 'bg-orange-500/20 text-orange-300', ar: 'بانتظار الشحن', en: 'Pending Funding' },
-        in_progress: { cls: 'bg-amber-500/20 text-amber-300', ar: 'عقد ضمان نشط', en: 'Escrow Active' },
-        completed: { cls: 'bg-sky-500/20 text-sky-300', ar: 'مكتمل', en: 'Completed' },
-        disputed: { cls: 'bg-rose-500/20 text-rose-300', ar: 'قيد النزاع', en: 'Disputed' },
-        suspended: { cls: 'bg-slate-700 text-slate-300', ar: 'موقوف إدارياً', en: 'Suspended' }
-      };
-      const st = map[status] || map.open;
-      return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${st.cls}">${isAr ? st.ar : st.en}</span>`;
+    setCategory(c) {
+      this.selectedCategory = c;
+      this.rerender();
     },
 
-    postTypeBadge(postType) {
-      if (postType === 'supplier') {
-        return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 shrink-0"><i class="fa-solid fa-truck-fast me-0.5"></i>مورّد / توريد B2B</span>`;
-      }
-      if (postType === 'seeking') {
-        return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 shrink-0">باحث عن عمل</span>`;
-      }
-      return `<span class="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 shrink-0">صاحب عمل</span>`;
+    onSearchInput(val) {
+      this.searchQuery = val || '';
+      const box = document.getElementById('daman-market-list-slot');
+      if (box) box.innerHTML = this.renderMarketCards(window.DamanApp);
     },
 
-    compressImage(file, maxW = 820, quality = 0.58) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Read error'));
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onerror = () => reject(new Error('Image error'));
-          img.onload = () => {
-            let w = img.width, h = img.height;
-            if (w > maxW) { h = Math.round((h * maxW) / w); w = maxW; }
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL('image/jpeg', quality));
-          };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      });
+    catLabel(id) {
+      const c = (window.DamanApp.CATEGORIES || []).find((x) => x.id === id);
+      return c ? (window.DamanApp.lang === 'ar' ? c.ar : c.en) : (id || 'عام');
     },
 
-    async handleProjectPhoto(input) {
-      const app = window.DamanApp;
-      const file = input.files && input.files[0];
-      if (!file) return;
-      try {
-        this.postPhotoBase64 = await this.compressImage(file);
-        const prev = document.getElementById('post-proj-prev');
-        if (prev) prev.innerHTML = `<img src="${this.postPhotoBase64}" class="w-full max-h-36 object-cover rounded-xl border border-emerald-500/40 mt-2" />`;
-      } catch (e) { app.toast('تعذر قراءة الصورة', 'error'); }
+    postTypeLabel(t) {
+      if (t === 'supplier') return '🚚 توريد خامات B2B';
+      if (t === 'worker') return '👷 مقاول / فني يبحث عن عمل';
+      return '🏗️ مطلوب تنفيذ / مشروع';
     },
 
+    // ==================== CREATE / EDIT / CLOSE / BOOST / FAVORITE POSTS ====================
     openPostModal() {
       const app = window.DamanApp;
-      const isAr = app.lang === 'ar';
       if (!app.user || !app.profile) return app.openAuthModal('login');
-      if (app.profile.status === 'frozen') return app.toast(app.t('frozenNotice'), 'error');
-      if (app.appConfig?.disablePosting && !app.isAdmin()) {
-        return app.toast('نشر الإعلانات والمشاريع الجديدة متوقف مؤقتاً من قِبل الإدارة', 'warning');
+      if (!app.isKycVerified()) return app.toast('يجب توثيق الحساب بالبطاقة والسيلفي قبل النشر', 'warning');
+      this.openPostEditorModal(null);
+    },
+
+    openEditPostModal(pid) {
+      const post = this.projects.find((x) => x.id === pid);
+      if (!post) {
+        window.DamanApp.db.collection('projects').doc(pid).get().then((s) => {
+          if (s.exists) this.openPostEditorModal(Object.assign({ id: s.id }, s.data()));
+        }).catch(() => {});
+        return;
       }
+      this.openPostEditorModal(post);
+    },
 
-      this.postPhotoBase64 = '';
-      let modal = document.getElementById('daman-post-project-modal');
-      if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'daman-post-project-modal';
-        modal.className = 'fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(modal);
+    openPostEditorModal(existing) {
+      const app = window.DamanApp;
+      this.tempPostPhoto = existing?.imageBase64 || '';
+      let m = document.getElementById('daman-post-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-post-modal';
+        m.className = 'daman-modal fixed inset-0 z-[88] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
       }
-      modal.classList.remove('hidden');
+      m.classList.remove('hidden');
 
-      const defaultCat = app.selectedMainCat && app.selectedMainCat !== 'all' ? app.selectedMainCat : window.DAMAN_CATEGORIES[0].id;
-      const defaultType = app.profile.accountType === 'supplier' ? 'supplier' : (this.postTypeFilter !== 'all' ? this.postTypeFilter : 'hiring');
-      const catOpts = window.DAMAN_CATEGORIES.map((c) => `<option value="${c.id}" ${c.id === defaultCat ? 'selected' : ''}>${isAr ? c.ar : c.en}</option>`).join('');
-      const govOpts = window.DAMAN_GOVERNORATES.map((g) => `<option value="${g}">${g}</option>`).join('');
+      const catsOpt = app.CATEGORIES.map((c) => `<option value="${c.id}" ${existing?.category === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
+      const defType = existing?.postType || (app.profile?.accountType === 'supplier' ? 'supplier' : 'project');
 
-      modal.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 max-h-[92vh] overflow-y-auto">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-extrabold text-amber-400"><i class="fa-solid fa-plus-circle me-1"></i> نشر مشروع / عرض عمل / توريد B2B</h3>
-            <button onclick="document.getElementById('daman-post-project-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400">${existing ? 'تعديل الإعلان (سيُعاد لمراجعة الإدارة)' : 'نشر إعلان / مشروع / عرض توريد B2B'}</h3>
+            <button onclick="document.getElementById('daman-post-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
-          <form onsubmit="DamanProjects.submitProject(event)" class="space-y-2.5 text-xs">
-            <div>
-              <label class="block text-[10px] text-slate-300 font-bold mb-1">تصنيف الإعلان</label>
-              <select id="pp-post-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/50 text-amber-300 font-black">
-                <option value="hiring" ${defaultType === 'hiring' ? 'selected' : ''}>📌 صاحب عمل / مشروع (مطلوب مقاول أو شركة أو عمالة)</option>
-                <option value="seeking" ${defaultType === 'seeking' ? 'selected' : ''}>👷 باحث عن عمل / مقدم خدمة (أعرض خدماتي ومعداتي)</option>
-                <option value="supplier" ${defaultType === 'supplier' ? 'selected' : ''}>🚚 مورّد خامات ومعدات B2B (عرض خامات أو طلب توريد)</option>
-              </select>
-            </div>
+          <form onsubmit="DamanProjects.savePost(event,'${existing ? existing.id : ''}')" class="space-y-2.5">
             <div class="grid grid-cols-2 gap-2">
-              <select id="pp-main-cat" class="px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${catOpts}</select>
-              <select id="pp-gov" class="px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${govOpts}</select>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-300 mb-1">نوع الإعلان</label>
+                <select id="pm-type" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                  <option value="project" ${defType === 'project' ? 'selected' : ''}>مطلوب تنفيذ / عمالة</option>
+                  <option value="worker" ${defType === 'worker' ? 'selected' : ''}>مقاول / فني متاح للعمل</option>
+                  <option value="supplier" ${defType === 'supplier' ? 'selected' : ''}>توريد خامات ومعدات B2B</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-300 mb-1">التخصص</label>
+                <select id="pm-cat" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${catsOpt}</select>
+              </div>
             </div>
-            <input id="pp-title" type="text" required placeholder="العنوان (مثال: توريد 50 طن أسمنت / مطلوب نجارين مسلح)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">عنوان الإعلان</label><input id="pm-title" type="text" required value="${app.esc(existing?.title || '')}" placeholder="مثال: مطلوب نجارين مسلح للتجمع الخامس / توريد رمل وزلط" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+
             <div class="grid grid-cols-2 gap-2">
-              <input id="pp-budget" type="number" min="50" step="any" required placeholder="السعر / الميزانية (ج.م)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
-              <input id="pp-area" type="text" placeholder="الكمية / المساحة / الوحدة" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <div><label class="block text-[11px] font-bold text-slate-300 mb-1">الميزانية / السعر التقريبي (ج.م)</label><input id="pm-budget" type="number" min="0" step="any" value="${existing?.budget || ''}" placeholder="اختياري" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المدينة / موقع المشروع</label><input id="pm-city" type="text" required value="${app.esc(existing?.city || app.profile?.city || '')}" placeholder="مثال: القاهرة الجديدة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
-            <textarea id="pp-desc" rows="3" required placeholder="اكتب التفاصيل والمواصفات وموعد التنفيذ أو التسليم..." class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
-            <label class="block p-2.5 rounded-xl border border-dashed border-slate-600 bg-slate-950/70 text-center cursor-pointer">
-              <span class="font-bold text-slate-300"><i class="fa-solid fa-image text-amber-400 me-1"></i> إرفاق صورة للموقع أو الخامات (اختياري)</span>
-              <input type="file" accept="image/*" class="hidden" onchange="DamanProjects.handleProjectPhoto(this)" />
-              <div id="post-proj-prev"></div>
+
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">التفاصيل والكميات والمواصفات</label><textarea id="pm-desc" rows="3" required placeholder="اكتب كل التفاصيل الواضحة للعمل أو التوريد..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc(existing?.description || '')}</textarea></div>
+
+            <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
+              <span class="font-bold text-emerald-300"><i class="fa-solid fa-image me-1"></i> صورة للمشروع أو الخامة (اختياري)</span>
+              <input type="file" accept="image/*" class="hidden" onchange="DamanProjects.handlePostPhoto(this)" />
+              <div id="pm-photo-prev">${this.tempPostPhoto ? `<img src="${this.tempPostPhoto}" class="max-h-24 mx-auto rounded mt-1.5" />` : ''}</div>
             </label>
-            <button id="pp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black">
-              <i class="fa-solid fa-paper-plane me-1"></i> إرسال المنشور لمراجعة الإدارة
+
+            <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">
+              ${existing ? 'حفظ التعديلات وإرسال للمراجعة' : 'نشر الإعلان الآن'}
             </button>
           </form>
         </div>`;
     },
 
-    async submitProject(e) {
-      e.preventDefault();
-      const app = window.DamanApp;
-      const btn = document.getElementById('pp-submit-btn');
-      if (btn) btn.disabled = true;
-      const title = document.getElementById('pp-title').value.trim();
-
+    async handlePostPhoto(input) {
+      const f = input.files && input.files[0];
+      if (!f) return;
       try {
-        const initialStatus = app.hasAdminAccess() ? 'open' : 'pending_review';
-        await app.db.collection('projects').add({
-          postType: document.getElementById('pp-post-type').value,
-          mainCategory: document.getElementById('pp-main-cat').value,
-          location: document.getElementById('pp-gov').value,
-          title,
-          budget: parseFloat(document.getElementById('pp-budget').value) || 0,
-          areaSpecs: document.getElementById('pp-area').value.trim(),
-          description: document.getElementById('pp-desc').value.trim(),
-          photoBase64: this.postPhotoBase64 || '',
-          clientId: app.user.uid,
-          clientName: app.profile.companyName || app.profile.kycFullName || app.profile.name || '',
-          clientEmail: app.profile.email || app.user.email || '',
-          clientPhone: app.profile.phone || '',
-          clientAccountType: app.profile.accountType || 'client',
-          clientRating: app.profile.ratingAvg || 0,
-          clientRatingCount: app.profile.ratingCount || 0,
-          isFeatured: false,
-          status: initialStatus,
-          proposalsCount: 0,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        if (!app.hasAdminAccess()) {
-          await app.sendNotification('ADMIN', 'منشور جديد بانتظار المراجعة', `${title} — بواسطة ${app.profile.name}`);
-        }
-        this.postPhotoBase64 = '';
-        document.getElementById('daman-post-project-modal').classList.add('hidden');
-        app.toast(app.hasAdminAccess() ? 'تم النشر بنجاح ✅' : 'تم إرسال منشورك لمراجعة الإدارة قبل النشر', 'success');
-      } catch (err) {
-        app.toast(err.message, 'error');
-        if (btn) btn.disabled = false;
-      }
+        this.tempPostPhoto = await window.DamanApp.compressImage(f, 580, 0.52);
+        const p = document.getElementById('pm-photo-prev');
+        if (p) p.innerHTML = `<img src="${this.tempPostPhoto}" class="max-h-24 mx-auto rounded mt-1.5" />`;
+      } catch (e) {}
     },
 
-    // ==================== SITE LEDGER (سجل العمال واليوميات والمصاريف وتصفية الخميس) ====================
-    async addLedgerEntry(e) {
+    async savePost(e, existingId) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      await app.withLock('savePost', async () => {
+        const payload = {
+          postType: document.getElementById('pm-type').value,
+          category: document.getElementById('pm-cat').value,
+          title: document.getElementById('pm-title').value.trim(),
+          budget: parseFloat(document.getElementById('pm-budget').value) || 0,
+          city: document.getElementById('pm-city').value.trim(),
+          description: document.getElementById('pm-desc').value.trim(),
+          imageBase64: this.tempPostPhoto || '',
+          status: app.hasAdminAccess() ? 'approved' : 'pending_review',
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        try {
+          if (existingId) {
+            await app.db.collection('projects').doc(existingId).update(payload);
+            await app.sendNotification('ADMIN', 'منشور معدّل بانتظار المراجعة ✏️', payload.title);
+            app.toast(app.hasAdminAccess() ? 'تم تحديث المنشور بنجاح ✅' : 'تم حفظ التعديلات وإعادة المنشور لمراجعة الإدارة', 'success');
+          } else {
+            Object.assign(payload, {
+              ownerId: app.user.uid,
+              ownerName: app.profile?.companyName || app.profile?.name || '',
+              ownerType: app.profile?.accountType || 'individual',
+              ownerVerified: app.profile?.kycStatus === 'verified',
+              ownerVip: app.isSubscriptionActive(),
+              views: 0,
+              boostedUntil: 0,
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await app.db.collection('projects').add(payload);
+            if (!app.hasAdminAccess()) {
+              await app.sendNotification('ADMIN', 'منشور جديد بالسوق بانتظار الموافقة 📢', `${payload.ownerName}: ${payload.title}`);
+            }
+            app.toast(app.hasAdminAccess() ? 'تم النشر مباشرة في السوق ✅' : 'تم إرسال إعلانك لمراجعة الإدارة وسيظهر فور اعتماده ✅', 'success');
+          }
+          document.getElementById('daman-post-modal').classList.add('hidden');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    async toggleClosePost(pid) {
+      const app = window.DamanApp;
+      const p = this.projects.find((x) => x.id === pid);
+      if (!p) return;
+      const next = p.status === 'closed' ? (app.hasAdminAccess() ? 'approved' : 'pending_review') : 'closed';
+      if (!window.confirm(next === 'closed' ? 'إغلاق الإعلان وإخفاؤه من السوق (تم الاتفاق)؟' : 'إعادة فتح الإعلان؟')) return;
+      try {
+        await app.db.collection('projects').doc(pid).update({ status: next });
+        app.toast(next === 'closed' ? 'تم إغلاق الإعلان ✅' : 'تم إرسال طلب إعادة فتح الإعلان', 'success');
+      } catch (e) { app.toast(e.message, 'error'); }
+    },
+
+    async toggleFavorite(pid) {
+      const app = window.DamanApp;
+      if (!app.user || !app.profile) return app.openAuthModal('login');
+      const favs = Array.isArray(app.profile.favorites) ? app.profile.favorites : [];
+      const exists = favs.includes(pid);
+      try {
+        await app.db.collection('users').doc(app.user.uid).update({
+          favorites: exists ? firebase.firestore.FieldValue.arrayRemove(pid) : firebase.firestore.FieldValue.arrayUnion(pid)
+        });
+        app.toast(exists ? 'تمت الإزالة من المفضلة' : 'تم الحفظ في المفضلة ❤️', 'info');
+      } catch (e) {}
+    },
+
+    async boostPost(pid) {
+      const app = window.DamanApp;
+      const p = this.projects.find((x) => x.id === pid);
+      if (!p || !app.user) return;
+      const price = Number(app.appConfig?.packages?.boostAdPrice || 75);
+      const avail = Number(app.profile?.balanceAvailable || 0);
+      if (avail < price) {
+        if (window.confirm(`تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م.\nرصيدك لا يكفي — هل تريد شحن المحفظة الآن؟`)) {
+          if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(price - avail);
+        }
+        return;
+      }
+      if (!window.confirm(`تأكيد تمييز الإعلان «${p.title}» وتثبيته بأعلى السوق لمدة 7 أيام بمبلغ ${app.fmtMoney(price)} ج.م؟`)) return;
+
+      await app.withLock('boost_' + pid, async () => {
+        const uRef = app.db.collection('users').doc(app.user.uid);
+        const pRef = app.db.collection('projects').doc(pid);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const uDoc = await tx.get(uRef);
+            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+            if (curAvail < price) throw new Error('الرصيد المتاح غير كافٍ');
+            tx.update(uRef, { balanceAvailable: Math.round((curAvail - price) * 100) / 100 });
+            tx.update(pRef, { boostedUntil: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: app.user.uid, type: 'ad_boost', amount: -price,
+              note: `تمييز إعلان لمدة 7 أيام: ${p.title}`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            tx.set(app.db.collection('platformFees').doc(), {
+              type: 'ad_boost', projectId: pid, userId: app.user.uid,
+              userName: app.profile?.companyName || app.profile?.name || '',
+              amount: price, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          app.toast('تم تمييز إعلانك وتثبيته بأعلى السوق لمدة 7 أيام ★', 'success');
+        } catch (e) { app.toast(e.message, 'error'); }
+      });
+    },
+
+    openPostDetails(pid) {
+      const app = window.DamanApp;
+      const p = this.projects.find((x) => x.id === pid);
+      if (!p) return;
+
+      if (!this.viewedSession.has(pid) && app.user && p.ownerId !== app.user.uid) {
+        this.viewedSession.add(pid);
+        app.db.collection('projects').doc(pid).update({ views: firebase.firestore.FieldValue.increment(1) }).catch(() => {});
+      }
+
+      let m = document.getElementById('daman-post-detail-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-post-detail-modal';
+        m.className = 'daman-modal fixed inset-0 z-[86] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      const isOwner = app.user && p.ownerId === app.user.uid;
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between gap-2">
+            <span class="px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-300 font-black text-[10px]">${this.postTypeLabel(p.postType)}</span>
+            <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <h3 class="text-sm font-black text-white">${app.esc(p.title)}</h3>
+          ${p.imageBase64 ? `<img src="${p.imageBase64}" onclick="DamanLightbox.open('${p.imageBase64}','${app.esc(p.title)}')" class="w-full max-h-56 object-cover rounded-2xl border border-slate-700 cursor-pointer" />` : ''}
+          <p class="text-slate-200 leading-relaxed whitespace-pre-line">${app.esc(p.description || '')}</p>
+          <div class="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+            <div>التخصص: <b class="text-amber-300">${app.esc(this.catLabel(p.category))}</b></div>
+            <div>الموقع: <b class="text-white">${app.esc(p.city || '—')}</b></div>
+            <div>السعر/الميزانية: <b class="text-emerald-400">${p.budget ? app.fmtMoney(p.budget) + ' ج.م' : 'بالاتفاق'}</b></div>
+            <div>المشاهدات: <b class="text-slate-300">${Number(p.views || 0)}</b></div>
+          </div>
+          <div onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanApp.openPublicProfile('${p.ownerId}')" class="p-2.5 rounded-xl bg-slate-800/80 flex items-center justify-between cursor-pointer">
+            <div>
+              <div class="font-black text-white">${app.esc(p.ownerName || 'مستخدم')} ${p.ownerVerified ? '<i class="fa-solid fa-circle-check text-emerald-400 ms-1"></i>' : ''}</div>
+              <div class="text-[10px] text-amber-300">اضغط لزيارة الصفحة وسابقة الأعمال والتقييمات</div>
+            </div>
+            <i class="fa-solid fa-chevron-left text-slate-400"></i>
+          </div>
+          <div class="flex gap-2">
+            ${!isOwner ? `
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); if(window.DamanChat) DamanChat.openDirectChat('${p.ownerId}','${app.esc(p.ownerName || '').replace(/'/g, "\\'")}','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">
+                <i class="fa-solid fa-comments me-1"></i> مراسلة واتفاق بالضمان
+              </button>
+              <button onclick="DamanApp.reportUserOrPost('project','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="px-3.5 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold">
+                <i class="fa-solid fa-flag"></i>
+              </button>` : `
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">تعديل</button>
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.boostPost('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-purple-500 text-white font-black">★ تمييز الإعلان</button>`}
+          </div>
+        </div>`;
+    },
+
+    // ==================== SITE WORKERS & WAGES LEDGER (WITH A4 PRINT & عهدة) ====================
+    async submitLedgerEntry(e) {
       e.preventDefault();
       const app = window.DamanApp;
       if (!app.user) return app.openAuthModal('login');
-      const siteName = document.getElementById('lg-site').value.trim();
-      const workerName = document.getElementById('lg-worker').value.trim();
-      const entryDate = document.getElementById('lg-date').value || new Date().toISOString().slice(0, 10);
-      const entryType = document.getElementById('lg-type').value;
-      const count = parseFloat(document.getElementById('lg-count').value) || 1;
-      const rate = parseFloat(document.getElementById('lg-rate').value) || 0;
-      const overtime = parseFloat(document.getElementById('lg-overtime').value) || 0;
-      const notes = document.getElementById('lg-notes').value.trim();
-
-      const total = Math.round((count * rate + overtime) * 100) / 100;
-      if (total <= 0) return app.toast('أدخل قيمة صحيحة للبند', 'error');
+      const workerName = document.getElementById('ld-worker').value.trim();
+      const entryType = document.getElementById('ld-type').value;
+      const amount = Math.round((parseFloat(document.getElementById('ld-amt').value) || 0) * 100) / 100;
+      const siteName = document.getElementById('ld-site').value.trim();
+      const note = document.getElementById('ld-note').value.trim();
+      if (!workerName || amount <= 0) return;
 
       try {
         await app.db.collection('siteLedger').add({
-          ownerUid: app.user.uid,
-          siteName, workerName, entryDate, entryType, count, rate, overtime, total, notes,
+          ownerId: app.user.uid,
+          workerName,
+          entryType, // 'wage' | 'overtime' | 'advance' | 'deduction' | 'custody'
+          amount,
+          siteName,
+          note,
+          date: app.todayLocal(),
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         e.target.reset();
-        document.getElementById('lg-date').value = new Date().toISOString().slice(0, 10);
-        document.getElementById('lg-site').value = siteName;
-        app.toast('تم تسجيل البند في سجل العمال بنجاح', 'success');
+        app.toast('تم التسجيل في دفتر الموقع بنجاح ✅', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
     async deleteLedgerEntry(id) {
-      if (!window.confirm('حذف هذا السجل؟')) return;
+      if (!window.confirm('حذف هذا القيد من دفتر الموقع؟')) return;
       try {
         await window.DamanApp.db.collection('siteLedger').doc(id).delete();
         window.DamanApp.toast('تم الحذف', 'info');
-      } catch (e) { window.DamanApp.toast(e.message, 'error'); }
+      } catch (e) {}
+    },
+
+    ledgerTypeLabel(t) {
+      return { wage: 'يومية عمل (+)', overtime: 'إضافي / سهر (+)', advance: 'سلفة (-)', deduction: 'خصم / جزاء (-)', custody: 'عهدة موقع (مشتريات)' }[t] || t;
     },
 
     printLedgerA4() {
       const app = window.DamanApp;
-      const list = this.ledgerSiteFilter === 'all'
-        ? this.ledgerEntries
-        : this.ledgerEntries.filter((x) => x.siteName === this.ledgerSiteFilter);
-      if (!list.length) return app.toast('لا توجد بيانات للطباعة', 'warning');
+      const byWorker = {};
+      this.ledgerEntries.forEach((x) => {
+        const k = x.workerName || 'غير مسمى';
+        if (!byWorker[k]) byWorker[k] = { wages: 0, advances: 0, deductions: 0, custody: 0 };
+        if (x.entryType === 'wage' || x.entryType === 'overtime') byWorker[k].wages += Number(x.amount || 0);
+        else if (x.entryType === 'advance') byWorker[k].advances += Number(x.amount || 0);
+        else if (x.entryType === 'deduction') byWorker[k].deductions += Number(x.amount || 0);
+        else if (x.entryType === 'custody') byWorker[k].custody += Number(x.amount || 0);
+      });
 
-      let totalWages = 0, totalLump = 0, totalExpenses = 0, totalDeduct = 0;
-      const typeAr = { daily: 'يوميات وإضافي', lump: 'مقطوعية', expense: 'مصروف / عهدة / سلفة', deduction: 'خصم / جزاء' };
-
-      const rows = list.map((it, i) => {
-        if (it.entryType === 'daily') totalWages += Number(it.total || 0);
-        else if (it.entryType === 'lump') totalLump += Number(it.total || 0);
-        else if (it.entryType === 'expense') totalExpenses += Number(it.total || 0);
-        else if (it.entryType === 'deduction') totalDeduct += Number(it.total || 0);
-        return `<tr><td>${i + 1}</td><td>${app.esc(it.entryDate)}</td><td>${app.esc(it.siteName)}</td><td>${app.esc(it.workerName)}</td><td>${typeAr[it.entryType] || it.entryType}</td><td>${it.count} × ${app.fmtMoney(it.rate)}${it.overtime ? ' + ' + app.fmtMoney(it.overtime) + ' إضافي' : ''}</td><td><b>${app.fmtMoney(it.total)} ج.م</b></td><td>${app.esc(it.notes || '-')}</td></tr>`;
+      const summaryRows = Object.entries(byWorker).map(([name, s], i) => {
+        const net = Math.round((s.wages - s.advances - s.deductions) * 100) / 100;
+        return `<tr><td>${i + 1}</td><td><b>${app.esc(name)}</b></td><td>${app.fmtMoney(s.wages)}</td><td>${app.fmtMoney(s.advances)}</td><td>${app.fmtMoney(s.deductions)}</td><td>${app.fmtMoney(s.custody)}</td><td><b>${app.fmtMoney(net)} ج.م</b></td></tr>`;
       }).join('');
 
-      const netPayable = Math.round((totalWages + totalLump - totalExpenses - totalDeduct) * 100) / 100;
-      const win = window.open('', '_blank');
-      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
+      const detailRows = this.ledgerEntries.map((x, i) => `
+        <tr><td>${i + 1}</td><td>${app.esc(x.date || '')}</td><td>${app.esc(x.workerName)}</td><td>${this.ledgerTypeLabel(x.entryType)}</td><td>${app.esc(x.siteName || '—')}</td><td>${app.esc(x.note || '—')}</td><td><b>${app.fmtMoney(x.amount)} ج.م</b></td></tr>`).join('');
 
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>كشف سجل العمال وتصفية الحساب — ضمان سايت</title><style>@page{size:A4 portrait;margin:12mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11px;line-height:1.5;}.sheet{border:2px solid #000;padding:14px 16px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:10px;}th,td{border:1px solid #000;padding:4px 6px;text-align:right;}th{background:#f0f0f0;}.sum{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:8px;text-align:center;}.sbox{border:1px solid #000;padding:6px;}.sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px;text-align:center;}.sig{border:1px solid #000;padding:8px 6px 38px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ كشف الحساب PDF (A4)</button><div class="sheet"><div class="hdr"><div><h2 style="margin:0">كشف سجل العمال واليوميات وتصفية الحساب</h2><div>المشروع / الموقع: <b>${app.esc(this.ledgerSiteFilter === 'all' ? 'جميع المواقع' : this.ledgerSiteFilter)}</b></div></div><div><div><b>منصة ضمان سايت | DamanSite</b></div><div>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</div></div></div><table><thead><tr><th>#</th><th>التاريخ</th><th>الموقع</th><th>العامل / المقاول</th><th>النوع</th><th>التفاصيل</th><th>الإجمالي</th><th>ملاحظات</th></tr></thead><tbody>${rows}</tbody></table><div class="sum"><div class="sbox">اليوميات<br/><b>${app.fmtMoney(totalWages)} ج.م</b></div><div class="sbox">المقطوعية<br/><b>${app.fmtMoney(totalLump)} ج.م</b></div><div class="sbox">المصاريف والسُلف<br/><b>-${app.fmtMoney(totalExpenses)} ج.م</b></div><div class="sbox">الخصومات<br/><b>-${app.fmtMoney(totalDeduct)} ج.م</b></div><div class="sbox" style="background:#eee">صافي التصفية<br/><b>${app.fmtMoney(netPayable)} ج.م</b></div></div><div class="sigs"><div class="sig">توقيع المشرف / المهندس</div><div class="sig">توقيع المقاول / المستلم</div><div class="sig">اعتماد المدير المسؤول</div></div></div></body></html>`);
-      win.document.close();
-    },
-
-    renderLedgerTab(app) {
-      if (!app.user) return `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${app.t('loginBtn')}</button></div>`;
-
-      const sites = [...new Set(this.ledgerEntries.map((x) => x.siteName).filter(Boolean))];
-      const list = this.ledgerSiteFilter === 'all' ? this.ledgerEntries : this.ledgerEntries.filter((x) => x.siteName === this.ledgerSiteFilter);
-
-      let wages = 0, lump = 0, exp = 0, ded = 0;
-      list.forEach((it) => {
-        if (it.entryType === 'daily') wages += Number(it.total || 0);
-        else if (it.entryType === 'lump') lump += Number(it.total || 0);
-        else if (it.entryType === 'expense') exp += Number(it.total || 0);
-        else if (it.entryType === 'deduction') ded += Number(it.total || 0);
-      });
-      const net = Math.round((wages + lump - exp - ded) * 100) / 100;
-      const today = new Date().toISOString().slice(0, 10);
-
-      return `
-        <div class="space-y-3.5">
-          <div class="rounded-2xl p-3.5 bg-gradient-to-br from-slate-800 to-slate-950 border border-amber-500/40 space-y-2.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-xs font-black text-amber-400"><i class="fa-solid fa-book-open me-1"></i> سجل العمال واليوميات وتصفية الحساب</div>
-              <button onclick="DamanProjects.printLedgerA4()" class="px-2.5 py-1.5 rounded-lg bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>كشف A4 PDF</button>
+      const html = `
+        <div style="border:2px solid #000; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+            <div>
+              <h2 style="margin:0; font-size:16px;">تصفية حساب العمال واليوميات والعهدة — ضمان سايت</h2>
+              <div style="font-size:11px;">إعداد: ${app.esc(app.profile?.legalName || app.profile?.name || '')}</div>
             </div>
-            <div class="grid grid-cols-3 gap-1.5 text-center text-[10px]">
-              <div class="p-2 rounded-xl bg-slate-950/80"><div class="text-slate-400">يوميات + مقطوعية</div><div class="text-xs font-black text-emerald-400 mt-0.5">${app.fmtMoney(wages + lump)}</div></div>
-              <div class="p-2 rounded-xl bg-slate-950/80"><div class="text-slate-400">مصاريف + خصومات</div><div class="text-xs font-black text-rose-400 mt-0.5">-${app.fmtMoney(exp + ded)}</div></div>
-              <div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/40"><div class="text-amber-200">صافي التصفية</div><div class="text-xs font-black text-amber-300 mt-0.5">${app.fmtMoney(net)} ج.م</div></div>
-            </div>
+            <div style="font-size:11px;"><b>التاريخ:</b> ${app.todayLocal()}</div>
           </div>
 
-          <form onsubmit="DamanProjects.addLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2 text-xs">
-            <div class="font-extrabold text-white"><i class="fa-solid fa-plus text-emerald-400 me-1"></i> تسجيل حركة جديدة (يومية / مصروف / مقطوعية / خصم)</div>
-            <div class="grid grid-cols-2 gap-2">
-              <input id="lg-site" type="text" required placeholder="اسم الموقع / المشروع" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <input id="lg-date" type="date" value="${today}" required class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <input id="lg-worker" type="text" required placeholder="اسم العامل / المقاول" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <select id="lg-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
-                <option value="daily">يوميات عمل (+)</option>
-                <option value="lump">مقطوعية / بند (+)</option>
-                <option value="expense">مصروف / سلفة / عهدة (-)</option>
-                <option value="deduction">خصم / جزاء (-)</option>
-              </select>
-            </div>
-            <div class="grid grid-cols-3 gap-1.5">
-              <input id="lg-count" type="number" step="any" min="0.5" value="1" placeholder="العدد" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <input id="lg-rate" type="number" step="any" min="1" required placeholder="السعر / المبلغ" class="px-2 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" />
-              <input id="lg-overtime" type="number" step="any" min="0" value="0" placeholder="إضافي (ج.م)" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            </div>
-            <input id="lg-notes" type="text" placeholder="ملاحظات (مثال: مصاريف يوم الثلاثاء / سلفة)" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">إضافة للسجل</button>
-          </form>
+          <h4 style="margin:6px 0;">أولاً: ملخص صافي المستحقات لكل عامل / مقاول</h4>
+          <table style="margin-bottom:12px;">
+            <thead><tr><th>#</th><th>الاسم</th><th>يوميات وإضافي</th><th>السلف</th><th>الخصومات</th><th>عهدة</th><th>الصافي المستحق</th></tr></thead>
+            <tbody>${summaryRows || '<tr><td colspan="7" style="text-align:center;">لا توجد قيود</td></tr>'}</tbody>
+          </table>
 
-          ${sites.length ? `
-            <select onchange="DamanProjects.ledgerSiteFilter=this.value; DamanProjects.rerender()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white">
-              <option value="all">تصفية حسب الموقع: جميع المواقع (${this.ledgerEntries.length})</option>
-              ${sites.map((s) => `<option value="${app.esc(s)}" ${this.ledgerSiteFilter === s ? 'selected' : ''}>${app.esc(s)}</option>`).join('')}
-            </select>` : ''}
+          <h4 style="margin:6px 0;">ثانياً: السجل التفصيلي للحركات</h4>
+          <table>
+            <thead><tr><th>#</th><th>التاريخ</th><th>الاسم</th><th>النوع</th><th>الموقع</th><th>البيان</th><th>المبلغ</th></tr></thead>
+            <tbody>${detailRows || '<tr><td colspan="7" style="text-align:center;">لا توجد قيود</td></tr>'}</tbody>
+          </table>
 
-          <div class="space-y-2">
-            ${!list.length
-              ? '<div class="text-center text-xs text-slate-400 py-5">لا توجد حركات مسجلة في سجل العمال بعد</div>'
-              : list.map((it) => {
-                  const isNeg = it.entryType === 'expense' || it.entryType === 'deduction';
-                  return `
-                    <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
-                      <div class="min-w-0">
-                        <div class="font-extrabold text-white truncate">${app.esc(it.workerName)} <span class="text-[10px] text-amber-300">(${app.esc(it.siteName)})</span></div>
-                        <div class="text-[10px] text-slate-400">${app.esc(it.entryDate)} • ${it.count} × ${app.fmtMoney(it.rate)} ${it.overtime ? '+ إضافي ' + app.fmtMoney(it.overtime) : ''} ${it.notes ? '— ' + app.esc(it.notes) : ''}</div>
-                      </div>
-                      <div class="flex items-center gap-2 shrink-0">
-                        <span class="font-black ${isNeg ? 'text-rose-400' : 'text-emerald-400'}">${isNeg ? '-' : '+'}${app.fmtMoney(it.total)}</span>
-                        <button onclick="DamanProjects.deleteLedgerEntry('${it.id}')" class="text-slate-500 hover:text-rose-400"><i class="fa-solid fa-trash"></i></button>
-                      </div>
-                    </div>`;
-                }).join('')}
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:22px; text-align:center; font-size:11px;">
+            <div>توقيع مشرف الموقع / المقاول<br/><br/>.....................................</div>
+            <div>توقيع المستلم<br/><br/>.....................................</div>
           </div>
         </div>`;
+
+      window.DamanPrint(html);
     },
 
-    // ==================== PROJECT DETAIL & BIDS ====================
-    openProjectDetail(projectId) {
-      const app = window.DamanApp;
-      this.activeProjectId = projectId;
-      this.activeDemoItem = this.demoCache[projectId] || null;
-      if (this.unsubProposals) { this.unsubProposals(); this.unsubProposals = null; }
-      this.currentProposals = [];
-
-      let modal = document.getElementById('daman-project-detail-modal');
-      if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'daman-project-detail-modal';
-        modal.className = 'fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 sm:p-4';
-        document.body.appendChild(modal);
-      }
-      modal.classList.remove('hidden');
-
-      if (!this.activeDemoItem) {
-        this.unsubProposals = app.db.collection('projects').doc(projectId).collection('proposals').onSnapshot(
-          (snap) => {
-            this.currentProposals = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            this.refreshDetailModal();
-          },
-          () => this.refreshDetailModal()
-        );
-      }
-      this.refreshDetailModal();
-    },
-
-    closeDetailModal() {
-      this.activeProjectId = null;
-      this.activeDemoItem = null;
-      if (this.unsubProposals) { this.unsubProposals(); this.unsubProposals = null; }
-      document.getElementById('daman-project-detail-modal')?.classList.add('hidden');
-    },
-
-    refreshDetailModal() {
-      const app = window.DamanApp;
-      const isAr = app.lang === 'ar';
-      const modal = document.getElementById('daman-project-detail-modal');
-      if (!modal || !this.activeProjectId) return;
-      const proj = this.activeDemoItem || this.projects.find((p) => p.id === this.activeProjectId);
-      if (!proj) return;
-
-      const isDemo = !!proj.isDemo;
-      const uid = app.user ? app.user.uid : null;
-      const isOwner = !isDemo && uid && proj.clientId === uid;
-      const stars = '★'.repeat(Math.round(proj.clientRating || 4)) + '☆'.repeat(5 - Math.round(proj.clientRating || 4));
-      const chatTargetUid = isDemo ? 'admin' : proj.clientId;
-      const isSupplier = proj.postType === 'supplier';
-
-      modal.innerHTML = `
-        <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 max-h-[92vh] overflow-y-auto space-y-3.5">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="flex items-center gap-1.5 flex-wrap mb-1">
-                ${this.postTypeBadge(proj.postType)}
-                ${this.statusBadge(proj.status, isAr)}
-              </div>
-              <h3 class="text-sm font-black text-white leading-snug">${app.esc(proj.title)}</h3>
-            </div>
-            <button onclick="DamanProjects.closeDetailModal()" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300 shrink-0"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-
-          ${proj.photoBase64 ? `<img src="${proj.photoBase64}" onclick="window.open('${proj.photoBase64}','_blank')" class="w-full max-h-48 object-cover rounded-xl border border-slate-800 cursor-pointer" />` : ''}
-
-          <div onclick="DamanApp.openPublicProfile('${proj.clientId}',{name:'${app.esc(proj.clientName).replace(/'/g, "\\'")}',phone:'${app.esc(proj.clientPhone || '')}',accountType:'${proj.clientAccountType || 'company'}',ratingAvg:${proj.clientRating || 4.8},ratingCount:${proj.clientRatingCount || 5},kycStatus:'verified'})"
-            class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 cursor-pointer hover:border-amber-500/40">
-            <div class="min-w-0">
-              <div class="text-xs font-extrabold text-amber-300 truncate">${app.esc(proj.clientName)}</div>
-              <div class="text-[10px] text-amber-400">${stars} (${proj.clientRatingCount || 0})</div>
-            </div>
-            <div class="text-end shrink-0">
-              <div class="text-xs font-black text-emerald-400">${app.fmtMoney(proj.contractAmount || proj.budget)} ${app.t('egp')}</div>
-              <div class="text-[10px] text-slate-400">${app.esc(proj.location)} ${proj.areaSpecs ? '• ' + app.esc(proj.areaSpecs) : ''}</div>
-            </div>
-          </div>
-
-          <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-line">${app.esc(proj.description)}</p>
-
-          <div class="grid grid-cols-3 gap-1.5">
-            <button onclick="DamanApp.revealPhoneWithAdvice('${app.esc(proj.clientPhone || '01000000000')}','${app.esc(proj.clientName).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-extrabold text-[11px]"><i class="fa-solid fa-phone me-1"></i>الهاتف</button>
-            <button onclick="DamanProjects.closeDetailModal(); DamanApp.openChatWith('${chatTargetUid}','${app.esc(proj.clientName).replace(/'/g, "\\'")}','${proj.id}','${app.esc(proj.title).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-sky-500/20 border border-sky-500/40 text-sky-300 font-extrabold text-[11px]"><i class="fa-solid fa-comments me-1"></i>${isSupplier ? 'تفاوض وتوريد' : 'دردشة واتفاق'}</button>
-            <button onclick="DamanApp.shareOnWhatsApp('${app.esc(proj.title).replace(/'/g, "\\'")}','${app.esc(proj.location)}')" class="py-2 rounded-xl bg-green-600/20 border border-green-500/40 text-green-300 font-extrabold text-[11px]"><i class="fa-brands fa-whatsapp me-1"></i>مشاركة</button>
-          </div>
-
-          ${!isDemo && proj.status === 'open' && uid && !isOwner ? `
-            <form onsubmit="DamanProjects.submitProposal(event,'${proj.id}')" class="p-3 rounded-2xl bg-slate-950/90 border border-emerald-500/30 space-y-2 text-xs">
-              <div class="font-extrabold text-emerald-400">${isSupplier ? 'تقديم عرض توريد / طلب كمية' : 'تقديم عرض سعر سريع'}</div>
-              <div class="grid grid-cols-2 gap-2">
-                <input id="bid-cost" type="number" min="50" required placeholder="السعر المقترح (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
-                <input id="bid-days" type="number" min="1" required placeholder="${isSupplier ? 'مدة التسليم (أيام)' : 'مدة التنفيذ (أيام)'}" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
-              </div>
-              <textarea id="bid-notes" rows="2" required placeholder="تفاصيل العرض أو الكمية والمواصفات..." class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white"></textarea>
-              <button type="submit" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال العرض</button>
-            </form>` : ''}
-
-          ${!isDemo && this.currentProposals.length ? `
-            <div class="space-y-1.5 pt-2 border-t border-slate-800">
-              <div class="text-xs font-extrabold text-amber-400">العروض المقدّمة (${this.currentProposals.length})</div>
-              ${this.currentProposals.map((b) => `
-                <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-xs">
-                  <div class="flex justify-between font-bold"><span class="text-white">${app.esc(b.bidderName)}</span><span class="text-emerald-400">${app.fmtMoney(b.totalCost)} ج.م (${b.durationDays} يوم)</span></div>
-                  <p class="text-[11px] text-slate-400">${app.esc(b.notes)}</p>
-                  ${isOwner ? `<button onclick="DamanProjects.closeDetailModal(); DamanApp.openChatWith('${b.bidderId}','${app.esc(b.bidderName).replace(/'/g, "\\'")}','${proj.id}','${app.esc(proj.title).replace(/'/g, "\\'")}')" class="w-full py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">فتح شات وتوقيع اتفاق الضمان</button>` : ''}
-                </div>`).join('')}
-            </div>` : ''}
-        </div>`;
-    },
-
-    async submitProposal(e, projectId) {
-      e.preventDefault();
-      const app = window.DamanApp;
-      const totalCost = parseFloat(document.getElementById('bid-cost').value);
-      const durationDays = parseInt(document.getElementById('bid-days').value, 10);
-      const notes = document.getElementById('bid-notes').value.trim();
-      const proj = this.projects.find((p) => p.id === projectId);
-      try {
-        await app.db.collection('projects').doc(projectId).collection('proposals').add({
-          projectId, bidderId: app.user.uid, bidderName: app.profile.companyName || app.profile.name || '',
-          totalCost, durationDays, notes, status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.db.collection('projects').doc(projectId).update({ proposalsCount: firebase.firestore.FieldValue.increment(1) });
-        if (proj?.clientId) await app.sendNotification(proj.clientId, 'عرض سعر جديد على إعلانك', `${app.profile.name} — ${app.fmtMoney(totalCost)} ج.م`);
-        e.target.reset();
-        app.toast('تم إرسال عرض السعر بنجاح', 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
-    },
-
-    renderProjectCard(proj, app) {
-      const isAr = app.lang === 'ar';
-      const catLabel = this.getCatLabel(proj.mainCategory, app.lang);
-      const stars = '★'.repeat(Math.round(proj.clientRating || 4)) + '☆'.repeat(5 - Math.round(proj.clientRating || 4));
-
-      return `
-        <div onclick="DamanProjects.openProjectDetail('${proj.id}')" class="glass-card rounded-2xl p-3.5 space-y-2 cursor-pointer transition-all ${proj.isFeatured ? 'border-amber-500/70 bg-amber-500/5' : 'hover:border-amber-500/40'}">
-          <div class="flex items-center justify-between gap-1.5">
-            <div class="flex items-center gap-1 min-w-0">
-              ${this.postTypeBadge(proj.postType)}
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 truncate">${app.esc(catLabel)}</span>
-            </div>
-            ${this.statusBadge(proj.status, isAr)}
-          </div>
-          <h4 class="text-xs font-extrabold text-white leading-snug">${app.esc(proj.title)}</h4>
-          <p class="text-[11px] text-slate-400 line-clamp-2">${app.esc(proj.description)}</p>
-          <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px]">
-            <span class="text-slate-300 truncate"><i class="fa-solid fa-location-dot text-amber-400 me-1"></i>${app.esc(proj.location)}</span>
-            <span class="font-black text-emerald-400 shrink-0">${app.fmtMoney(proj.contractAmount || proj.budget)} ${app.t('egp')}</span>
-          </div>
-          <div class="flex items-center justify-between text-[10px] text-slate-400">
-            <span class="truncate">${app.esc(proj.clientName || '-')} <span class="text-amber-400 ms-1">${stars}</span></span>
-            <span class="shrink-0">${proj.proposalsCount || 0} عروض</span>
-          </div>
-        </div>`;
-    },
-
-    renderBrowseTab(app) {
-      const isAr = app.lang === 'ar';
-      const selCat = app.selectedMainCat || 'all';
-      const selGov = app.selectedGov || 'all';
-      const q = (app.searchQuery || '').toLowerCase();
-
-      const livePosts = this.projects.filter((p) => p.status !== 'pending_review' && p.status !== 'suspended');
-      const demoPosts = this.getDemoAdsForCategory(selCat);
-      const combined = livePosts.concat(demoPosts).filter((p) => {
-        if (this.postTypeFilter !== 'all' && (p.postType || 'hiring') !== this.postTypeFilter) return false;
-        if (selCat !== 'all' && p.mainCategory !== selCat) return false;
-        if (selGov !== 'all' && p.location !== selGov) return false;
-        if (q && !(p.title + ' ' + p.description + ' ' + p.location + ' ' + p.clientName).toLowerCase().includes(q)) return false;
-        return true;
-      });
-      combined.sort((a, b) => (b.isFeatured ? 1 : 0) - (a.isFeatured ? 1 : 0));
-
-      return `
-        <div class="space-y-3">
-          <div class="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button onclick="DamanProjects.setPostTypeFilter('all')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'all' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">الكل</button>
-            <button onclick="DamanProjects.setPostTypeFilter('hiring')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'hiring' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">أصحاب أعمال</button>
-            <button onclick="DamanProjects.setPostTypeFilter('seeking')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'seeking' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">باحثين عن عمل</button>
-            <button onclick="DamanProjects.setPostTypeFilter('supplier')" class="py-1.5 rounded-lg text-[9.5px] font-black ${this.postTypeFilter === 'supplier' ? 'bg-orange-500 text-slate-950' : 'text-slate-400'}">الموردين B2B</button>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <select onchange="DamanProjects.setFilter(this.value)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-[11px] font-bold text-white">
-              <option value="all" ${selCat === 'all' ? 'selected' : ''}>كل الأقسام (24)</option>
-              ${window.DAMAN_CATEGORIES.map((c) => `<option value="${c.id}" ${selCat === c.id ? 'selected' : ''}>${isAr ? c.ar : c.en}</option>`).join('')}
-            </select>
-            <select onchange="DamanProjects.setGovFilter(this.value)" class="px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-[11px] font-bold text-white">
-              <option value="all" ${selGov === 'all' ? 'selected' : ''}>كل المحافظات</option>
-              ${window.DAMAN_GOVERNORATES.map((g) => `<option value="${g}" ${selGov === g ? 'selected' : ''}>${g}</option>`).join('')}
-            </select>
-          </div>
-
-          <input type="search" value="${app.esc(app.searchQuery || '')}" oninput="DamanProjects.setSearch(this.value)" placeholder="ابحث بالعنوان أو الخامات أو المحافظة أو المورّد..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white" />
-
-          ${!combined.length
-            ? '<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد نتائج مطابقة</div>'
-            : `<div class="space-y-2.5">${combined.map((p) => this.renderProjectCard(p, app)).join('')}</div>`}
-        </div>`;
-    },
-
-    renderInspectionTab(app) {
-      return `
-        <div class="space-y-3.5">
-          <div class="rounded-2xl p-4 bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950 border border-emerald-500/50 space-y-1.5">
-            <div class="text-xs font-black text-emerald-300"><i class="fa-solid fa-shield-halved me-1"></i> الاستلام الهندسي بضمان مادي 3 أضعاف (3x)</div>
-            <p class="text-[11px] text-slate-200 leading-relaxed">نستلم الشدات، الأسقف، المحارة، التشطيبات، أو نمسك مشروعك كامل استشارات هندسية مع ضمان مادي يصل لـ 3 أضعاف قيمة الخدمة. حدد المساحة والموقع وسنرسل لك السعر فوراً.</p>
-          </div>
-          <form onsubmit="DamanProjects.submitInspectionRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
-            <select id="insp-pkg" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white">
-              <option value="shoring_roof">استلام شدة وسقف كامل بضمان 3x (تشوين + شدة وحدادة + صب)</option>
-              <option value="plaster_finish">استلام محارة وتشطيبات بضمان 3x (شقة / فيلا / مبنى)</option>
-              <option value="four_visits">باقة 4 زيارات هندسية شاملة بضمان 3x</option>
-              <option value="full_consulting">استشارات وإدارة مشروع كامل من البداية للتسليم (3x)</option>
-              <option value="single_visit">معاينة هندسية منفردة وتقرير فني معتمد</option>
-            </select>
-            <input id="insp-area" type="text" required placeholder="المساحة بالمتر المربع وعدد الأدوار (إلزامي للتسعير)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <input id="insp-location" type="text" required placeholder="المحافظة وعنوان الموقع بالتفصيل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <input id="insp-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <textarea id="insp-notes" rows="2" placeholder="ملاحظات إضافية عن البند المطلوب استلامه..." class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
-            <button id="insp-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال للإدارة لتحديد السعر</button>
-          </form>
-          ${this.myInspections.length ? `
-            <div class="glass-card rounded-2xl p-3.5 space-y-2">
-              <h4 class="text-xs font-extrabold text-amber-400">طلبات الاستلام والضمان الخاصة بي</h4>
-              ${this.myInspections.map((r) => `
-                <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs space-y-1">
-                  <div class="font-bold text-white">${app.esc(r.packageLabel)}</div>
-                  <div class="text-[10px] text-slate-400">${app.esc(r.area)} — ${app.esc(r.location)}</div>
-                  ${r.quotedPrice ? `<div class="font-black text-emerald-400">السعر المحدد: ${app.fmtMoney(r.quotedPrice)} ج.م</div>` : `<div class="text-[10px] text-amber-300">بانتظار تسعير الإدارة</div>`}
-                </div>`).join('')}
-            </div>` : ''}
-        </div>`;
-    },
-
-    renderVipLaborTab(app) {
-      return `
-        <div class="space-y-3.5">
-          <div class="rounded-2xl p-4 bg-gradient-to-br from-amber-900/50 to-slate-950 border border-amber-500/40 space-y-1">
-            <div class="text-xs font-black text-amber-300"><i class="fa-solid fa-people-group me-1"></i> طلب عمالة VIP مضمونة من ضمان سايت</div>
-            <p class="text-[11px] text-slate-300">نوفر لك فرق عمل مضمونة في كل القطاعات (عمولة توفير وإشراف VIP: 10% تُضاف على التكلفة عند التسعير).</p>
-          </div>
-          <form onsubmit="DamanProjects.submitVipLabor(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
-            <select id="vl-cat" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 font-bold text-white">
-              ${window.DAMAN_CATEGORIES.map((c) => `<option value="${c.id}">${c.ar}</option>`).join('')}
-            </select>
-            <input id="vl-trade" type="text" required placeholder="التخصص المطلوب (نجارين، حدادين، مبيضين محارة...)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <div class="grid grid-cols-2 gap-2">
-              <input id="vl-count" type="number" min="1" required placeholder="عدد العمال" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <input id="vl-days" type="text" required placeholder="المدة (مثلاً 10 أيام)" class="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            </div>
-            <input id="vl-location" type="text" required placeholder="المحافظة ومكان الموقع" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <input id="vl-phone" type="tel" required value="${app.esc(app.profile?.phone || '')}" placeholder="رقم الهاتف للتواصل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <button id="vl-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إرسال طلب عمالة VIP للإدارة</button>
-          </form>
-
-          ${this.myVipLabor.length ? `
-            <div class="glass-card rounded-2xl p-3.5 space-y-2">
-              <h4 class="text-xs font-extrabold text-amber-400">طلبات عمالة VIP الخاصة بي (${this.myVipLabor.length})</h4>
-              ${this.myVipLabor.map((r) => `
-                <div class="p-3 rounded-xl bg-slate-950/90 border ${r.status === 'funded' ? 'border-emerald-500/50' : 'border-slate-800'} text-xs space-y-1.5">
-                  <div class="flex justify-between font-bold">
-                    <span class="text-white">${app.esc(r.trade)} (${r.workersCount} عامل)</span>
-                    <span class="text-[10px] ${r.status === 'funded' ? 'text-emerald-400' : 'text-amber-300'}">${r.status === 'funded' ? 'تم الحجز بنجاح ✅' : r.status === 'quoted' ? 'تم التسعير' : 'قيد المراجعة'}</span>
-                  </div>
-                  <div class="text-[10px] text-slate-400">${app.esc(r.location)} • المدة: ${app.esc(r.duration)}</div>
-                  ${r.totalPrice ? `
-                    <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] space-y-0.5">
-                      <div>تكلفة العمالة: <b>${app.fmtMoney(r.baseCost)} ج.م</b></div>
-                      <div>عمولة توفير VIP (10%): <b>${app.fmtMoney(r.vipCommission)} ج.م</b></div>
-                      <div class="text-emerald-400 font-black">الإجمالي المطلوب حجزه: ${app.fmtMoney(r.totalPrice)} ج.م</div>
-                      ${r.adminNote ? `<div class="text-[10px] text-amber-200 pt-1">ملاحظة الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
-                    </div>` : ''}
-                  ${r.status === 'quoted' ? `
-                    <button onclick="DamanProjects.acceptAndFundVipLabor('${r.id}')" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">
-                      ✓ موافقة وحجز المبلغ من المحفظة (${app.fmtMoney(r.totalPrice)} ج.م)
-                    </button>` : ''}
-                </div>`).join('')}
-            </div>` : ''}
-        </div>`;
-    },
-
+    // ==================== ENGINEERING INSPECTION 3x (WITH WALLET PAYMENT -> ADMIN PROFIT) ====================
     async submitInspectionRequest(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      if (!app.user || !app.profile) return app.openAuthModal('login');
-      const sel = document.getElementById('insp-pkg');
-      try {
-        await app.db.collection('vipRequests').add({
-          userId: app.user.uid, userName: app.profile.name || '', userEmail: app.profile.email || '',
-          packageId: sel.value, packageLabel: sel.options[sel.selectedIndex].text,
-          area: document.getElementById('insp-area').value.trim(),
-          location: document.getElementById('insp-location').value.trim(),
-          phone: document.getElementById('insp-phone').value.trim(),
-          notes: document.getElementById('insp-notes').value.trim(),
-          status: 'pending', quotedPrice: 0, adminNote: '',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.sendNotification('ADMIN', 'طلب استلام هندسي وضمان 3x جديد', `${sel.options[sel.selectedIndex].text} — ${document.getElementById('insp-area').value.trim()}`);
-        e.target.reset();
-        app.toast('تم إرسال طلب الاستلام الهندسي للإدارة بنجاح', 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
+      if (!app.user || !app.isKycVerified()) return;
+      await app.withLock('inspReq', async () => {
+        const element = document.getElementById('ins-elem').value;
+        const location = document.getElementById('ins-loc').value.trim();
+        const area = document.getElementById('ins-area').value.trim();
+        const preferredDate = document.getElementById('ins-date').value;
+        const notes = document.getElementById('ins-notes').value.trim();
+        try {
+          await app.db.collection('vipRequests').add({
+            userId: app.user.uid,
+            userName: app.profile?.companyName || app.profile?.name || '',
+            userPhone: app.profile?.phone || '',
+            element, location, area, preferredDate, notes,
+            quotedPrice: 0,
+            status: 'pending', // 'pending' | 'quoted' | 'paid' | 'completed' | 'rejected'
+            date: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.sendNotification('ADMIN', 'طلب استلام هندسي 3x جديد 🛡️', `${app.profile?.name} — ${element} (${location})`);
+          e.target.reset();
+          app.toast('تم إرسال طلب الاستلام الهندسي 3x بنجاح! سيتم التسعير والرد قريباً ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
     },
 
-    async submitVipLabor(e) {
+    async payInspectionRequest(reqId) {
+      const app = window.DamanApp;
+      const req = this.inspectionReqs.find((x) => x.id === reqId);
+      if (!req || req.status !== 'quoted' || Number(req.quotedPrice || 0) <= 0) return;
+
+      const price = Number(req.quotedPrice);
+      const avail = Number(app.profile?.balanceAvailable || 0);
+      if (avail < price) {
+        const diff = Math.round((price - avail) * 100) / 100;
+        if (window.confirm(`رسوم الاستلام الهندسي 3x هي ${app.fmtMoney(price)} ج.م.\nرصيدك المتاح غير كافٍ — هل تريد شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+          if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(diff);
+        }
+        return;
+      }
+      if (!window.confirm(`تأكيد دفع ${app.fmtMoney(price)} ج.م من المحفظة لتأكيد موعد الاستلام الهندسي بضمان 3x؟`)) return;
+
+      await app.withLock('payIns_' + reqId, async () => {
+        const uRef = app.db.collection('users').doc(app.user.uid);
+        const rRef = app.db.collection('vipRequests').doc(reqId);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const [uDoc, rDoc] = await Promise.all([tx.get(uRef), tx.get(rRef)]);
+            if (rDoc.data().status !== 'quoted') throw new Error('حالة الطلب تغيرت بالفعل');
+            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+            if (curAvail < price) throw new Error('الرصيد المتاح غير كافٍ');
+            tx.update(uRef, { balanceAvailable: Math.round((curAvail - price) * 100) / 100 });
+            tx.update(rRef, { status: 'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: app.user.uid, type: 'inspection_3x', amount: -price,
+              note: `دفع خدمة الاستلام الهندسي 3x (${req.element} — ${req.location})`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            // Credit Admin Net Profit Treasury directly
+            tx.set(app.db.collection('platformFees').doc(), {
+              type: 'inspection_3x', requestId: reqId, userId: app.user.uid,
+              userName: app.profile?.companyName || app.profile?.name || '',
+              amount: price, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          await app.sendNotification('ADMIN', 'تم دفع طلب استلام هندسي 3x ✅', `${app.profile?.name} دفع ${app.fmtMoney(price)} ج.م (${req.location})`);
+          app.toast('تم الدفع وتأكيد موعد الاستلام الهندسي 3x بنجاح ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== VIP LABOR SUPPLY (FIXED 10% SEPARATION — NO DOUBLE COUNTING!) ====================
+    async submitVipLaborRequest(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      if (!app.user || !app.profile) return app.openAuthModal('login');
-      const trade = document.getElementById('vl-trade').value.trim();
-      try {
-        await app.db.collection('vipLaborRequests').add({
-          userId: app.user.uid, userName: app.profile.name || '', userEmail: app.profile.email || '',
-          category: document.getElementById('vl-cat').value, trade,
-          workersCount: parseInt(document.getElementById('vl-count').value, 10) || 1,
-          duration: document.getElementById('vl-days').value.trim(),
-          location: document.getElementById('vl-location').value.trim(),
-          phone: document.getElementById('vl-phone').value.trim(),
-          status: 'pending', adminNote: '',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.sendNotification('ADMIN', 'طلب عمالة VIP جديد', `${trade} — ${document.getElementById('vl-location').value.trim()}`);
-        e.target.reset();
-        app.toast('تم إرسال طلب عمالة VIP للإدارة بنجاح', 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
+      if (!app.user || !app.isKycVerified()) return;
+      await app.withLock('vipLabReq', async () => {
+        const trade = document.getElementById('vl-trade').value.trim();
+        const workersCount = parseInt(document.getElementById('vl-count').value, 10) || 1;
+        const days = parseInt(document.getElementById('vl-days').value, 10) || 1;
+        const location = document.getElementById('vl-loc').value.trim();
+        const notes = document.getElementById('vl-notes').value.trim();
+        try {
+          await app.db.collection('vipLaborRequests').add({
+            userId: app.user.uid,
+            userName: app.profile?.companyName || app.profile?.name || '',
+            userPhone: app.profile?.phone || '',
+            trade, workersCount, days, location, notes,
+            baseCost: 0,
+            vipFee: 0,
+            totalQuoted: 0,
+            status: 'pending', // 'pending' | 'quoted' | 'funded' | 'settled' | 'rejected'
+            date: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.sendNotification('ADMIN', 'طلب توريد عمالة VIP جديد 👷', `${app.profile?.name}: ${workersCount} (${trade}) × ${days} أيام — ${location}`);
+          e.target.reset();
+          app.toast('تم إرسال طلب عمالة VIP بنجاح! ستصلك التسعيرة قريباً ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
     },
 
-    async acceptAndFundVipLabor(reqId) {
+    async fundVipLaborRequest(reqId) {
       const app = window.DamanApp;
-      const req = this.myVipLabor.find((x) => x.id === reqId);
-      if (!req || !req.totalPrice) return;
+      const req = this.vipLaborReqs.find((x) => x.id === reqId);
+      if (!req || req.status !== 'quoted') return;
 
-      const total = Number(req.totalPrice);
+      const baseCost = Math.round(Number(req.baseCost || 0) * 100) / 100;
+      const vipRate = app.getVipCommissionRate();
+      const vipFee = Math.round(Number(req.vipFee || baseCost * vipRate) * 100) / 100;
+      const total = Math.round((baseCost + vipFee) * 100) / 100;
+      if (baseCost <= 0) return;
+
       const avail = Number(app.profile?.balanceAvailable || 0);
       if (avail < total) {
         const diff = Math.round((total - avail) * 100) / 100;
-        if (window.confirm(`رصيدك المتاح (${app.fmtMoney(avail)} ج.م) أقل من الإجمالي (${app.fmtMoney(total)} ج.م).\nهل تريد الانتقال لشحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+        if (window.confirm(`إجمالي حجز عمالة VIP: ${app.fmtMoney(total)} ج.م (التكلفة ${app.fmtMoney(baseCost)} + عمولة VIP ${app.fmtMoney(vipFee)}).\nرصيدك المتاح لا يكفي — هل تريد شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
           if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(diff);
         }
         return;
       }
 
-      if (!window.confirm(`تأكيد الموافقة وحجز ${app.fmtMoney(total)} ج.م (شامل عمولة VIP 10%) من محفظتك لبدء توفير العمالة؟`)) return;
+      if (!window.confirm(`تأكيد حجز عمالة VIP؟\n• تكلفة العمالة المحجوزة بالضمان: ${app.fmtMoney(baseCost)} ج.م\n• عمولة توريد VIP (${(vipRate * 100).toFixed(0)}%): ${app.fmtMoney(vipFee)} ج.م\n• الإجمالي المخصوم: ${app.fmtMoney(total)} ج.م`)) return;
 
-      const userRef = app.db.collection('users').doc(app.user.uid);
-      const reqRef = app.db.collection('vipLaborRequests').doc(reqId);
-      try {
-        await app.db.runTransaction(async (tx) => {
-          const [uDoc, rDoc] = await Promise.all([tx.get(userRef), tx.get(reqRef)]);
-          const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
-          const curEsc = Number((uDoc.data() || {}).balanceEscrow || 0);
-          if (curAvail < total) throw new Error('الرصيد المتاح غير كافٍ');
-          if ((rDoc.data() || {}).status === 'funded') throw new Error('تم حجز هذا الطلب بالفعل');
+      await app.withLock('fundVip_' + reqId, async () => {
+        const uRef = app.db.collection('users').doc(app.user.uid);
+        const rRef = app.db.collection('vipLaborRequests').doc(reqId);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const [uDoc, rDoc] = await Promise.all([tx.get(uRef), tx.get(rRef)]);
+            if (rDoc.data().status !== 'quoted') throw new Error('حالة الطلب تغيرت بالفعل');
+            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+            const curEsc = Number((uDoc.data() || {}).balanceEscrow || 0);
+            if (curAvail < total) throw new Error('الرصيد المتاح غير كافٍ');
 
-          tx.update(userRef, {
-            balanceAvailable: Math.round((curAvail - total) * 100) / 100,
-            balanceEscrow: Math.round((curEsc + total) * 100) / 100
-          });
-          tx.update(reqRef, {
-            status: 'funded',
-            fundedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          if (Number(req.vipCommission || 0) > 0) {
-            tx.set(app.db.collection('platformFees').doc(), {
-              vipLaborId: reqId,
-              type: 'vip_labor_10pct',
-              amount: Number(req.vipCommission),
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            // CLEAN ACCOUNTING: ONLY baseCost goes to Escrow; vipFee goes immediately to platformFees!
+            tx.update(uRef, {
+              balanceAvailable: Math.round((curAvail - total) * 100) / 100,
+              balanceEscrow: Math.round((curEsc + baseCost) * 100) / 100
             });
-          }
-        });
-        await app.sendNotification('ADMIN', 'تم حجز ودفع طلب عمالة VIP ✅', `${req.trade} (${req.workersCount} عامل) — الإجمالي: ${app.fmtMoney(total)} ج.م (عمولتك 10%: ${app.fmtMoney(req.vipCommission)} ج.م)`);
-        app.toast('تم حجز المبلغ بنجاح ✅ ستتواصل معك الإدارة فوراً لتنزيل العمالة', 'success');
-      } catch (err) {
-        app.toast(err.message, 'error');
+            tx.update(rRef, {
+              status: 'funded',
+              lockedBaseCost: baseCost,
+              paidVipFee: vipFee,
+              totalPaid: total,
+              fundedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: app.user.uid, type: 'vip_labor_lock', amount: -total,
+              note: `حجز عمالة VIP (${req.trade} — ${req.workersCount} عامل): ضمان ${app.fmtMoney(baseCost)} + عمولة ${app.fmtMoney(vipFee)}`,
+              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            if (vipFee > 0) {
+              tx.set(app.db.collection('platformFees').doc(), {
+                type: 'vip_labor_fee', requestId: reqId, userId: app.user.uid,
+                userName: app.profile?.companyName || app.profile?.name || '',
+                amount: vipFee, date: app.todayLocal(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          });
+          await app.sendNotification('ADMIN', 'تم حجز وتمويل عمالة VIP ✅', `${app.profile?.name} حجز ${app.fmtMoney(total)} ج.م (${req.trade})`);
+          app.toast('تم حجز عمالة VIP بنجاح! ستتواصل معك الإدارة لتنسيق النزول للموقع ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== RENDER SUB-VIEWS ====================
+    renderMarketCards(app) {
+      const myUid = app.user?.uid;
+      const favs = Array.isArray(app.profile?.favorites) ? app.profile.favorites : [];
+      const qNorm = app.normalizeAr(this.searchQuery);
+
+      const list = this.projects.filter((p) => {
+        const isOwn = myUid && p.ownerId === myUid;
+        if (p.status !== 'approved' && !isOwn && !app.hasAdminAccess()) return false;
+        if (this.marketFilter === 'favorites') {
+          if (!favs.includes(p.id)) return false;
+        } else if (this.marketFilter !== 'all' && p.postType !== this.marketFilter) {
+          return false;
+        }
+        if (this.selectedCategory !== 'all' && p.category !== this.selectedCategory) return false;
+        if (qNorm) {
+          const hay = app.normalizeAr(`${p.title} ${p.description} ${p.city} ${p.ownerName} ${this.catLabel(p.category)}`);
+          if (!hay.includes(qNorm)) return false;
+        }
+        return true;
+      });
+
+      if (!list.length) {
+        return `<div class="glass-card rounded-2xl p-7 text-center text-xs text-slate-400">لا توجد إعلانات مطابقة للبحث حالياً.</div>`;
       }
+
+      return list.map((p) => {
+        const isOwn = myUid && p.ownerId === myUid;
+        const isFav = favs.includes(p.id);
+        const boosted = Number(p.boostedUntil || 0) > Date.now();
+        return `
+          <div class="glass-card rounded-2xl p-3.5 space-y-2 ${boosted ? 'border-amber-400 bg-amber-500/5' : ''}">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center flex-wrap gap-1.5">
+                ${boosted ? `<span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">★ مميّز</span>` : ''}
+                <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 text-[9.5px] font-bold">${this.postTypeLabel(p.postType)}</span>
+                <span class="px-2 py-0.5 rounded-lg bg-slate-950 text-slate-300 text-[9.5px]">${app.esc(this.catLabel(p.category))}</span>
+                ${p.status !== 'approved' ? `<span class="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-300 text-[9px] font-black">${app.esc(p.status)}</span>` : ''}
+              </div>
+              <button onclick="DamanProjects.toggleFavorite('${p.id}')" class="text-sm ${isFav ? 'text-rose-500' : 'text-slate-500'}">
+                <i class="fa-${isFav ? 'solid' : 'regular'} fa-heart"></i>
+              </button>
+            </div>
+
+            <div onclick="DamanProjects.openPostDetails('${p.id}')" class="cursor-pointer space-y-1.5">
+              <h4 class="text-xs font-black text-white">${app.esc(p.title)}</h4>
+              ${p.imageBase64 ? `<img src="${p.imageBase64}" class="w-full h-36 object-cover rounded-xl border border-slate-800" />` : ''}
+              <p class="text-[11px] text-slate-300 line-clamp-2">${app.esc(p.description || '')}</p>
+            </div>
+
+            <div class="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+              <button onclick="DamanApp.openPublicProfile('${p.ownerId}')" class="font-bold text-sky-300 hover:underline">
+                <i class="fa-solid fa-user me-1"></i>${app.esc(p.ownerName || 'مستخدم')} ${p.ownerVerified ? '✅' : ''}
+              </button>
+              <div class="flex items-center gap-2">
+                <span><i class="fa-solid fa-location-dot me-0.5"></i>${app.esc(p.city || '')}</span>
+                ${p.budget ? `<b class="text-emerald-400">${app.fmtMoney(p.budget)} ج.م</b>` : ''}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1.5 pt-0.5">
+              ${!isOwn ? `
+                <button onclick="if(window.DamanChat) DamanChat.openDirectChat('${p.ownerId}','${app.esc(p.ownerName || '').replace(/'/g, "\\'")}','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="flex-1 py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">
+                  <i class="fa-solid fa-comments me-1"></i> مراسلة واتفاق
+                </button>
+                <button onclick="DamanProjects.openPostDetails('${p.id}')" class="px-3 py-2 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">التفاصيل</button>` : `
+                <button onclick="DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-slate-800 text-amber-300 font-bold text-[10.5px]">تعديل</button>
+                <button onclick="DamanProjects.boostPost('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-purple-500/25 text-purple-200 border border-purple-500/40 font-black text-[10.5px]">★ تمييز</button>
+                <button onclick="DamanProjects.toggleClosePost('${p.id}')" class="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-[10.5px]">${p.status === 'closed' ? 'فتح' : 'إغلاق'}</button>`}
+            </div>
+          </div>`;
+      }).join('');
+    },
+
+    renderMarketTab(app) {
+      const catOpts = `<option value="all">كل التخصصات (17)</option>` + app.CATEGORIES.map((c) => `<option value="${c.id}" ${this.selectedCategory === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
+      return `
+        <div class="space-y-3">
+          <div class="flex items-center gap-2">
+            <input type="text" value="${app.esc(this.searchQuery)}" oninput="DamanProjects.onSearchInput(this.value)" placeholder="ابحث عن صنايعي، مشروع، مورد حديد/أسمنت، مدينة..." class="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
+            <button onclick="DamanProjects.openPostModal()" class="px-3.5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs shrink-0">
+              <i class="fa-solid fa-plus me-1"></i> نشر
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10.5px] font-extrabold">
+            ${[
+              ['all', 'الكل'],
+              ['project', '🏗️ مشاريع'],
+              ['worker', '👷 مقاولين وفنيين'],
+              ['supplier', '🚚 موردين B2B'],
+              ['favorites', '❤️ المفضلة']
+            ].map(([k, lbl]) => `
+              <button onclick="DamanProjects.setMarketFilter('${k}')" class="shrink-0 px-3 py-1.5 rounded-xl ${this.marketFilter === k ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 border border-slate-800 text-slate-300'}">${lbl}</button>`).join('')}
+          </div>
+
+          <select onchange="DamanProjects.setCategory(this.value)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 font-bold">${catOpts}</select>
+
+          <div id="daman-market-list-slot" class="space-y-2.5">${this.renderMarketCards(app)}</div>
+        </div>`;
+    },
+
+    renderLedgerTab(app) {
+      if (!app.user) return `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تسجيل الدخول</button></div>`;
+      return `
+        <div class="space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="font-black text-amber-400"><i class="fa-solid fa-clipboard-list me-1"></i> دفتر عمال ويوميات وعهدة الموقع</h3>
+            <button onclick="DamanProjects.printLedgerA4()" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10.5px]"><i class="fa-solid fa-print me-1"></i> تصفية A4</button>
+          </div>
+
+          <form onsubmit="DamanProjects.submitLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <input id="ld-worker" type="text" required placeholder="اسم العامل / المقاول" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <select id="ld-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                <option value="wage">يومية عمل (+)</option>
+                <option value="overtime">إضافي / سهر (+)</option>
+                <option value="advance">سلفة (-)</option>
+                <option value="deduction">خصم / جزاء (-)</option>
+                <option value="custody">عهدة مشتريات</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="ld-amt" type="number" min="1" step="any" required placeholder="المبلغ (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
+              <input id="ld-site" type="text" placeholder="اسم الموقع / الفيلا" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <input id="ld-note" type="text" placeholder="ملاحظات / تفاصيل البند..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">إضافة القيد للدفتر</button>
+          </form>
+
+          <div class="space-y-2">
+            ${!this.ledgerEntries.length
+              ? `<div class="glass-card rounded-2xl p-6 text-center text-slate-400">لا توجد قيود مسجّلة في دفتر الموقع بعد.</div>`
+              : this.ledgerEntries.map((x) => `
+                <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="font-black text-white">${app.esc(x.workerName)} • <span class="text-amber-300">${this.ledgerTypeLabel(x.entryType)}</span></div>
+                    <div class="text-[10px] text-slate-400">${app.esc(x.date || '')} ${x.siteName ? '• ' + app.esc(x.siteName) : ''} ${x.note ? '• ' + app.esc(x.note) : ''}</div>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <b class="${['advance', 'deduction'].includes(x.entryType) ? 'text-rose-400' : 'text-emerald-400'}">${app.fmtMoney(x.amount)} ج.م</b>
+                    <button onclick="DamanProjects.deleteLedgerEntry('${x.id}')" class="text-rose-400"><i class="fa-solid fa-trash-can"></i></button>
+                  </div>
+                </div>`).join('')}
+          </div>
+        </div>`;
+    },
+
+    renderInspectionTab(app) {
+      if (!app.user) return `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تسجيل الدخول</button></div>`;
+      return `
+        <div class="space-y-3 text-xs">
+          <div class="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 space-y-1">
+            <div class="font-black text-emerald-300"><i class="fa-solid fa-shield-halved me-1"></i> خدمة الاستلام الهندسي بضمان 3 أضعاف (3x)</div>
+            <p class="text-[11px] text-slate-200 leading-relaxed">فحص واستلام الشدات الخشبية والمعدنية والحدادة والأسقف والمحارة والتشطيبات بتقرير هندسي معتمد وضمان مادي 3 أضعاف قيمة الخدمة.</p>
+          </div>
+
+          <form onsubmit="DamanProjects.submitInspectionRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
+            <select id="ins-elem" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-emerald-300 font-bold">
+              <option value="استلام شدة خشبية ومعدنية لسقف">استلام شدة خشبية ومعدنية لسقف</option>
+              <option value="استلام حدادة مسلحة قبل الصب">استلام حدادة مسلحة قبل الصب</option>
+              <option value="استلام مباني ومحارة وبؤج وأوتار">استلام مباني ومحارة وبؤج وأوتار</option>
+              <option value="استلام تأسيس سباكة وكهرباء وعزل">استلام تأسيس سباكة وكهرباء وعزل</option>
+              <option value="استلام تشطيب كامل (فيلا / شقة)">استلام تشطيب كامل (فيلا / شقة)</option>
+            </select>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="ins-loc" type="text" required placeholder="عنوان الموقع والكمبوند" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="ins-area" type="text" required placeholder="المساحة التقريبية (م²)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <input id="ins-date" type="date" required value="${app.todayLocal()}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <textarea id="ins-notes" rows="2" placeholder="أي ملاحظات أو مواعيد الصب..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">طلب تسعير واستلام هندسي 3x</button>
+          </form>
+
+          <div class="space-y-2">
+            ${this.inspectionReqs.map((r) => `
+              <div class="glass-card rounded-2xl p-3 space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="font-black text-white">${app.esc(r.element)}</span>
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 text-[10px] font-black">${app.esc(r.status)}</span>
+                </div>
+                <div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • المساحة: ${app.esc(r.area)} • الموعد: ${app.esc(r.preferredDate || '')}</div>
+                ${r.adminNote ? `<div class="p-2 rounded-lg bg-slate-950 text-[10.5px] text-sky-300">رد الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
+                ${r.status === 'quoted' && Number(r.quotedPrice || 0) > 0 ? `
+                  <div class="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500 flex items-center justify-between gap-2">
+                    <span class="font-black text-emerald-300">التسعيرة المعتمدة: ${app.fmtMoney(r.quotedPrice)} ج.م</span>
+                    <button onclick="DamanProjects.payInspectionRequest('${r.id}')" class="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">موافقة ودفع من المحفظة</button>
+                  </div>` : ''}
+                ${r.status === 'paid' ? `<div class="text-emerald-400 font-black text-[10.5px]">✅ تم الدفع (${app.fmtMoney(r.quotedPrice)} ج.م) وجارٍ تنسيق الزيارة الهندسية</div>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>`;
+    },
+
+    renderVipLaborTab(app) {
+      if (!app.user) return `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تسجيل الدخول</button></div>`;
+      const vipPct = (app.getVipCommissionRate() * 100).toFixed(0);
+      return `
+        <div class="space-y-3 text-xs">
+          <div class="p-3.5 rounded-2xl bg-purple-500/15 border border-purple-500/40 space-y-1">
+            <div class="font-black text-purple-300"><i class="fa-solid fa-users-gear me-1"></i> توريد عمالة VIP بضمان ضمان سايت (عمولة ${vipPct}%)</div>
+            <p class="text-[11px] text-slate-200 leading-relaxed">نوفر لك فرقاً فنية مختبرة (نجارين، حدادين، بنائين، مبيضين محارة، تشطيبات) بضمان كامل للالتزام والجودة، ويتم الحجز 100% عبر المحفظة.</p>
+          </div>
+
+          <form onsubmit="DamanProjects.submitVipLaborRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
+            <input id="vl-trade" type="text" required placeholder="التخصص المطلوب (مثال: نجارين مسلح / حدادين / مبيضين محارة)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white" />
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-slate-400 mb-1">عدد العمال</label><input id="vl-count" type="number" min="1" value="6" required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-slate-400 mb-1">عدد الأيام</label><input id="vl-days" type="number" min="1" value="5" required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            </div>
+            <input id="vl-loc" type="text" required placeholder="موقع المشروع" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <textarea id="vl-notes" rows="2" placeholder="تفاصيل البند وموعد النزول المطلوب..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-purple-500 text-white font-black">إرسال طلب عمالة VIP</button>
+          </form>
+
+          <div class="space-y-2">
+            ${this.vipLaborReqs.map((r) => `
+              <div class="glass-card rounded-2xl p-3 space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="font-black text-white">${app.esc(r.trade)} (${r.workersCount} عامل × ${r.days} أيام)</span>
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-purple-300 text-[10px] font-black">${app.esc(r.status)}</span>
+                </div>
+                <div class="text-[10.5px] text-slate-400">${app.esc(r.location)}</div>
+                ${r.adminNote ? `<div class="p-2 rounded-lg bg-slate-950 text-[10.5px] text-sky-300">رد الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
+                ${r.status === 'quoted' && Number(r.baseCost || 0) > 0 ? `
+                  <div class="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500 space-y-1.5">
+                    <div class="text-[11px] text-purple-200">
+                      تكلفة العمالة (ضمان): <b>${app.fmtMoney(r.baseCost)} ج.م</b> + عمولة VIP (${vipPct}%): <b>${app.fmtMoney(r.vipFee)} ج.م</b>
+                      <br/><b class="text-emerald-300">الإجمالي للحجز: ${app.fmtMoney(r.totalQuoted || (Number(r.baseCost) + Number(r.vipFee)))} ج.م</b>
+                    </div>
+                    <button onclick="DamanProjects.fundVipLaborRequest('${r.id}')" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">موافقة وحجز 100% من المحفظة</button>
+                  </div>` : ''}
+                ${r.status === 'funded' ? `<div class="text-emerald-400 font-black text-[10.5px]">✅ تم الحجز (ضمان العمالة: ${app.fmtMoney(r.lockedBaseCost)} ج.م | عمولة: ${app.fmtMoney(r.paidVipFee)} ج.م)</div>` : ''}
+                ${r.status === 'settled' ? `<div class="text-sky-400 font-black text-[10.5px]">🏁 تم التنفيذ وتسوية الحساب بالكامل</div>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>`;
     },
 
     render(container, app) {
       this.ensureListeners(app);
-      const body =
-        this.subTab === 'browse' ? this.renderBrowseTab(app)
-        : this.subTab === 'ledger' ? this.renderLedgerTab(app)
-        : this.subTab === 'inspection' ? this.renderInspectionTab(app)
-        : this.renderVipLaborTab(app);
+      const body = this.subTab === 'ledger'
+        ? this.renderLedgerTab(app)
+        : this.subTab === 'inspection'
+        ? this.renderInspectionTab(app)
+        : this.subTab === 'viplabor'
+        ? this.renderVipLaborTab(app)
+        : this.renderMarketTab(app);
 
       container.innerHTML = `
         <div class="space-y-3.5">
-          <div class="flex items-center justify-between gap-2">
-            <h2 class="text-sm font-black text-white"><i class="fa-solid fa-briefcase text-amber-400 me-1.5"></i> السوق والموردين والضمان</h2>
-            <button onclick="DamanProjects.openPostModal()" class="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[11px] flex items-center gap-1">
-              <i class="fa-solid fa-plus"></i><span>انشر الآن</span>
-            </button>
-          </div>
-          <div class="grid grid-cols-4 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-            <button onclick="DamanProjects.setSubTab('browse')" class="py-2 rounded-lg text-[10px] font-extrabold ${this.subTab === 'browse' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">السوق</button>
-            <button onclick="DamanProjects.setSubTab('ledger')" class="py-2 rounded-lg text-[10px] font-extrabold ${this.subTab === 'ledger' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">سجل العمال</button>
-            <button onclick="DamanProjects.setSubTab('inspection')" class="py-2 rounded-lg text-[10px] font-extrabold ${this.subTab === 'inspection' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">ضمان 3x</button>
-            <button onclick="DamanProjects.setSubTab('vip_labor')" class="py-2 rounded-lg text-[10px] font-extrabold ${this.subTab === 'vip_labor' ? 'bg-purple-500 text-white' : 'text-slate-400'}">عمالة VIP</button>
+          <div class="grid grid-cols-4 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[10px] font-extrabold">
+            <button onclick="DamanProjects.setSubTab('market')" class="py-2 rounded-lg ${this.subTab === 'market' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">السوق B2B</button>
+            <button onclick="DamanProjects.setSubTab('ledger')" class="py-2 rounded-lg ${this.subTab === 'ledger' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">دفتر الموقع</button>
+            <button onclick="DamanProjects.setSubTab('inspection')" class="py-2 rounded-lg ${this.subTab === 'inspection' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">استلام 3x</button>
+            <button onclick="DamanProjects.setSubTab('viplabor')" class="py-2 rounded-lg ${this.subTab === 'viplabor' ? 'bg-purple-500 text-white' : 'text-slate-400'}">عمالة VIP</button>
           </div>
           ${body}
         </div>`;
