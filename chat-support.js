@@ -32,7 +32,7 @@
     callRecChunks: [],
     callStartTime: 0,
 
-    // Temporary image buffers for Day Proof / Invoice / Delivery Proof
+    // Temporary image buffers
     tempDayPhoto: '',
     tempInvoicePhoto: '',
 
@@ -41,8 +41,8 @@
       this.aiHistory.push({
         sender: 'ai',
         text: isAr
-          ? 'أهلاً بك في الدعم الفني الذكي لـ «ضمان سايت» 🏗️\nاسألني عن اتفاقات الموردين (B2B)، الاستلام الهندسي بضمان 3 أضعاف (3x)، اليوميات وتصفية الخميس أو كل 15 يوم، المستخلصات، طلب السلفة، أو تعديل العقد.'
-          : 'Welcome to DamanSite AI Support 🏗️\nAsk about B2B Supply Escrow, 3x Engineering Guarantee, Daily/15-Day Settlements, Abstracts, Advances, or Contract Amendments.'
+          ? 'أهلاً بك في الدعم الفني الذكي لـ «ضمان سايت» 🏗️\nاسألني عن اتفاقات الموردين (B2B)، الاستلام الهندسي بضمان 3 أضعاف (3x)، اليوميات وتصفية الخميس أو كل 15 يوم، المستخلصات، طلب السلفة، تعديل أو فسخ العقد.'
+          : 'Welcome to DamanSite AI Support 🏗️\nAsk about B2B Supply Escrow, 3x Engineering Guarantee, Daily/15-Day Settlements, Abstracts, Advances, or Contract Termination.'
       });
     },
 
@@ -537,29 +537,17 @@
       this.rerender();
     },
 
-    // ==================== 6-TEMPLATE EASY AGREEMENT ENGINE (INCLUDING B2B SUPPLY & MONTHLY SALARY) ====================
+    // ==================== 6-TEMPLATE AGREEMENT ENGINE ====================
     typeLabel(t) {
-      const map = {
-        supply: 'توريد خامات / بضاعة (B2B)',
-        daily: 'يومية وعمالة',
-        lump: 'مقطوعية',
-        meter: 'بالمتر ومستخلصات',
-        monthly: 'راتب شهري / دائم',
-        weekly: 'اتفاق أسبوعي'
-      };
+      const map = { supply: 'توريد خامات / بضاعة (B2B)', daily: 'يومية وعمالة', lump: 'مقطوعية', meter: 'بالمتر ومستخلصات', monthly: 'راتب شهري / دائم', weekly: 'اتفاق أسبوعي' };
       return map[t] || t;
     },
 
     payModeLabel(m) {
       const map = {
-        daily_pay: 'يومية تُصرف كل يوم',
-        expenses_thursday: 'مصاريف يومية + تصفية الخميس',
-        every_15_days: 'تصفية كل 15 يوم بتواريخ محددة',
-        split_50_50: '50% مقدم و50% عند التسليم',
-        milestones: 'دفعات بنسب مئوية ومواعيد',
-        on_completion: '100% عند الاستلام والفحص',
-        supply_advance: 'دفعة تجهيز/شحن + الباقي عند الاستلام',
-        monthly_pay: 'صرف راتب شهري ثابت'
+        daily_pay: 'يومية تُصرف كل يوم', expenses_thursday: 'مصاريف يومية + تصفية الخميس', every_15_days: 'تصفية كل 15 يوم بتواريخ محددة',
+        split_50_50: '50% مقدم و50% عند التسليم', milestones: 'دفعات بنسب مئوية ومواعيد', on_completion: '100% عند الاستلام والفحص',
+        supply_advance: 'دفعة تجهيز/شحن + الباقي عند الاستلام', monthly_pay: 'صرف راتب شهري ثابت'
       };
       return map[m] || m;
     },
@@ -582,7 +570,6 @@
             <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-file-signature me-1"></i> إنشاء اتفاق وعقد رسمي</h3>
             <button onclick="document.getElementById('daman-chat-agree-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
-
           <form onsubmit="DamanChat.submitAgreement(event)" oninput="DamanChat.updateAgreementPreview()" class="space-y-2.5 text-xs">
             <div>
               <label class="block text-[11px] font-bold text-slate-300 mb-1">1. اختر نوع الاتفاق</label>
@@ -595,105 +582,52 @@
                 <option value="weekly">📅 اتفاق أسبوعي (قيمة الأسبوع × أسابيع)</option>
               </select>
             </div>
-
             <div>
               <label class="block text-[11px] font-bold text-slate-300 mb-1">2. وصف الشغل أو الصنف المطلوب</label>
               <input id="ag-title" type="text" required placeholder="مثال: توريد 50 طن أسمنت / 10 نجارين / محارة فيلا" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             </div>
 
-            <!-- 1. DAILY BOX -->
             <div id="ag-box-daily" class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
               <div class="grid grid-cols-3 gap-1.5">
-                <div>
-                  <label class="block text-[10px] text-amber-300 font-bold mb-1">عدد العمال</label>
-                  <input id="ag-workers" type="number" min="1" value="10" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                </div>
-                <div>
-                  <label class="block text-[10px] text-amber-300 font-bold mb-1">يومية الفرد (ج.م)</label>
-                  <input id="ag-daily-rate" type="number" min="10" value="350" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                </div>
-                <div>
-                  <label class="block text-[10px] text-amber-300 font-bold mb-1">عدد الأيام</label>
-                  <input id="ag-days" type="number" min="1" value="6" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                </div>
+                <div><label class="block text-[10px] text-amber-300 font-bold mb-1">عدد العمال</label><input id="ag-workers" type="number" min="1" value="10" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                <div><label class="block text-[10px] text-amber-300 font-bold mb-1">يومية الفرد (ج.م)</label><input id="ag-daily-rate" type="number" min="10" value="350" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                <div><label class="block text-[10px] text-amber-300 font-bold mb-1">عدد الأيام</label><input id="ag-days" type="number" min="1" value="6" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
               </div>
-              <div>
-                <label class="block text-[10px] text-slate-300 font-bold mb-1">مصاريف تشغيل يومية (اختياري - ج.م)</label>
-                <input id="ag-daily-exp" type="number" min="0" value="0" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-              </div>
+              <div><label class="block text-[10px] text-slate-300 font-bold mb-1">مصاريف تشغيل يومية (اختياري - ج.م)</label><input id="ag-daily-exp" type="number" min="0" value="0" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
             </div>
 
-            <!-- 2. B2B SUPPLY BOX -->
             <div id="ag-box-supply" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/40 space-y-2">
               <div class="grid grid-cols-3 gap-1.5">
-                <div>
-                  <label class="block text-[10px] text-emerald-300 font-bold mb-1">الكمية</label>
-                  <input id="ag-sup-qty" type="number" min="1" step="any" value="10" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                </div>
-                <div>
-                  <label class="block text-[10px] text-emerald-300 font-bold mb-1">الوحدة</label>
-                  <input id="ag-sup-unit" type="text" value="طن / شيكارة" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-                </div>
-                <div>
-                  <label class="block text-[10px] text-emerald-300 font-bold mb-1">سعر الوحدة (ج.م)</label>
-                  <input id="ag-sup-price" type="number" min="1" step="any" value="2500" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                </div>
+                <div><label class="block text-[10px] text-emerald-300 font-bold mb-1">الكمية</label><input id="ag-sup-qty" type="number" min="1" step="any" value="10" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                <div><label class="block text-[10px] text-emerald-300 font-bold mb-1">الوحدة</label><input id="ag-sup-unit" type="text" value="طن / شيكارة" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                <div><label class="block text-[10px] text-emerald-300 font-bold mb-1">سعر الوحدة (ج.م)</label><input id="ag-sup-price" type="number" min="1" step="any" value="2500" class="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
               </div>
               <div class="grid grid-cols-2 gap-1.5">
-                <div>
-                  <label class="block text-[10px] text-slate-300 font-bold mb-1">مكان التسليم</label>
-                  <input id="ag-sup-loc" type="text" placeholder="مثال: موقع التجمع" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-                </div>
-                <div>
-                  <label class="block text-[10px] text-slate-300 font-bold mb-1">تاريخ التسليم</label>
-                  <input id="ag-sup-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-                </div>
+                <div><label class="block text-[10px] text-slate-300 font-bold mb-1">مكان التسليم</label><input id="ag-sup-loc" type="text" placeholder="مثال: موقع التجمع" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                <div><label class="block text-[10px] text-slate-300 font-bold mb-1">تاريخ التسليم</label><input id="ag-sup-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
               </div>
             </div>
 
-            <!-- 3. METER BOX -->
             <div id="ag-box-meter" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] text-amber-300 font-bold mb-1">سعر المتر الواحد (ج.م)</label>
-                <input id="ag-meter-price" type="number" min="1" step="any" value="20" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-              </div>
-              <div>
-                <label class="block text-[10px] text-amber-300 font-bold mb-1">إجمالي الأمتار (م² / م.ط)</label>
-                <input id="ag-meter-qty" type="number" min="1" step="any" value="1000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-              </div>
+              <div><label class="block text-[10px] text-amber-300 font-bold mb-1">سعر المتر الواحد (ج.م)</label><input id="ag-meter-price" type="number" min="1" step="any" value="20" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-amber-300 font-bold mb-1">إجمالي الأمتار (م² / م.ط)</label><input id="ag-meter-qty" type="number" min="1" step="any" value="1000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
             </div>
 
-            <!-- 4. LUMP BOX -->
             <div id="ag-box-lump" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
               <label class="block text-[10px] text-amber-300 font-bold mb-1">إجمالي مبلغ المقطوعية (ج.م)</label>
               <input id="ag-lump-total" type="number" min="50" step="any" value="1000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-emerald-500/40 text-white font-bold" />
             </div>
 
-            <!-- 5. MONTHLY SALARY BOX -->
             <div id="ag-box-monthly" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-sky-500/40 grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] text-sky-300 font-bold mb-1">الراتب الشهري الثابت (ج.م)</label>
-                <input id="ag-month-sal" type="number" min="500" value="12000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-              </div>
-              <div>
-                <label class="block text-[10px] text-sky-300 font-bold mb-1">يوم الصرف بالشهر</label>
-                <input id="ag-month-day" type="text" value="يوم 1 من كل شهر" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-              </div>
+              <div><label class="block text-[10px] text-sky-300 font-bold mb-1">الراتب الشهري الثابت (ج.م)</label><input id="ag-month-sal" type="number" min="500" value="12000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-sky-300 font-bold mb-1">يوم الصرف بالشهر</label><input id="ag-month-day" type="text" value="يوم 1 من كل شهر" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
             </div>
 
-            <!-- 6. WEEKLY BOX -->
             <div id="ag-box-weekly" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] text-amber-300 font-bold mb-1">مبلغ الأسبوع (ج.م)</label>
-                <input id="ag-week-rate" type="number" min="100" value="5000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-              </div>
-              <div>
-                <label class="block text-[10px] text-amber-300 font-bold mb-1">عدد الأسابيع</label>
-                <input id="ag-weeks" type="number" min="1" value="4" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-              </div>
+              <div><label class="block text-[10px] text-amber-300 font-bold mb-1">مبلغ الأسبوع (ج.م)</label><input id="ag-week-rate" type="number" min="100" value="5000" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-amber-300 font-bold mb-1">عدد الأسابيع</label><input id="ag-weeks" type="number" min="1" value="4" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
             </div>
 
-            <!-- PAYOUT SCHEDULE OPTIONS -->
             <div class="p-2.5 rounded-xl bg-slate-950/90 border border-sky-500/30 space-y-2">
               <label class="block text-[11px] font-bold text-sky-300">3. نظام الصرف والتصفية</label>
               <select id="ag-pay-mode" onchange="DamanChat.togglePayModeSubfields()" class="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold">
@@ -706,29 +640,16 @@
                 <option value="on_completion">100% عند انتهاء واستلام الشغل/التوريد</option>
                 <option value="monthly_pay">صرف راتب شهري ثابت</option>
               </select>
-
-              <!-- 15-day dates -->
               <div id="ag-sub-15d" class="hidden">
                 <label class="block text-[10px] text-amber-300 font-bold mb-1">تواريخ التصفية (كل 15 يوم)</label>
                 <input id="ag-15d-dates" type="text" value="يوم 1 ويوم 15 من كل شهر" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
               </div>
-
-              <!-- Custom milestones / supply advance -->
               <div id="ag-sub-ms" class="hidden space-y-2 pt-1">
                 <div class="grid grid-cols-2 gap-2">
-                  <div>
-                    <label class="block text-[10px] text-slate-300 mb-1">الدفعة الأولى الآن (%)</label>
-                    <input id="ag-m1-pct" type="number" min="0" max="100" value="20" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-slate-300 mb-1">الدفعة الثانية (%)</label>
-                    <input id="ag-m2-pct" type="number" min="0" max="100" value="20" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                  </div>
+                  <div><label class="block text-[10px] text-slate-300 mb-1">الدفعة الأولى الآن (%)</label><input id="ag-m1-pct" type="number" min="0" max="100" value="20" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                  <div><label class="block text-[10px] text-slate-300 mb-1">الدفعة الثانية (%)</label><input id="ag-m2-pct" type="number" min="0" max="100" value="20" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
                 </div>
-                <div>
-                  <label class="block text-[10px] text-slate-300 mb-1">موعد الدفعة الثانية (أو اتركه 0 للباقي عند الاستلام)</label>
-                  <input id="ag-m2-when" type="text" value="بعد أسبوع من البدء" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-                </div>
+                <div><label class="block text-[10px] text-slate-300 mb-1">موعد الدفعة الثانية</label><input id="ag-m2-when" type="text" value="بعد أسبوع من البدء" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
                 <div id="ag-m3-info" class="text-[10px] text-emerald-300 font-bold"></div>
               </div>
             </div>
@@ -749,7 +670,6 @@
       ['daily', 'supply', 'meter', 'lump', 'monthly', 'weekly'].forEach((k) => {
         document.getElementById('ag-box-' + k)?.classList.toggle('hidden', t !== k);
       });
-      // Auto-pick best matching payout mode for user convenience
       const pmSel = document.getElementById('ag-pay-mode');
       if (pmSel) {
         if (t === 'daily') pmSel.value = 'expenses_thursday';
@@ -812,13 +732,9 @@
       const m3 = Math.max(0, Math.round((100 - m1 - m2) * 10) / 10);
       const m3El = document.getElementById('ag-m3-info');
       if (m3El) m3El.textContent = `الباقي عند الاستلام النهائي: ${m3}% (${app.fmtMoney((calc.total * m3) / 100)} ج.م)`;
-
       const prev = document.getElementById('ag-calc-preview');
       if (prev) {
-        prev.innerHTML = `
-          <div>إجمالي قيمة الاتفاق: <b>${app.fmtMoney(calc.total)} ج.م</b></div>
-          <div>عمولة ضمان سايت (${(app.getCommissionRate() * 100).toFixed(1)}%): <b>${app.fmtMoney(calc.fee)} ج.م</b></div>
-          <div class="text-amber-300 font-black">الإجمالي شامل الضمان: ${app.fmtMoney(calc.grand)} ج.م</div>`;
+        prev.innerHTML = `<div>إجمالي قيمة الاتفاق: <b>${app.fmtMoney(calc.total)} ج.م</b></div><div>عمولة ضمان سايت (${(app.getCommissionRate() * 100).toFixed(1)}%): <b>${app.fmtMoney(calc.fee)} ج.م</b></div><div class="text-amber-300 font-black">الإجمالي شامل الضمان: ${app.fmtMoney(calc.grand)} ج.م</div>`;
       }
     },
 
@@ -833,9 +749,7 @@
       const dailyExpense = parseFloat(document.getElementById('ag-daily-exp')?.value) || 0;
       const settlementSchedule = payMode === 'every_15_days'
         ? (document.getElementById('ag-15d-dates')?.value.trim() || 'يوم 1 ويوم 15')
-        : calc.t === 'monthly'
-        ? (document.getElementById('ag-month-day')?.value.trim() || 'يوم 1 من كل شهر')
-        : 'يوم الخميس';
+        : calc.t === 'monthly' ? (document.getElementById('ag-month-day')?.value.trim() || 'يوم 1 من كل شهر') : 'يوم الخميس';
 
       let milestones = [];
       if (payMode === 'split_50_50') {
@@ -857,45 +771,19 @@
       const ticketNumber = 'TKT-' + Date.now().toString().slice(-6);
       try {
         await app.db.collection('chatAgreements').add({
-          chatId: this.activeChatId,
-          ticketNumber,
-          type: calc.t,
-          payMode,
-          title,
-          unitPrice: calc.unitPrice,
-          unitQty: calc.unitQty,
-          unitName: calc.unitName,
+          chatId: this.activeChatId, ticketNumber, type: calc.t, payMode, title,
+          unitPrice: calc.unitPrice, unitQty: calc.unitQty, unitName: calc.unitName,
           supplyLocation: (document.getElementById('ag-sup-loc')?.value || '').trim(),
           supplyDate: (document.getElementById('ag-sup-date')?.value || '').trim(),
-          workers: calc.workers,
-          totalDays: calc.days,
-          dailyRate: calc.t === 'daily' ? calc.unitPrice : 0,
-          dailyCost: calc.dailyCost,
-          dailyExpense,
-          settlementSchedule,
-          milestones,
-          totalAmount: calc.total,
-          commissionFee: calc.fee,
-          grandTotalWithFee: calc.grand,
-          lockedAmount: 0,
-          remainingEscrow: 0,
-          coveragePercent: 0,
-          createdBy: app.user.uid,
-          createdByName: app.profile?.companyName || app.profile?.name || '',
-          createdByNationalId: app.profile?.nationalId || '',
-          otherUid: this.activeChatMeta?.otherUid || '',
-          otherName: this.activeChatMeta?.otherName || '',
-          status: 'proposed',
-          contractStatus: 'not_uploaded',
-          signedContractBase64: '',
-          confirmedDays: 0,
-          pendingDayLog: null,
-          pendingAdvance: null,
-          pendingAmendment: null,
-          pendingAbstract: null,
-          pendingSupplyDelivery: null,
-          timeline: [],
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          workers: calc.workers, totalDays: calc.days, dailyRate: calc.t === 'daily' ? calc.unitPrice : 0,
+          dailyCost: calc.dailyCost, dailyExpense, settlementSchedule, milestones,
+          totalAmount: calc.total, commissionFee: calc.fee, grandTotalWithFee: calc.grand,
+          lockedAmount: 0, remainingEscrow: 0, coveragePercent: 0,
+          createdBy: app.user.uid, createdByName: app.profile?.companyName || app.profile?.name || '', createdByNationalId: app.profile?.nationalId || '',
+          otherUid: this.activeChatMeta?.otherUid || '', otherName: this.activeChatMeta?.otherName || '',
+          status: 'proposed', contractStatus: 'not_uploaded', signedContractBase64: '',
+          confirmedDays: 0, pendingDayLog: null, pendingAdvance: null, pendingAmendment: null, pendingAbstract: null, pendingTermination: null,
+          timeline: [], createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         document.getElementById('daman-chat-agree-modal').classList.add('hidden');
         await this.notifyChatPeer(app, `📄 تذكرة اتفاق جديدة (${ticketNumber}): ${title} — ${app.fmtMoney(calc.total)} ج.م`);
@@ -903,7 +791,6 @@
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
-    // Accept Agreement (Full 100% or Partial % with Low-Balance Alert)
     async acceptAgreement(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -918,17 +805,14 @@
         return;
       }
 
-      let lockNow = needed;
-      let isPartial = false;
+      let lockNow = needed, isPartial = false;
       if (avail < needed) {
         const pct = Math.max(1, Math.floor((avail / needed) * 100));
-        const okPartial = window.confirm(`⚠️ رصيدك المتاح (${app.fmtMoney(avail)} ج.م) يغطي ${pct}% فقط من إجمالي الاتفاق (${app.fmtMoney(needed)} ج.م).\nاضغط OK للبدء بتغطية جزئية (${pct}%) وإشعار الطرفين، أو Cancel لشحن الفرق الآن.`);
-        if (!okPartial) {
+        if (!window.confirm(`⚠️ رصيدك المتاح (${app.fmtMoney(avail)} ج.م) يغطي ${pct}% فقط من الاتفاق.\nاضغط OK للبدء بتغطية جزئية (${pct}%) أو Cancel لشحن الفرق.`)) {
           if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(Math.round((needed - avail) * 100) / 100);
           return;
         }
-        lockNow = avail;
-        isPartial = true;
+        lockNow = avail; isPartial = true;
       } else {
         if (!window.confirm(`تأكيد الموافقة وحجز ${app.fmtMoney(needed)} ج.م (شامل عمولة الضمان 3.5%)؟\nيُرجى طباعة العقد نسختين وتوقيعه ورفع صورته هنا لتفعيل الضمان.`)) return;
       }
@@ -945,32 +829,16 @@
           const curEsc = Number((uDoc.data() || {}).balanceEscrow || 0);
           if (curAvail < lockNow) throw new Error('الرصيد المتاح غير كافٍ');
 
-          tx.update(userRef, {
-            balanceAvailable: Math.round((curAvail - lockNow) * 100) / 100,
-            balanceEscrow: Math.round((curEsc + lockNow) * 100) / 100
-          });
+          tx.update(userRef, { balanceAvailable: Math.round((curAvail - lockNow) * 100) / 100, balanceEscrow: Math.round((curEsc + lockNow) * 100) / 100 });
           tx.update(agRef, {
-            status: 'active',
-            payerUid: app.user.uid,
-            payerName: app.profile?.companyName || app.profile?.name || '',
-            payerNationalId: app.profile?.nationalId || '',
-            lockedAmount: lockNow,
-            remainingEscrow: escrowNet,
-            coveragePercent: covPct,
+            status: 'active', payerUid: app.user.uid, payerName: app.profile?.companyName || app.profile?.name || '', payerNationalId: app.profile?.nationalId || '',
+            lockedAmount: lockNow, remainingEscrow: escrowNet, coveragePercent: covPct,
             acceptedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: new Date().toISOString().slice(0, 10),
-              kind: 'lock',
-              label: isPartial ? `تغطية جزئية مبدئية (${covPct}%)` : 'حجز كامل مبلغ الضمان (100%)',
-              amount: lockNow,
-              by: app.profile?.name || ''
-            })
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'lock', label: isPartial ? `تغطية جزئية (${covPct}%)` : 'حجز كامل مبلغ الضمان (100%)', amount: lockNow, by: app.profile?.name || '' })
           });
         });
 
-        const msg = isPartial
-          ? `⚠️ تم تفعيل الاتفاق ${ag.ticketNumber} بتغطية جزئية (${covPct}% فقط). اطبع العقد نسختين وارفع الصورة الموقّعة هنا.`
-          : `✅ تم حجز كامل الضمان للاتفاق ${ag.ticketNumber} (100%). اطبع العقد نسختين وارفع الصورة الموقّعة هنا.`;
+        const msg = isPartial ? `⚠️ تم تفعيل الاتفاق ${ag.ticketNumber} بتغطية جزئية (${covPct}%). اطبع العقد نسختين وارفع الصورة الموقّعة هنا.` : `✅ تم حجز كامل الضمان للاتفاق ${ag.ticketNumber}. اطبع العقد نسختين وارفع الصورة الموقّعة هنا.`;
         await app.sendNotification(ag.createdBy, `اعتماد الاتفاق ${ag.ticketNumber}`, msg);
         await app.sendNotification(app.user.uid, `اعتماد الاتفاق ${ag.ticketNumber}`, msg);
         app.toast(isPartial ? `تم الحجز بنسبة تغطية ${covPct}%` : 'تم حجز الضمان بنجاح!', 'success');
@@ -1008,9 +876,7 @@
           tx.update(userRef, { balanceAvailable: Math.round((curAvail - amt) * 100) / 100, balanceEscrow: Math.round((curEsc + amt) * 100) / 100 });
           tx.update(agRef, {
             lockedAmount: newLocked, remainingEscrow: newRem, coveragePercent: newCov,
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: new Date().toISOString().slice(0, 10), kind: 'topup', label: `تعزيز رصيد التغطية (وصلت لـ ${newCov}%)`, amount: amt, by: app.profile?.name || ''
-            })
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'topup', label: `تعزيز رصيد التغطية (وصلت لـ ${newCov}%)`, amount: amt, by: app.profile?.name || '' })
           });
         });
         await app.sendNotification(ag.createdBy, `تم تعزيز رصيد الاتفاق ${ag.ticketNumber}`, `أضاف صاحب العمل ${app.fmtMoney(amt)} ج.م لاستمرار الشغل/التوريد.`);
@@ -1025,10 +891,8 @@
       try {
         const b64 = await this.compressChatImage(file);
         await app.db.collection('chatAgreements').doc(agId).update({
-          signedContractBase64: b64,
-          contractStatus: 'pending_admin',
-          signedUploadedBy: app.profile?.name || '',
-          signedUploadedAt: firebase.firestore.FieldValue.serverTimestamp()
+          signedContractBase64: b64, contractStatus: 'pending_admin',
+          signedUploadedBy: app.profile?.name || '', signedUploadedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         await this.notifyChatPeer(app, '📄 تم رفع صورة العقد الموقّع (نسختين) — بانتظار اعتماد الإدارة');
         await app.sendNotification('ADMIN', 'عقد موقّع جديد بانتظار الاعتماد', `تم رفع صورة عقد موقّع للاتفاق ${agId}`);
@@ -1037,7 +901,118 @@
       input.value = '';
     },
 
-    // ==================== MUTUAL ADVANCE REQUEST (طلب سلفة بموافقة المهندس) ====================
+    // ==================== TERMINATE / CANCEL CONTRACT (إنهاء العمل وفسخ العقد) ====================
+    async requestTermination(agId) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag) return;
+      const rem = Number(ag.remainingEscrow || 0);
+      const reason = window.prompt('سبب طلب إنهاء العمل / فسخ العقد:', 'إنهاء العمل بالتراضي');
+      if (!reason) return;
+
+      const workerShare = parseFloat(window.prompt(
+        `المتبقي في الضمان حالياً: ${app.fmtMoney(rem)} ج.م.\nأدخل المبلغ المقترح صرفه للمنفّذ/العامل عن الشغل الذي تم تنفيذه حتى الآن (والباقي يرجع لصاحب العمل):`,
+        '0'
+      ));
+      if (isNaN(workerShare) || workerShare < 0 || workerShare > rem) {
+        return app.toast(`أدخل مبلغاً صحيحاً بين 0 و ${app.fmtMoney(rem)} ج.م`, 'error');
+      }
+      const clientRefund = Math.round((rem - workerShare) * 100) / 100;
+
+      try {
+        await app.db.collection('chatAgreements').doc(agId).update({
+          pendingTermination: {
+            reason: reason.trim(),
+            workerShare,
+            clientRefund,
+            proposedByUid: app.user.uid,
+            proposedByName: app.profile?.name || '',
+            date: new Date().toISOString().slice(0, 10)
+          }
+        });
+        const peer = app.user.uid === ag.createdBy ? ag.payerUid : ag.createdBy;
+        if (peer) {
+          await app.sendNotification(
+            peer,
+            `طلب إنهاء عمل وفسخ العقد (${ag.ticketNumber})`,
+            `طلب ${app.profile?.name} فسخ العقد (${reason}) — للمنفّذ: ${app.fmtMoney(workerShare)} ج.م | يُرد للعميل: ${app.fmtMoney(clientRefund)} ج.م — ادخل للموافقة أو التحويل لنزاع.`
+          );
+        }
+        app.toast('تم إرسال طلب فسخ العقد للطرف الآخر للموافقة', 'info');
+      } catch (e) { app.toast(e.message, 'error'); }
+    },
+
+    async respondTermination(agId, approve) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || !ag.pendingTermination) return;
+      const tm = ag.pendingTermination;
+
+      if (!approve) {
+        if (!window.confirm('رفض شروط الفسخ وتحويل العقد لنزاع رسمي تفصل فيه إدارة ضمان سايت؟')) return;
+        try {
+          await app.db.collection('chatAgreements').doc(agId).update({ status: 'disputed', pendingTermination: null });
+          await app.db.collection('disputes').add({
+            agreementId: agId,
+            contractNumber: ag.ticketNumber,
+            projectTitle: ag.title,
+            contractAmount: Number(ag.remainingEscrow || 0),
+            clientId: ag.payerUid || '',
+            providerId: ag.createdBy || '',
+            reason: `خلاف على إنهاء/فسخ العقد: ${tm.reason} (مقترح ${tm.proposedByName}: ${tm.workerShare} ج.م للمنفّذ)`,
+            status: 'open',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.sendNotification('ADMIN', `نزاع فسخ عقد جديد (${ag.ticketNumber})`, `${ag.title} — المتبقي بالضمان: ${app.fmtMoney(ag.remainingEscrow)} ج.م`);
+          const peer = tm.proposedByUid;
+          if (peer) await app.sendNotification(peer, `تم تحويل فسخ العقد لنزاع (${ag.ticketNumber})`, 'ستتولى إدارة ضمان سايت مراجعة المحادثة والفصل بين الطرفين.');
+          app.toast('تم تحويل العقد لنزاع رسمي أمام الإدارة', 'warning');
+        } catch (e) { app.toast(e.message, 'error'); }
+        return;
+      }
+
+      if (!window.confirm(`تأكيد الموافقة على فسخ العقد نهائياً؟\n• يُصرف للمنفّذ: ${app.fmtMoney(tm.workerShare)} ج.م\n• يُرد لصاحب العمل: ${app.fmtMoney(tm.clientRefund)} ج.م`)) return;
+
+      const payerRef = app.db.collection('users').doc(ag.payerUid);
+      const workerRef = app.db.collection('users').doc(ag.createdBy);
+      const agRef = app.db.collection('chatAgreements').doc(agId);
+
+      try {
+        await app.db.runTransaction(async (tx) => {
+          const [pDoc, wDoc, aDoc] = await Promise.all([tx.get(payerRef), tx.get(workerRef), tx.get(agRef)]);
+          const a = aDoc.data();
+          const curRem = Number(a.remainingEscrow || 0);
+          const pEsc = Number((pDoc.data() || {}).balanceEscrow || 0);
+          const pAvail = Number((pDoc.data() || {}).balanceAvailable || 0);
+          const wAvail = Number((wDoc.data() || {}).balanceAvailable || 0);
+
+          tx.update(payerRef, {
+            balanceEscrow: Math.max(0, Math.round((pEsc - curRem) * 100) / 100),
+            balanceAvailable: Math.round((pAvail + tm.clientRefund) * 100) / 100
+          });
+          if (tm.workerShare > 0) {
+            tx.update(workerRef, { balanceAvailable: Math.round((wAvail + tm.workerShare) * 100) / 100 });
+          }
+          tx.update(agRef, {
+            status: 'cancelled',
+            remainingEscrow: 0,
+            pendingTermination: null,
+            timeline: firebase.firestore.FieldValue.arrayUnion({
+              date: tm.date,
+              kind: 'cancelled',
+              label: `فسخ وإنهاء العقد بالتراضي (${tm.reason}) — للمنفّذ ${app.fmtMoney(tm.workerShare)} ج.م | رُد للعميل ${app.fmtMoney(tm.clientRefund)} ج.م`,
+              amount: tm.workerShare,
+              by: app.profile?.name || ''
+            })
+          });
+        });
+        await app.sendNotification(ag.createdBy, `تم فسخ وتصفية العقد ${ag.ticketNumber}`, `تم تحويل ${app.fmtMoney(tm.workerShare)} ج.م لمحفظتك.`);
+        await app.sendNotification(ag.payerUid, `تم فسخ وتصفية العقد ${ag.ticketNumber}`, `تم رد ${app.fmtMoney(tm.clientRefund)} ج.م لمحفظتك.`);
+        app.toast('تم فسخ العقد وتصفية المستحقات بالتراضي بنجاح ✅', 'success');
+      } catch (e) { app.toast(e.message, 'error'); }
+    },
+
+    // ==================== MUTUAL ADVANCE, AMENDMENT, DAILY HEADCOUNT, ABSTRACTS & MOVEMENTS ====================
     async requestAdvance(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -1049,8 +1024,8 @@
         await app.db.collection('chatAgreements').doc(agId).update({
           pendingAdvance: { amount, reason, byUid: app.user.uid, byName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) }
         });
-        await app.sendNotification(ag.payerUid, `طلب سلفة جديدة (${app.fmtMoney(amount)} ج.م)`, `طلب ${app.profile?.name} سلفة (${reason}) من الاتفاق ${ag.ticketNumber} — ادخل للموافقة أو الرفض.`);
-        app.toast('تم إرسال طلب السلفة لصاحب العمل/المهندس للموافقة', 'success');
+        await app.sendNotification(ag.payerUid, `طلب سلفة جديدة (${app.fmtMoney(amount)} ج.م)`, `طلب ${app.profile?.name} سلفة (${reason}) من الاتفاق ${ag.ticketNumber}.`);
+        app.toast('تم إرسال طلب السلفة للمهندس/المشتري للموافقة', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1059,16 +1034,12 @@
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag || !ag.pendingAdvance) return;
       const adv = ag.pendingAdvance;
-
       if (!approve) {
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAdvance: null });
-        await app.sendNotification(ag.createdBy, `تم رفض طلب السلفة (${app.fmtMoney(adv.amount)} ج.م)`, `رفض المهندس/العميل صرف السلفة حالياً.`);
+        await app.sendNotification(ag.createdBy, `تم رفض طلب السلفة (${app.fmtMoney(adv.amount)} ج.م)`, 'رفض المهندس/العميل صرف السلفة حالياً.');
         return app.toast('تم رفض طلب السلفة', 'info');
       }
-
-      if (Number(ag.remainingEscrow || 0) < Number(adv.amount)) {
-        return app.toast('الرصيد المتبقي بالضمان لا يكفي لصرف السلفة — قم بتعزيز الرصيد أولاً', 'error');
-      }
+      if (Number(ag.remainingEscrow || 0) < Number(adv.amount)) return app.toast('الرصيد المتبقي بالضمان لا يكفي لصرف السلفة', 'error');
 
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
@@ -1081,36 +1052,29 @@
           tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - adv.amount) * 100) / 100) });
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + adv.amount) * 100) / 100 });
           tx.update(agRef, {
-            remainingEscrow: Math.round((curRem - adv.amount) * 100) / 100,
-            pendingAdvance: null,
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: adv.date, kind: 'advance_paid', label: `موافقة وصرف سلفة (${adv.reason})`, amount: adv.amount, by: app.profile?.name || ''
-            })
+            remainingEscrow: Math.round((curRem - adv.amount) * 100) / 100, pendingAdvance: null,
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: adv.date, kind: 'advance_paid', label: `موافقة وصرف سلفة (${adv.reason})`, amount: adv.amount, by: app.profile?.name || '' })
           });
         });
-        await app.sendNotification(ag.createdBy, `تمت الموافقة وصرف السلفة ✅`, `تم تحويل ${app.fmtMoney(adv.amount)} ج.م إلى محفظتك وخصمها من باقي الحساب.`);
+        await app.sendNotification(ag.createdBy, 'تمت الموافقة وصرف السلفة ✅', `تم تحويل ${app.fmtMoney(adv.amount)} ج.م إلى محفظتك.`);
         app.toast('تم صرف السلفة لمحفظة المنفّذ وخصمها أوتوماتيك ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== MUTUAL AMENDMENT / ADDENDUM (تعديل الاتفاق بموافقة الطرفين) ====================
     async proposeAmendment(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
       const newTotal = parseFloat(window.prompt(`السعر الإجمالي الجديد للاتفاق (الحالي: ${app.fmtMoney(ag.totalAmount)} ج.م):`, ag.totalAmount));
       if (!newTotal || newTotal <= 0) return;
-      const note = window.prompt('تفاصيل التعديل المطلوب (مثال: زيادة أمتار / تعديل نظام الصرف / مد المدة):', '');
+      const note = window.prompt('تفاصيل التعديل المطلوب (زيادة أمتار / تعديل نظام الصرف / مد المدة):', '');
       if (!note) return;
-
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
-          pendingAmendment: {
-            newTotal, note: note.trim(), proposedByUid: app.user.uid, proposedByName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10)
-          }
+          pendingAmendment: { newTotal, note: note.trim(), proposedByUid: app.user.uid, proposedByName: app.profile?.name || '', date: new Date().toISOString().slice(0, 10) }
         });
         const peer = app.user.uid === ag.createdBy ? ag.payerUid : ag.createdBy;
-        if (peer) await app.sendNotification(peer, `طلب تعديل الاتفاق ${ag.ticketNumber}`, `اقترح ${app.profile?.name} تعديل الإجمالي إلى ${app.fmtMoney(newTotal)} ج.م (${note}) — ادخل للموافقة أو الرفض.`);
+        if (peer) await app.sendNotification(peer, `طلب تعديل الاتفاق ${ag.ticketNumber}`, `اقترح ${app.profile?.name} تعديل الإجمالي إلى ${app.fmtMoney(newTotal)} ج.م (${note}).`);
         app.toast('تم إرسال طلب تعديل الاتفاق للطرف الآخر للموافقة', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
@@ -1120,36 +1084,25 @@
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag || !ag.pendingAmendment) return;
       const am = ag.pendingAmendment;
-      const peer = am.proposedByUid;
-
       if (!approve) {
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAmendment: null });
-        if (peer) await app.sendNotification(peer, `تم رفض طلب تعديل الاتفاق ${ag.ticketNumber}`, 'يبقى الاتفاق الأصلي سارياً كما هو.');
+        if (am.proposedByUid) await app.sendNotification(am.proposedByUid, `تم رفض تعديل الاتفاق ${ag.ticketNumber}`, 'يبقى الاتفاق الأصلي سارياً كما هو.');
         return app.toast('تم رفض التعديل وإبقاء الاتفاق الأصلي', 'info');
       }
-
       const rate = app.getCommissionRate();
       const newFee = Math.round(am.newTotal * rate * 100) / 100;
       const newGrand = Math.round((am.newTotal + newFee) * 100) / 100;
       const newCov = Math.min(100, Math.round((Number(ag.lockedAmount || 0) / newGrand) * 100));
-
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
-          totalAmount: am.newTotal,
-          commissionFee: newFee,
-          grandTotalWithFee: newGrand,
-          coveragePercent: newCov,
-          pendingAmendment: null,
-          timeline: firebase.firestore.FieldValue.arrayUnion({
-            date: am.date, kind: 'amendment', label: `ملحق تعديل معتمد من الطرفين: ${am.note} (الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م)`, amount: am.newTotal, by: app.profile?.name || ''
-          })
+          totalAmount: am.newTotal, commissionFee: newFee, grandTotalWithFee: newGrand, coveragePercent: newCov, pendingAmendment: null,
+          timeline: firebase.firestore.FieldValue.arrayUnion({ date: am.date, kind: 'amendment', label: `ملحق تعديل معتمد: ${am.note} (الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م)`, amount: am.newTotal, by: app.profile?.name || '' })
         });
-        if (peer) await app.sendNotification(peer, `تمت الموافقة على تعديل الاتفاق ${ag.ticketNumber} ✅`, `الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م (تغطية الرصيد الحالية: ${newCov}%)`);
+        if (am.proposedByUid) await app.sendNotification(am.proposedByUid, `تمت الموافقة على تعديل الاتفاق ${ag.ticketNumber} ✅`, `الإجمالي الجديد: ${app.fmtMoney(am.newTotal)} ج.م`);
         app.toast('تم اعتماد ملحق التعديل وتحديث العقد بنجاح ✅', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== DAILY VARIABLE HEADCOUNT + SITE PHOTO PROOF ====================
     openDailyLogModal(agId) {
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
@@ -1169,14 +1122,8 @@
             <button onclick="document.getElementById('daman-day-log-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <form onsubmit="DamanChat.submitDailyLog(event,'${agId}')" class="space-y-2.5">
-            <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">عدد العمال الفعلي الذين حضروا اليوم (المتفق عليه: ${ag.workers || 1})</label>
-              <input id="dl-count" type="number" min="1" required value="${ag.workers || 1}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" />
-            </div>
-            <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">ملاحظة عن ما تم إنجازه اليوم (اختياري)</label>
-              <input id="dl-note" type="text" placeholder="مثال: شدة سقف الدور الثاني" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            </div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">عدد العمال الفعلي الذين حضروا اليوم (المتفق عليه: ${ag.workers || 1})</label><input id="dl-count" type="number" min="1" required value="${ag.workers || 1}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" /></div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">ملاحظة عن ما تم إنجازه اليوم (اختياري)</label><input id="dl-note" type="text" placeholder="مثال: شدة سقف الدور الثاني" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
               <span class="font-bold text-emerald-300"><i class="fa-solid fa-camera me-1"></i> إرفاق صورة إثبات الإنجاز من الموقع (اختياري)</span>
               <input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'day')" />
@@ -1213,11 +1160,7 @@
       const note = document.getElementById('dl-note').value.trim();
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
-          pendingDayLog: {
-            date: new Date().toISOString().slice(0, 10),
-            actualWorkers, note, photoBase64: this.tempDayPhoto || '',
-            byUid: app.user.uid, byName: app.profile?.name || ''
-          }
+          pendingDayLog: { date: new Date().toISOString().slice(0, 10), actualWorkers, note, photoBase64: this.tempDayPhoto || '', byUid: app.user.uid, byName: app.profile?.name || '' }
         });
         document.getElementById('daman-day-log-modal').classList.add('hidden');
         await app.sendNotification(ag.payerUid || ag.otherUid, `تأكيد حضور اليوم (${actualWorkers} عامل)`, `سجّل ${app.profile?.name} حضور ${actualWorkers} فرد اليوم — ادخل للاعتماد.`);
@@ -1229,11 +1172,7 @@
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag || !ag.pendingDayLog) return;
-
-      const confirmedCount = parseInt(
-        window.prompt(`اعتماد العدد الفعلي لعمال اليوم (المسجّل: ${ag.pendingDayLog.actualWorkers} — يمكنك التعديل قبل الاعتماد):`, ag.pendingDayLog.actualWorkers),
-        10
-      );
+      const confirmedCount = parseInt(window.prompt(`اعتماد العدد الفعلي لعمال اليوم (المسجّل: ${ag.pendingDayLog.actualWorkers}):`, ag.pendingDayLog.actualWorkers), 10);
       if (!confirmedCount || confirmedCount <= 0) return;
 
       const dayCost = ag.type === 'daily' ? Math.round(confirmedCount * Number(ag.dailyRate || 0) * 100) / 100 : 0;
@@ -1251,21 +1190,14 @@
             tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + dayCost) * 100) / 100 });
           });
         }
-
         await app.db.collection('chatAgreements').doc(agId).update({
-          confirmedDays: nextDays,
-          remainingEscrow: newRem,
-          pendingDayLog: null,
+          confirmedDays: nextDays, remainingEscrow: newRem, pendingDayLog: null,
           timeline: firebase.firestore.FieldValue.arrayUnion({
-            date: ag.pendingDayLog.date,
-            kind: 'day_confirmed',
+            date: ag.pendingDayLog.date, kind: 'day_confirmed',
             label: `اعتماد يوم (${confirmedCount} عامل)${payNow ? ' + صرف فوري' : ''}${ag.pendingDayLog.note ? ' — ' + ag.pendingDayLog.note : ''}`,
-            amount: dayCost,
-            photoBase64: ag.pendingDayLog.photoBase64 || '',
-            by: app.profile?.name || ''
+            amount: dayCost, photoBase64: ag.pendingDayLog.photoBase64 || '', by: app.profile?.name || ''
           })
         });
-
         await app.sendNotification(ag.createdBy, `تم اعتماد يوم العمل (${confirmedCount} عامل)`, `بقيمة ${app.fmtMoney(dayCost)} ج.م${payNow ? ' وتم صرفها فوراً لمحفظتك ✅' : ''}.`);
         const tomorrowEst = Number(ag.dailyCost || dayCost || 0);
         if (tomorrowEst > 0 && newRem < tomorrowEst) {
@@ -1288,24 +1220,22 @@
       app.toast('تم إعادة الطلب للمراجعة', 'info');
     },
 
-    // ==================== B2B SUPPLY DELIVERY & RUNNING ABSTRACTS (مستخلص جاري / استلام توريد) ====================
     async submitRunningAbstractOrSupply(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag) return;
       const isSupply = ag.type === 'supply';
-      const qty = parseFloat(window.prompt(isSupply ? `الكمية المورّدة الآن (${ag.unitName || 'وحدة'}):` : `الكمية / الأمتار المنفّذة في المستخلص الجاري:`, ag.unitQty || 1));
+      const qty = parseFloat(window.prompt(isSupply ? `الكمية المورّدة الآن (${ag.unitName || 'وحدة'}):` : 'الكمية / الأمتار المنفّذة في المستخلص الجاري:', ag.unitQty || 1));
       if (!qty || qty <= 0) return;
       const amount = parseFloat(window.prompt('القيمة المطلوب صرفها لهذا المستخلص / التوريد (ج.م):', Math.round(qty * Number(ag.unitPrice || 0)) || ag.remainingEscrow));
       if (!amount || amount <= 0) return;
-      const note = window.prompt(isSupply ? 'رقم بوليصة الشحن / ملاحظة التوريد:' : 'رقم المستخلص والبيان (مثال: مستخلص رقم 1 - محارة الدور الأول):', isSupply ? 'تم الشحن والتسليم للموقع' : 'مستخلص جاري رقم 1') || '';
-
+      const note = window.prompt(isSupply ? 'رقم بوليصة الشحن / ملاحظة التوريد:' : 'رقم المستخلص والبيان:', isSupply ? 'تم الشحن والتسليم للموقع' : 'مستخلص جاري رقم 1') || '';
       try {
         await app.db.collection('chatAgreements').doc(agId).update({
           pendingAbstract: { qty, amount, note, isSupply, date: new Date().toISOString().slice(0, 10), byName: app.profile?.name || '' }
         });
-        await app.sendNotification(ag.payerUid, isSupply ? `إشعار تسليم بضاعة وتوريد (${ag.ticketNumber})` : `مستخلص جاري جديد (${ag.ticketNumber})`, `${note} — بقيمة ${app.fmtMoney(amount)} ج.م — ادخل للفحص والاعتماد.`);
-        app.toast(isSupply ? 'تم إرسال إشعار تسليم التوريد للمشتري للفحص والاعتماد' : 'تم رفع المستخلص الجاري للمهندس للاعتماد', 'success');
+        await app.sendNotification(ag.payerUid, isSupply ? `إشعار تسليم بضاعة وتوريد (${ag.ticketNumber})` : `مستخلص جاري جديد (${ag.ticketNumber})`, `${note} — بقيمة ${app.fmtMoney(amount)} ج.م.`);
+        app.toast(isSupply ? 'تم إرسال إشعار تسليم التوريد للمشتري' : 'تم رفع المستخلص الجاري للمهندس', 'success');
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
@@ -1314,17 +1244,13 @@
       const ag = this.agreements.find((a) => a.id === agId);
       if (!ag || !ag.pendingAbstract) return;
       const ab = ag.pendingAbstract;
-
       if (!approve) {
-        const reason = window.prompt(ab.isSupply ? 'اذكر ملاحظة النقص أو سبب رفض البضاعة:' : 'سبب رفض المستخلص:', 'يوجد ملاحظات فنية / نقص كمية') || '';
+        const reason = window.prompt(ab.isSupply ? 'ملاحظة النقص أو سبب رفض البضاعة:' : 'سبب رفض المستخلص:', 'يوجد ملاحظات فنية / نقص كمية') || '';
         await app.db.collection('chatAgreements').doc(agId).update({ pendingAbstract: null });
         await app.sendNotification(ag.createdBy, ab.isSupply ? 'ملاحظة نقص / رفض استلام توريد' : 'تم إعادة المستخلص للمراجعة', reason);
         return app.toast('تم إرسال الملاحظة للطرف الآخر', 'info');
       }
-
-      if (Number(ag.remainingEscrow || 0) < Number(ab.amount)) {
-        return app.toast('الرصيد المتبقي بالضمان أقل من قيمة المستخلص/التوريد — يرجى تعزيز الرصيد أولاً', 'error');
-      }
+      if (Number(ag.remainingEscrow || 0) < Number(ab.amount)) return app.toast('الرصيد المتبقي بالضمان أقل من قيمة المستخلص/التوريد', 'error');
 
       const payerRef = app.db.collection('users').doc(ag.payerUid);
       const workerRef = app.db.collection('users').doc(ag.createdBy);
@@ -1337,11 +1263,8 @@
           tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((Number((pDoc.data() || {}).balanceEscrow || 0) - ab.amount) * 100) / 100) });
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + ab.amount) * 100) / 100 });
           tx.update(agRef, {
-            remainingEscrow: Math.round((curRem - ab.amount) * 100) / 100,
-            pendingAbstract: null,
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: ab.date, kind: 'abstract_paid', label: `${ab.isSupply ? 'اعتماد استلام توريد' : 'اعتماد مستخلص جاري'}: ${ab.note} (كمية ${ab.qty})`, amount: ab.amount, by: app.profile?.name || ''
-            })
+            remainingEscrow: Math.round((curRem - ab.amount) * 100) / 100, pendingAbstract: null,
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: ab.date, kind: 'abstract_paid', label: `${ab.isSupply ? 'اعتماد استلام توريد' : 'اعتماد مستخلص جاري'}: ${ab.note} (كمية ${ab.qty})`, amount: ab.amount, by: app.profile?.name || '' })
           });
         });
         await app.sendNotification(ag.createdBy, ab.isSupply ? 'تم تأكيد استلام التوريد وتحرير المبلغ ✅' : 'تم اعتماد المستخلص الجاري وتحرير المبلغ ✅', `تم تحويل ${app.fmtMoney(ab.amount)} ج.م إلى محفظتك.`);
@@ -1349,7 +1272,6 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== MATERIALS CUSTODY + INVOICE UPLOAD / PAYOUT / DEDUCTION ====================
     openMovementModal(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -1364,7 +1286,6 @@
       }
       modal.classList.remove('hidden');
       const isPayer = ag.payerUid === app.user.uid;
-
       modal.innerHTML = `
         <div class="w-full max-w-sm bg-slate-900 border border-sky-500/50 rounded-2xl p-4 space-y-3 text-xs">
           <div class="flex items-center justify-between">
@@ -1372,22 +1293,9 @@
             <button onclick="document.getElementById('daman-chat-move-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <form onsubmit="DamanChat.submitMovement(event,'${agId}')" class="space-y-2.5">
-            <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">نوع الحركة</label>
-              <select id="mv-kind" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 font-bold text-white">
-                <option value="materials">عُهدة شراء خامات / بضاعة + إرفاق فاتورة</option>
-                ${isPayer ? `<option value="payout">صرف دفعة / راتب / مصاريف من الضمان لمحفظة المنفّذ</option>` : ''}
-                <option value="deduction">تسجيل خصم / جزاء / تلفيات (مع السبب)</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ (ج.م)</label>
-              <input id="mv-amt" type="number" min="1" step="any" required placeholder="أدخل المبلغ بالجنيه" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white" />
-            </div>
-            <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">البيان / السبب</label>
-              <input id="mv-note" type="text" required placeholder="مثال: فاتورة شراء مسامير وأسلاك / راتب شهر نوفمبر" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            </div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">نوع الحركة</label><select id="mv-kind" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 font-bold text-white"><option value="materials">عُهدة شراء خامات / بضاعة + إرفاق فاتورة</option>${isPayer ? `<option value="payout">صرف دفعة / راتب / مصاريف من الضمان لمحفظة المنفّذ</option>` : ''}<option value="deduction">تسجيل خصم / جزاء / تلفيات (مع السبب)</option></select></div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ (ج.م)</label><input id="mv-amt" type="number" min="1" step="any" required placeholder="أدخل المبلغ بالجنيه" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 font-bold text-white" /></div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">البيان / السبب</label><input id="mv-note" type="text" required placeholder="مثال: فاتورة شراء مسامير وأسلاك / راتب شهر نوفمبر" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <label class="block p-2 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer">
               <span class="font-bold text-amber-300"><i class="fa-solid fa-receipt me-1"></i> إرفاق صورة الفاتورة أو الإيصال (اختياري)</span>
               <input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPhoto(this,'inv')" />
@@ -1424,17 +1332,13 @@
             tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + amount) * 100) / 100 });
             tx.update(agRef, {
               remainingEscrow: Math.round((curRem - amount) * 100) / 100,
-              timeline: firebase.firestore.FieldValue.arrayUnion({
-                date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || ''
-              })
+              timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' })
             });
           });
-          await app.sendNotification(ag.createdBy, `تم صرف دفعة في محفظتك ✅`, `تم تحويل ${app.fmtMoney(amount)} ج.م (${note})`);
+          await app.sendNotification(ag.createdBy, 'تم صرف دفعة في محفظتك ✅', `تم تحويل ${app.fmtMoney(amount)} ج.م (${note})`);
         } else {
           await agRef.update({
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || ''
-            })
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind, label: `${labels[kind]} — ${note}`, amount, photoBase64: this.tempInvoicePhoto || '', by: app.profile?.name || '' })
           });
           await this.notifyChatPeer(app, `🧾 ${labels[kind]}: ${app.fmtMoney(amount)} ج.م — ${note}`);
         }
@@ -1466,13 +1370,11 @@
           tx.update(workerRef, { balanceAvailable: Math.round((Number((wDoc.data() || {}).balanceAvailable || 0) + curRem) * 100) / 100 });
           tx.update(agRef, {
             status: 'completed', remainingEscrow: 0, completedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            timeline: firebase.firestore.FieldValue.arrayUnion({
-              date: new Date().toISOString().slice(0, 10), kind: 'completed', label: 'تأكيد الاستلام النهائي وتصفية الحساب', amount: curRem, by: app.profile?.name || ''
-            })
+            timeline: firebase.firestore.FieldValue.arrayUnion({ date: new Date().toISOString().slice(0, 10), kind: 'completed', label: 'تأكيد الاستلام النهائي وتصفية الحساب', amount: curRem, by: app.profile?.name || '' })
           });
           if (Number(a.commissionFee || 0) > 0) {
             tx.set(app.db.collection('platformFees').doc(), {
-              agreementId: agId, ticketNumber: a.ticketNumber, amount: Number(a.commissionFee || 0), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              agreementId: agId, type: 'escrow_35', ticketNumber: a.ticketNumber, amount: Number(a.commissionFee || 0), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           }
         });
@@ -1510,7 +1412,7 @@
               <div class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5">
                 <div class="flex justify-between gap-2">
                   <div><div class="font-bold text-white">${app.esc(it.label)}</div><div class="text-[10px] text-slate-400">${app.esc(it.date)} — ${app.esc(it.by || '')}</div></div>
-                  <span class="font-black ${it.kind === 'deduction' ? 'text-rose-400' : 'text-emerald-400'} shrink-0">${it.amount ? app.fmtMoney(it.amount) + ' ج.م' : ''}</span>
+                  <span class="font-black ${it.kind === 'deduction' || it.kind === 'cancelled' ? 'text-rose-400' : 'text-emerald-400'} shrink-0">${it.amount ? app.fmtMoney(it.amount) + ' ج.م' : ''}</span>
                 </div>
                 ${it.photoBase64 ? `<img src="${it.photoBase64}" onclick="window.open('${it.photoBase64}','_blank')" class="max-h-32 rounded border border-slate-700 cursor-pointer" />` : ''}
               </div>`).join('')}
@@ -1527,46 +1429,22 @@
       const d = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
       const specDetail = ag.type === 'supply'
         ? `توريد بضاعة/خامات: ${ag.unitQty} ${app.esc(ag.unitName || 'وحدة')} × ${app.fmtMoney(ag.unitPrice)} ج.م | مكان التسليم: ${app.esc(ag.supplyLocation || '-')} | الموعد: ${app.esc(ag.supplyDate || '-')}`
-        : ag.type === 'meter'
-        ? `بالمتر: ${ag.unitQty} متر × ${app.fmtMoney(ag.unitPrice)} ج.م`
-        : ag.type === 'daily'
-        ? `باليومية: ${ag.workers} عمال × ${app.fmtMoney(ag.dailyRate)} ج.م × ${ag.totalDays} أيام (تأكيد يومي للعدد الفعلي)`
-        : ag.type === 'monthly'
-        ? `راتب شهري ثابت: ${app.fmtMoney(ag.totalAmount)} ج.م (${app.esc(ag.settlementSchedule || '')})`
+        : ag.type === 'meter' ? `بالمتر: ${ag.unitQty} متر × ${app.fmtMoney(ag.unitPrice)} ج.م`
+        : ag.type === 'daily' ? `باليومية: ${ag.workers} عمال × ${app.fmtMoney(ag.dailyRate)} ج.م × ${ag.totalDays} أيام`
+        : ag.type === 'monthly' ? `راتب شهري ثابت: ${app.fmtMoney(ag.totalAmount)} ج.م (${app.esc(ag.settlementSchedule || '')})`
         : this.typeLabel(ag.type);
-      const msHtml = (ag.milestones && ag.milestones.length)
-        ? `<tr><th>جدول الدفعات</th><td colspan="3">${ag.milestones.map((m) => `• ${app.esc(m.label)} (${app.fmtMoney(m.amount)} ج.م) — ${app.esc(m.when)}`).join('<br/>')}</td></tr>`
-        : '';
+      const msHtml = (ag.milestones && ag.milestones.length) ? `<tr><th>جدول الدفعات</th><td colspan="3">${ag.milestones.map((m) => `• ${app.esc(m.label)} (${app.fmtMoney(m.amount)} ج.م) — ${app.esc(m.when)}`).join('<br/>')}</td></tr>` : '';
 
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>عقد ضمان سايت ${ag.ticketNumber}</title><style>@page{size:A4 portrait;margin:13mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11.5px;line-height:1.6;}.box{border:2px solid #000;padding:16px 18px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:10px;}th,td{border:1px solid #000;padding:5px 7px;text-align:right;}th{background:#f2f2f2;width:22%;}.clauses{border:1px solid #000;padding:8px 10px;margin:10px 0;font-size:11px;}.verify{border:1px dashed #000;padding:6px;text-align:center;font-weight:700;margin-bottom:10px;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;text-align:center;}.sig{border:1px solid #000;padding:8px 8px 44px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة العقد نسختين (A4 PDF)</button><div class="box"><div class="hdr"><div><h2 style="margin:0">عقد اتفاق وتعاقد رسمي — ضمان سايت</h2><div>DamanSite Official Escrow & B2B Contract</div></div><div><div><b>كود التحقق الرسمي:</b> ${ag.ticketNumber}</div><div><b>التاريخ:</b> ${d}</div></div></div><div class="verify">للتحقق من صحة وسريان هذا العقد أدخل الكود (${ag.ticketNumber}) في أداة «فحص عقد» داخل تطبيق ضمان سايت</div><table><tr><th>الطرف الأول (صاحب العمل / المشتري)</th><td>${app.esc(ag.payerName || ag.otherName)}</td><th>الرقم القومي</th><td>${app.esc(ag.payerNationalId || 'موثّق بالمنصة')}</td></tr><tr><th>الطرف الثاني (المنفّذ / المورّد)</th><td>${app.esc(ag.createdByName)}</td><th>الرقم القومي</th><td>${app.esc(ag.createdByNationalId || 'موثّق بالمنصة')}</td></tr></table><table><tr><th>بند العمل / التوريد</th><td colspan="3"><b>${app.esc(ag.title)}</b></td></tr><tr><th>التفاصيل</th><td colspan="3">${specDetail}</td></tr><tr><th>نظام الصرف</th><td>${this.payModeLabel(ag.payMode)}</td><th>مواعيد التصفية</th><td>${app.esc(ag.settlementSchedule || '-')} ${ag.dailyExpense ? '| مصاريف يومية: ' + app.fmtMoney(ag.dailyExpense) + ' ج.م' : ''}</td></tr>${msHtml}<tr><th>إجمالي الاتفاق</th><td><b>${app.fmtMoney(ag.totalAmount)} ج.م</b></td><th>عمولة الضمان (3.5%)</th><td>${app.fmtMoney(ag.commissionFee)} ج.م</td></tr></table><div class="clauses"><b>شروط ضمان سايت الملزمة للطرفين:</b><br/>1. يُطبع هذا العقد <b>نسختين أصليتين</b> ويوقّع الطرفان وتُرفع صورة العقد الموقّع داخل المحادثة لاعتماده وتفعيل الضمان.<br/>2. أي تعديل في الأسعار أو الكميات أو المواعيد يتم بملحق معتمد بموافقة الطرفين داخل التطبيق، وتُوثّق السُلف وفواتير الخامات والمستخلصات وإثباتات التوريد داخل سجل الاتفاق.<br/>3. في حال عدم كفاية التغطية المالية يلتزم الطرفان بإشعار وقف العمل/التوريد لحين تعزيز الرصيد.<br/>4. المحادثات والمكالمات (المحتفظ بها 30 يوماً) خاضعة لمراجعة الإدارة عند النزاع لحفظ الحقوق.</div><div class="sigs"><div class="sig">توقيع الطرف الأول (صاحب العمل / المشتري)</div><div class="sig">توقيع الطرف الثاني (المقاول / المورّد)</div></div></div></body></html>`);
+      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>عقد ضمان سايت ${ag.ticketNumber}</title><style>@page{size:A4 portrait;margin:13mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11.5px;line-height:1.6;}.box{border:2px solid #000;padding:16px 18px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:10px;}th,td{border:1px solid #000;padding:5px 7px;text-align:right;}th{background:#f2f2f2;width:22%;}.clauses{border:1px solid #000;padding:8px 10px;margin:10px 0;font-size:11px;}.verify{border:1px dashed #000;padding:6px;text-align:center;font-weight:700;margin-bottom:10px;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;text-align:center;}.sig{border:1px solid #000;padding:8px 8px 44px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة العقد نسختين (A4 PDF)</button><div class="box"><div class="hdr"><div><h2 style="margin:0">عقد اتفاق وتعاقد رسمي — ضمان سايت</h2><div>DamanSite Official Escrow & B2B Contract</div></div><div><div><b>كود التحقق الرسمي:</b> ${ag.ticketNumber}</div><div><b>التاريخ:</b> ${d}</div></div></div><div class="verify">للتحقق من صحة وسريان هذا العقد أدخل الكود (${ag.ticketNumber}) في أداة «فحص عقد» داخل تطبيق ضمان سايت</div><table><tr><th>الطرف الأول (صاحب العمل / المشتري)</th><td>${app.esc(ag.payerName || ag.otherName)}</td><th>الرقم القومي</th><td>${app.esc(ag.payerNationalId || 'موثّق بالمنصة')}</td></tr><tr><th>الطرف الثاني (المنفّذ / المورّد)</th><td>${app.esc(ag.createdByName)}</td><th>الرقم القومي</th><td>${app.esc(ag.createdByNationalId || 'موثّق بالمنصة')}</td></tr></table><table><tr><th>بند العمل / التوريد</th><td colspan="3"><b>${app.esc(ag.title)}</b></td></tr><tr><th>التفاصيل</th><td colspan="3">${specDetail}</td></tr><tr><th>نظام الصرف</th><td>${this.payModeLabel(ag.payMode)}</td><th>مواعيد التصفية</th><td>${app.esc(ag.settlementSchedule || '-')}</td></tr>${msHtml}<tr><th>إجمالي الاتفاق</th><td><b>${app.fmtMoney(ag.totalAmount)} ج.م</b></td><th>عمولة الضمان (3.5%)</th><td>${app.fmtMoney(ag.commissionFee)} ج.م</td></tr></table><div class="clauses"><b>شروط ضمان سايت الملزمة للطرفين:</b><br/>1. يُطبع هذا العقد <b>نسختين أصليتين</b> ويوقّع الطرفان وتُرفع صورة العقد الموقّع داخل المحادثة لاعتماده وتفعيل الضمان.<br/>2. أي تعديل أو إنهاء/فسخ للعقد يتم بموافقة الطرفين داخل التطبيق، وفي حال الخلاف يُحال الأمر لإدارة ضمان سايت للفصل العادل.<br/>3. المحادثات والمكالمات (المحتفظ بها 30 يوماً) خاضعة لمراجعة الإدارة عند النزاع لحفظ الحقوق.</div><div class="sigs"><div class="sig">توقيع الطرف الأول (صاحب العمل / المشتري)</div><div class="sig">توقيع الطرف الثاني (المقاول / المورّد)</div></div></div></body></html>`);
       win.document.close();
     },
 
     // ==================== AI SUPPORT & TICKETS ====================
     getAiReply(rawText, isAr) {
       const q = (rawText || '').toLowerCase();
-      if (/مورد|توريد|خامات|بضاعة|b2b/.test(q)) {
-        return {
-          text: isAr
-            ? '🚚 **تعاملات الموردين (B2B) بضمان سايت:**\n• افتح محادثة مع المورّد واضغط **«اتفاق»** ← اختر **«توريد خامات / بضاعة»**.\n• يُحجز المبلغ في الضمان ولا يُفرج عنه إلا بعد وصول البضاعة وفحصها وتأكيد الاستلام في الموقع.'
-            : '🚚 Use B2B Supply Escrow inside any chat to lock funds until goods are inspected and confirmed on site.',
-          action: null
-        };
-      }
-      if (/3x|ثلاث|أضعاف|اضعاف|استلام|شدة|سقف|محارة/.test(q)) {
-        return {
-          text: isAr
-            ? '🛡️ **الاستلام الهندسي بضمان مادي 3 أضعاف (3x):**\nنستلم الشدات والأسقف والمحارة والتشطيبات كمهندس استشاري بضمان مادي يصل لـ **3 أضعاف قيمة الخدمة المدفوعة**.'
-            : '🛡️ 3x Financial Warranty on Consultant Engineering Handovers.',
-          action: { label: isAr ? 'اطلب استلام 3x الآن' : 'Request 3x Inspection', fn: "if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects')" }
-        };
-      }
-      return {
-        text: isAr
-          ? 'تقدر تسألني عن تعاملات الموردين (B2B)، الضمان 3 أضعاف، اليوميات والـ 15 يوم، السلف والمستخلصات، أو تتواصل مع **إدارة ضمان سايت**.'
-          : 'Ask about B2B Suppliers, 3x Guarantee, Settlements, or chat with Admin.',
-        action: { label: isAr ? 'كلّم الإدارة مباشرة' : 'Chat with Admin', fn: "DamanChat.openDirectChat('admin','إدارة ضمان سايت')" }
-      };
+      if (/مورد|توريد|خامات|بضاعة|b2b/.test(q)) return { text: isAr ? '🚚 افتح محادثة مع المورّد واضغط **«اتفاق»** ← اختر **«توريد خامات / بضاعة»** لحجز المبلغ حتى استلام وفحص البضاعة.' : '🚚 Use B2B Supply Escrow inside any chat.', action: null };
+      if (/3x|ثلاث|أضعاف|اضعاف|استلام|شدة|سقف|محارة/.test(q)) return { text: isAr ? '🛡️ نستلم الشدات والأسقف والمحارة والتشطيبات بضمان مادي يصل لـ **3 أضعاف قيمة الخدمة**.' : '🛡️ 3x Financial Warranty on Consultant Engineering Handovers.', action: { label: isAr ? 'اطلب استلام 3x الآن' : 'Request 3x', fn: "if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects')" } };
+      return { text: isAr ? 'تقدر تسألني عن تعاملات الموردين (B2B)، الضمان 3 أضعاف، اليوميات، فسخ العقد، أو تتواصل مع **إدارة ضمان سايت**.' : 'Ask about B2B Suppliers, 3x Guarantee, Settlements, or chat with Admin.', action: { label: isAr ? 'كلّم الإدارة مباشرة' : 'Chat with Admin', fn: "DamanChat.openDirectChat('admin','إدارة ضمان سايت')" } };
     },
 
     askAi(presetText) {
@@ -1668,7 +1546,6 @@
               ${isPayer && covPct < 100 ? `<button onclick="DamanChat.topUpAgreementCoverage('${ag.id}')" class="px-2 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black shrink-0">+ تعزيز</button>` : ''}
             </div>
 
-            <!-- SIGNED CONTRACT UPLOAD BOX -->
             <div class="p-2 rounded-xl bg-slate-950/90 border border-slate-700 space-y-1.5">
               <div>${csHtml}</div>
               <div class="grid grid-cols-2 gap-1.5">
@@ -1680,28 +1557,37 @@
               </div>
             </div>
 
-            <!-- PENDING ADVANCE REQUEST CARD -->
+            <!-- PENDING TERMINATION / CANCELLATION CARD -->
+            ${ag.pendingTermination ? `
+              <div class="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500 space-y-1.5 text-[10px]">
+                <div class="font-black text-rose-300">⚠️ طلب إنهاء العمل وفسخ العقد من ${app.esc(ag.pendingTermination.proposedByName)}</div>
+                <div class="text-white">السبب: ${app.esc(ag.pendingTermination.reason)}</div>
+                <div class="text-amber-200">التصفية المقترحة: للمنفّذ <b>${app.fmtMoney(ag.pendingTermination.workerShare)} ج.م</b> | يُرد للعميل <b>${app.fmtMoney(ag.pendingTermination.clientRefund)} ج.م</b></div>
+                ${ag.pendingTermination.proposedByUid !== myUid ? `
+                  <div class="flex gap-1.5 pt-1">
+                    <button onclick="DamanChat.respondTermination('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة على الفسخ والتصفية</button>
+                    <button onclick="DamanChat.respondTermination('${ag.id}',false)" class="flex-1 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض وتحويل لنزاع</button>
+                  </div>` : `<div class="text-slate-300">بانتظار رد الطرف الآخر على طلب الفسخ...</div>`}
+              </div>` : ''}
+
             ${ag.pendingAdvance ? `
               <div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/50 space-y-1.5 text-[10px]">
                 <div class="font-bold text-amber-200">💰 طلب سلفة (${app.fmtMoney(ag.pendingAdvance.amount)} ج.م) — ${app.esc(ag.pendingAdvance.reason)}</div>
                 ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAdvance('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة وصرف فوري</button><button onclick="DamanChat.respondAdvance('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار موافقة المهندس/المشتري...</div>`}
               </div>` : ''}
 
-            <!-- PENDING MUTUAL AMENDMENT CARD -->
             ${ag.pendingAmendment ? `
               <div class="p-2 rounded-xl bg-purple-500/15 border border-purple-500/50 space-y-1.5 text-[10px]">
                 <div class="font-bold text-purple-200">📝 طلب تعديل الاتفاق من ${app.esc(ag.pendingAmendment.proposedByName)}: الإجمالي الجديد <b>${app.fmtMoney(ag.pendingAmendment.newTotal)} ج.م</b> (${app.esc(ag.pendingAmendment.note)})</div>
                 ${ag.pendingAmendment.proposedByUid !== myUid ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAmendment('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ موافقة وتعديل العقد</button><button onclick="DamanChat.respondAmendment('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">رفض</button></div>` : `<div class="text-slate-300">بانتظار موافقة الطرف الآخر على التعديل...</div>`}
               </div>` : ''}
 
-            <!-- PENDING ABSTRACT OR B2B SUPPLY DELIVERY CARD -->
             ${ag.pendingAbstract ? `
               <div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/50 space-y-1.5 text-[10px]">
                 <div class="font-bold text-emerald-200">${ag.pendingAbstract.isSupply ? '🚚 إشعار تسليم بضاعة وتوريد' : '📑 مستخلص جاري جديد'}: ${app.esc(ag.pendingAbstract.note)} — الكمية: ${ag.pendingAbstract.qty} | القيمة: <b>${app.fmtMoney(ag.pendingAbstract.amount)} ج.م</b></div>
                 ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',true)" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ تأكيد الاستلام وصرف المبلغ</button><button onclick="DamanChat.respondAbstractOrSupply('${ag.id}',false)" class="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-black">نقص / رفض</button></div>` : `<div class="text-slate-300">بانتظار الفحص والاعتماد...</div>`}
               </div>` : ''}
 
-            <!-- PENDING DAILY HEADCOUNT CARD -->
             ${ag.pendingDayLog ? `
               <div class="p-2 rounded-xl bg-sky-500/15 border border-sky-500/40 space-y-1.5 text-[10px]">
                 <div class="font-bold text-sky-200">👷 حضور اليوم (${app.esc(ag.pendingDayLog.date)}): <b>${ag.pendingDayLog.actualWorkers} عامل</b> ${ag.pendingDayLog.note ? '— ' + app.esc(ag.pendingDayLog.note) : ''}</div>
@@ -1709,7 +1595,6 @@
                 ${isPayer ? `<div class="flex gap-1.5"><button onclick="DamanChat.clientApproveActualDay('${ag.id}')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">✓ اعتماد العدد واليوم</button><button onclick="DamanChat.clientRejectActualDay('${ag.id}')" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold">مراجعة</button></div>` : `<div class="text-slate-300">بانتظار اعتماد المهندس...</div>`}
               </div>` : ''}
 
-            <!-- ACTION BUTTONS GRID -->
             <div class="grid grid-cols-3 gap-1">
               ${isCreator && ag.type === 'daily' && !ag.pendingDayLog ? `<button onclick="DamanChat.openDailyLogModal('${ag.id}')" class="py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[9.5px]">تأكيد عمال اليوم</button>` : ''}
               ${isCreator && (ag.type === 'supply' || ag.type === 'meter') && !ag.pendingAbstract ? `<button onclick="DamanChat.submitRunningAbstractOrSupply('${ag.id}')" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[9.5px]">${ag.type === 'supply' ? 'إشعار تسليم بضاعة' : 'رفع مستخلص جاري'}</button>` : ''}
@@ -1717,12 +1602,23 @@
               <button onclick="DamanChat.openMovementModal('${ag.id}')" class="py-1.5 rounded-lg bg-slate-800 text-sky-300 font-bold text-[9.5px]">فواتير / صرف</button>
               ${!ag.pendingAmendment ? `<button onclick="DamanChat.proposeAmendment('${ag.id}')" class="py-1.5 rounded-lg bg-purple-500/20 text-purple-300 font-bold text-[9.5px]">تعديل الاتفاق</button>` : ''}
               <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="py-1.5 rounded-lg bg-slate-800 text-slate-200 font-bold text-[9.5px]">السجل (${(ag.timeline || []).length})</button>
+              ${!ag.pendingTermination ? `<button onclick="DamanChat.requestTermination('${ag.id}')" class="py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-black text-[9.5px]">إنهاء / فسخ العقد</button>` : ''}
               ${isPayer ? `<button onclick="DamanChat.confirmFinalHandover('${ag.id}')" class="col-span-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">✓ تأكيد الاستلام النهائي وتصفية باقي الحساب</button>` : ''}
             </div>
           ` : ag.status === 'proposed' ? `
             <div class="flex gap-1.5">
               ${!isCreator ? `<button onclick="DamanChat.acceptAgreement('${ag.id}')" class="flex-1 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة وحجز الضمان (${app.fmtMoney(ag.grandTotalWithFee)} ج.م)</button>` : `<div class="flex-1 text-[10px] text-amber-300 py-1">بانتظار موافقة الطرف الآخر وحجز الضمان...</div>`}
               <button onclick="DamanChat.printAgreementA4('${ag.id}')" class="px-3 py-2 rounded-lg bg-white text-slate-950 font-black text-[10px]">معاينة العقد</button>
+            </div>
+          ` : ag.status === 'cancelled' ? `
+            <div class="flex items-center justify-between text-[10px] text-rose-300 font-bold">
+              <span>❌ تم إنهاء وفسخ العقد وتصفية المستحقات</span>
+              <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button>
+            </div>
+          ` : ag.status === 'disputed' ? `
+            <div class="flex items-center justify-between text-[10px] text-amber-300 font-bold">
+              <span>⚖️ العقد قيد النزاع — بانتظار فصل إدارة ضمان سايت</span>
+              <button onclick="DamanChat.openTimelineModal('${ag.id}')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-white">السجل</button>
             </div>
           ` : `
             <div class="flex items-center justify-between text-[10px] text-emerald-300 font-bold">
@@ -1826,7 +1722,7 @@
     },
 
     renderAiTab(app) {
-      const quickChips = ['توريد الموردين B2B', 'الضمان المادي 3 أضعاف', 'اليوميات والـ 15 يوم', 'كلّم الإدارة'];
+      const quickChips = ['توريد الموردين B2B', 'الضمان المادي 3 أضعاف', 'فسخ العقد والتصفية', 'كلّم الإدارة'];
       return `
         <div class="space-y-3">
           <div class="glass-card rounded-2xl p-3 space-y-2.5 h-[300px] overflow-y-auto">
