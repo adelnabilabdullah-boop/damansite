@@ -1,133 +1,115 @@
 (function () {
   const CompanyMod = {
-    subTab: 'team', // 'team' | 'hr' | 'custody' | 'leaves' | 'chat'
+    subTab: 'attendance', // 'attendance' | 'team' | 'payroll' | 'custody' | 'reports' | 'leaves' | 'group'
+    company: null,
     members: [],
-    myMemberships: [],
+    sites: [],
     attendance: [],
-    payrolls: [],
-    custodyList: [],
+    payrollLogs: [],
+    custodies: [],
+    dailyReports: [],
     leaves: [],
     groupMsgs: [],
-    activeCompanyUid: null,
-    activeCompanyName: '',
-    isOwnerView: false,
-    foundUser: null,
-    tempCustodyPhoto: '',
+
     attachedUid: null,
+    attachedCompId: null,
     unsubs: [],
 
-    clearSubs() {
-      this.unsubs.forEach((u) => { try { u(); } catch (e) {} });
-      this.unsubs = [];
-    },
+    tempSelfieBase64: '',
+    tempCustodyPhoto: '',
 
-    copySafe(text, label) {
-      if (window.DamanWallet && typeof window.DamanWallet.copyText === 'function') {
-        return window.DamanWallet.copyText(text, label);
-      }
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(() => window.DamanApp.toast(`تم نسخ ${label}`, 'success')).catch(() => {});
-      }
-    },
-
+    // ==================== LIFECYCLE & LISTENERS (NO COMPOSITE INDEX ERRORS) ====================
     ensureListeners(app) {
       if (!app.user || !app.profile) {
-        this.clearSubs();
-        this.attachedUid = null;
+        this.detachListeners();
         return;
       }
-      if (this.attachedUid === app.user.uid) return;
-      this.clearSubs();
+      const compId = app.profile.companyId || '';
+      if (this.attachedUid === app.user.uid && this.attachedCompId === compId) return;
+
+      this.detachListeners();
       this.attachedUid = app.user.uid;
+      this.attachedCompId = compId;
+      if (!compId) return;
 
-      const p = app.profile;
-      const email = (p.email || app.user.email || '').toLowerCase();
-      const phone = (p.phone || '').trim();
-      const isBiz = p.accountType === 'company' || p.accountType === 'supplier';
-
-      if (isBiz) {
-        this.isOwnerView = true;
-        this.activeCompanyUid = app.user.uid;
-        this.activeCompanyName = p.companyName || p.name || '';
-        if (!p.companyCode) {
-          const code = 'CMP-' + Math.floor(1000 + Math.random() * 9000);
-          app.db.collection('users').doc(app.user.uid).update({ companyCode: code }).catch(() => {});
-        }
-        this.bindCompanyStreams(app, app.user.uid);
-      } else {
-        this.isOwnerView = false;
-        const q = email && !email.endsWith('@phone.damansite.app')
-          ? app.db.collection('companyMembers').where('memberEmail', '==', email)
-          : app.db.collection('companyMembers').where('memberPhone', '==', phone);
-
-        this.unsubs.push(
-          q.onSnapshot((snap) => {
-            this.myMemberships = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-            const active = this.myMemberships.find((m) => m.status === 'active');
-            if (active && this.activeCompanyUid !== active.companyUid) {
-              this.activeCompanyUid = active.companyUid;
-              this.activeCompanyName = active.companyName || '';
-              this.bindCompanyStreams(app, active.companyUid);
-            }
-            if (app.activeTab === 'company') this.rerender();
-          }, () => {})
-        );
-      }
-    },
-
-    bindCompanyStreams(app, companyUid) {
-      if (!companyUid) return;
       const db = app.db;
+      const pushUnsub = (u) => { if (u) this.unsubs.push(u); };
+      const sortByTime = (arr) => arr.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
-      this.unsubs.push(
-        db.collection('companyMembers').where('companyUid', '==', companyUid).onSnapshot((snap) => {
-          this.members = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      pushUnsub(
+        db.collection('companies').doc(compId).onSnapshot((snap) => {
+          this.company = snap.exists ? Object.assign({ id: snap.id }, snap.data()) : null;
+          this.sites = Array.isArray(this.company?.sites) ? this.company.sites : [];
           if (app.activeTab === 'company') this.rerender();
         }, () => {})
       );
 
-      this.unsubs.push(
-        db.collection('companyAttendance').where('companyUid', '==', companyUid).limit(140).onSnapshot((snap) => {
-          this.attendance = snap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-          if (app.activeTab === 'company' && this.subTab === 'hr') this.rerender();
+      pushUnsub(
+        db.collection('companyMembers').where('companyId', '==', compId).limit(120).onSnapshot((snap) => {
+          this.members = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+          if (app.activeTab === 'company') this.rerender();
         }, () => {})
       );
 
-      this.unsubs.push(
-        db.collection('companyPayrolls').where('companyUid', '==', companyUid).limit(80).onSnapshot((snap) => {
-          this.payrolls = snap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-          if (app.activeTab === 'company' && this.subTab === 'hr') this.rerender();
+      pushUnsub(
+        db.collection('companyAttendance').where('companyId', '==', compId).limit(150).onSnapshot((snap) => {
+          this.attendance = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+          if (app.activeTab === 'company' && this.subTab === 'attendance') this.rerender();
         }, () => {})
       );
 
-      this.unsubs.push(
-        db.collection('companyCustody').where('companyUid', '==', companyUid).limit(80).onSnapshot((snap) => {
-          this.custodyList = snap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      pushUnsub(
+        db.collection('companyPayroll').where('companyId', '==', compId).limit(100).onSnapshot((snap) => {
+          this.payrollLogs = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+          if (app.activeTab === 'company' && this.subTab === 'payroll') this.rerender();
+        }, () => {})
+      );
+
+      pushUnsub(
+        db.collection('companyCustody').where('companyId', '==', compId).limit(100).onSnapshot((snap) => {
+          this.custodies = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
           if (app.activeTab === 'company' && this.subTab === 'custody') this.rerender();
         }, () => {})
       );
 
-      this.unsubs.push(
-        db.collection('companyLeaves').where('companyUid', '==', companyUid).limit(50).onSnapshot((snap) => {
-          this.leaves = snap.docs
-            .map((d) => Object.assign({ id: d.id }, d.data()))
-            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      pushUnsub(
+        db.collection('companyDailyReports').where('companyId', '==', compId).limit(80).onSnapshot((snap) => {
+          this.dailyReports = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+          if (app.activeTab === 'company' && this.subTab === 'reports') this.rerender();
+        }, () => {})
+      );
+
+      pushUnsub(
+        db.collection('companyLeaves').where('companyId', '==', compId).limit(80).onSnapshot((snap) => {
+          this.leaves = sortByTime(snap.docs.map((d) => Object.assign({ id: d.id }, d.data())));
           if (app.activeTab === 'company' && this.subTab === 'leaves') this.rerender();
         }, () => {})
       );
 
-      this.unsubs.push(
-        db.collection('companyChats').doc(companyUid).collection('messages').orderBy('createdAt', 'asc').limit(60).onSnapshot((snap) => {
-          this.groupMsgs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-          if (app.activeTab === 'company' && this.subTab === 'chat') this.rerender();
+      pushUnsub(
+        db.collection('companyMessages').where('companyId', '==', compId).limit(80).onSnapshot((snap) => {
+          this.groupMsgs = snap.docs
+            .map((d) => Object.assign({ id: d.id }, d.data()))
+            .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+          if (app.activeTab === 'company' && this.subTab === 'group') this.rerender();
         }, () => {})
       );
+    },
+
+    detachListeners() {
+      this.unsubs.forEach((u) => { try { u(); } catch (e) {} });
+      this.unsubs = [];
+      this.attachedUid = null;
+      this.attachedCompId = null;
+      this.company = null;
+      this.members = [];
+      this.sites = [];
+      this.attendance = [];
+      this.payrollLogs = [];
+      this.custodies = [];
+      this.dailyReports = [];
+      this.leaves = [];
+      this.groupMsgs = [];
     },
 
     rerender() {
@@ -137,672 +119,1030 @@
       }
     },
 
-    setSubTab(tab) { this.subTab = tab; this.rerender(); },
-
-    canGrantAccess(app) {
-      const p = app.profile || {};
-      const minBal = Number(app.getPackages().minCompanyBalanceForAccess || 100);
-      const isVerified = p.kycStatus === 'verified';
-      const hasBalanceOrPlan = Number(p.balanceAvailable || 0) >= minBal || p.activePlanKey === 'company';
-      return { allowed: isVerified && hasBalanceOrPlan, isVerified, hasBalanceOrPlan, minBal };
+    setSubTab(t) {
+      this.subTab = t;
+      this.rerender();
     },
 
-    // ==================== 1. TEAM SEARCH, JOIN BY CODE & PERMISSIONS ====================
-    async searchEmployee() {
+    getMyMember() {
+      const uid = window.DamanApp?.user?.uid;
+      return this.members.find((m) => m.userId === uid) || null;
+    },
+
+    isManager() {
       const app = window.DamanApp;
-      const q = (document.getElementById('cm-search-input')?.value || '').trim();
-      if (!q) return;
-      this.foundUser = null;
-      try {
-        const snap = q.includes('@')
-          ? await app.db.collection('users').where('email', '==', q.toLowerCase()).limit(1).get()
-          : await app.db.collection('users').where('phone', '==', q).limit(1).get();
-        if (snap.empty) {
-          app.toast('لم يتم العثور على حساب بهذا الرقم أو الإيميل — يمكنك إضافته يدوياً بالأسفل', 'info');
-        } else {
-          this.foundUser = Object.assign({ id: snap.docs[0].id }, snap.docs[0].data());
-          app.toast(`تم العثور على: ${this.foundUser.name}`, 'success');
-        }
-        this.rerender();
-      } catch (e) { app.toast(e.message, 'error'); }
+      if (!app.user || !this.company) return false;
+      if (app.isAdmin() || this.company.ownerId === app.user.uid) return true;
+      const me = this.getMyMember();
+      return !!(me && me.status === 'active' && ['owner', 'manager', 'hr'].includes(me.role));
     },
 
-    async joinByCompanyCode(e) {
+    // ==================== CREATE / JOIN COMPANY ====================
+    async createCompanyWorkspace(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      const code = (document.getElementById('join-comp-code')?.value || '').trim().toUpperCase();
-      if (!code) return;
-      try {
-        const snap = await app.db.collection('users').where('companyCode', '==', code).limit(1).get();
-        if (snap.empty) return app.toast('كود الشركة غير صحيح', 'error');
-        const comp = snap.docs[0].data();
-        await app.db.collection('companyMembers').add({
-          companyUid: snap.docs[0].id,
-          companyName: comp.companyName || comp.name || '',
-          memberUid: app.user.uid,
-          memberName: app.profile.name || '',
-          memberEmail: (app.profile.email || app.user.email || '').toLowerCase(),
-          memberPhone: app.profile.phone || '',
-          roleTitle: document.getElementById('join-comp-role').value.trim() || 'مهندس / موظف',
-          permissions: ['chat_clients', 'approve_supply'],
-          monthlySalary: 0,
-          allowances: 0,
-          overtimePay: 0,
-          workDaysPerMonth: 26,
-          deductions: 0,
-          rating: 5,
-          ratingNote: '',
-          status: 'pending',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.sendNotification(snap.docs[0].id, 'طلب انضمام موظف جديد للشركة', `${app.profile.name} طلب الانضمام بكود الشركة ${code}`);
-        app.toast('تم إرسال طلب الانضمام لمدير الشركة بنجاح', 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
-    },
+      if (!app.user || !app.isKycVerified()) return;
+      const name = document.getElementById('nc-name').value.trim();
+      const cr = document.getElementById('nc-cr').value.trim();
+      const tax = document.getElementById('nc-tax').value.trim();
+      if (!name) return;
 
-    async addTeamMember(e) {
-      e.preventDefault();
-      const app = window.DamanApp;
-      const check = this.canGrantAccess(app);
-      if (!check.allowed && !app.isAdmin()) return app.toast('يجب استيفاء شرط التوثيق والرصيد أولاً', 'error');
-
-      const memberName = document.getElementById('cm-name').value.trim();
-      const memberEmail = document.getElementById('cm-email').value.trim().toLowerCase();
-      const memberPhone = document.getElementById('cm-phone').value.trim();
-      const roleTitle = document.getElementById('cm-role').value.trim();
-      const monthlySalary = parseFloat(document.getElementById('cm-salary').value) || 0;
-      const allowances = parseFloat(document.getElementById('cm-allow').value) || 0;
-
-      const perms = [];
-      if (document.getElementById('perm-post')?.checked) perms.push('post_projects');
-      if (document.getElementById('perm-bid')?.checked) perms.push('submit_bids');
-      if (document.getElementById('perm-chat')?.checked) perms.push('chat_clients');
-      if (document.getElementById('perm-supply')?.checked) perms.push('approve_supply');
-      if (document.getElementById('perm-vip')?.checked) perms.push('request_vip_labor');
-
-      try {
-        await app.db.collection('companyMembers').add({
-          companyUid: app.user.uid,
-          companyName: app.profile.companyName || app.profile.name || '',
-          memberUid: this.foundUser?.id || '',
-          memberName,
-          memberEmail,
-          memberPhone,
-          roleTitle,
-          permissions: perms,
-          monthlySalary,
-          allowances,
-          overtimePay: 0,
-          workDaysPerMonth: 26,
-          deductions: 0,
-          rating: 5,
-          ratingNote: '',
-          status: 'active',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        if (this.foundUser?.id) {
-          await app.sendNotification(this.foundUser.id, `تم إضافتك لفريق ${app.profile.companyName || app.profile.name}`, `الوظيفة: ${roleTitle} — افتح لوحة الشركات وHR الآن.`);
-        }
-        this.foundUser = null;
-        e.target.reset();
-        app.toast(`تم إضافة ${memberName} للفريق بنجاح`, 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
-    },
-
-    async updateMemberStatus(docId, memberUid, status) {
-      const app = window.DamanApp;
-      try {
-        await app.db.collection('companyMembers').doc(docId).update({ status });
-        if (memberUid) await app.sendNotification(memberUid, 'تحديث صلاحيات الشركة', status === 'active' ? 'تم تفعيل صلاحياتك بالفريق ✅' : 'تم إيقاف صلاحياتك مؤقتاً');
-        app.toast('تم التحديث', 'success');
-      } catch (e) { app.toast(e.message, 'error'); }
-    },
-
-    async editSalaryAndRating(docId) {
-      const app = window.DamanApp;
-      const m = this.members.find((x) => x.id === docId);
-      if (!m) return;
-      const sal = parseFloat(window.prompt('الراتب الشهري الأساسي (ج.م):', m.monthlySalary || 0));
-      if (isNaN(sal)) return;
-      const allow = parseFloat(window.prompt('البدلات الشهرية (انتقالات / إقامة - ج.م):', m.allowances || 0)) || 0;
-      const ot = parseFloat(window.prompt('إجمالي الإضافي / المكافآت هذا الشهر (ج.م):', m.overtimePay || 0)) || 0;
-      const ded = parseFloat(window.prompt('إجمالي السُلف والخصومات هذا الشهر (ج.م):', m.deductions || 0)) || 0;
-      const rat = Math.min(5, Math.max(1, parseInt(window.prompt('تقييم الأداء (من 1 إلى 5 نجوم):', m.rating || 5), 10) || 5));
-      const note = window.prompt('ملاحظة التقييم:', m.ratingNote || '') || '';
-      try {
-        await app.db.collection('companyMembers').doc(docId).update({
-          monthlySalary: sal,
-          allowances: allow,
-          overtimePay: ot,
-          deductions: ded,
-          rating: rat,
-          ratingNote: note
-        });
-        app.toast('تم تحديث بيانات الراتب والتقييم بنجاح', 'success');
-      } catch (e) { app.toast(e.message, 'error'); }
-    },
-
-    // ==================== 2. HR ATTENDANCE (SELFIE + GPS + SITE NAME) & PAYROLL PAYOUT ====================
-    compressImage(file, maxW = 540) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Read error'));
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onerror = () => reject(new Error('Image error'));
-          img.onload = () => {
-            let w = img.width, h = img.height;
-            if (w > maxW) { h = Math.round((h * maxW) / w); w = maxW; }
-            const c = document.createElement('canvas');
-            c.width = w; c.height = h;
-            c.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve(c.toDataURL('image/jpeg', 0.52));
-          };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+      await app.withLock('createComp', async () => {
+        const compCode = 'CMP-' + Math.floor(100000 + Math.random() * 900000);
+        const compRef = app.db.collection('companies').doc();
+        try {
+          await compRef.set({
+            name,
+            code: compCode,
+            ownerId: app.user.uid,
+            ownerName: app.profile?.legalName || app.profile?.name || '',
+            commercialReg: cr || app.profile?.commercialReg || '',
+            taxCard: tax || app.profile?.taxCard || '',
+            sites: [],
+            status: 'active',
+            date: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.db.collection('companyMembers').doc(`${compRef.id}_${app.user.uid}`).set({
+            companyId: compRef.id,
+            userId: app.user.uid,
+            name: app.profile?.name || '',
+            legalName: app.profile?.legalName || app.profile?.name || '',
+            phone: app.profile?.phone || '',
+            jobTitle: 'المدير العام / المالك',
+            role: 'owner',
+            baseSalary: 0,
+            allowances: 0,
+            overtimeAmount: 0,
+            advances: 0,
+            deductions: 0,
+            approvedAbsentDays: 0,
+            status: 'active',
+            joinedDate: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.db.collection('users').doc(app.user.uid).update({
+            companyId: compRef.id,
+            companyCode: compCode,
+            companyName: name
+          });
+          app.toast(`تم إنشاء مساحة الشركة بنجاح! كود الشركة: ${compCode}`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
       });
     },
 
-    async recordAttendance(kind, input) {
+    async joinCompanyByCode(e) {
+      e.preventDefault();
       const app = window.DamanApp;
-      const file = input.files && input.files[0];
-      if (!file || !this.activeCompanyUid) return;
-      const siteName = (document.getElementById('hr-site-name')?.value || '').trim() || 'الموقع الرئيسي';
-      app.toast('جارٍ تسجيل السيلفي واللوكيشن (GPS)...', 'info');
+      if (!app.user || !app.isKycVerified()) return;
+      const code = document.getElementById('jc-code').value.trim().toUpperCase();
+      const jobTitle = document.getElementById('jc-title').value.trim() || 'مهندس / مشرف موقع';
+      if (!code) return;
 
-      try {
-        const selfieBase64 = await this.compressImage(file, 420);
-        const pos = await new Promise((res) => {
-          if (!navigator.geolocation) return res(null);
-          navigator.geolocation.getCurrentPosition(
-            (p) => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
-            () => res(null),
-            { enableHighAccuracy: true, timeout: 8000 }
-          );
-        });
+      await app.withLock('joinComp', async () => {
+        try {
+          const snap = await app.db.collection('companies').where('code', '==', code).limit(1).get();
+          if (snap.empty) return app.toast('كود الشركة غير صحيح — تأكد من الكود مع مدير الشركة', 'error');
+          const compDoc = snap.docs[0];
+          const comp = compDoc.data();
 
-        const now = new Date();
-        const dateStr = now.toISOString().slice(0, 10);
-        const timeStr = now.toTimeString().slice(0, 5);
-        const docId = `${this.activeCompanyUid}_${app.user.uid}_${dateStr}`;
-        const ref = app.db.collection('companyAttendance').doc(docId);
-        const existing = await ref.get();
-
-        if (kind === 'in') {
-          await ref.set({
-            companyUid: this.activeCompanyUid,
-            memberUid: app.user.uid,
-            memberName: app.profile.name || '',
-            siteName,
-            date: dateStr,
-            checkInTime: timeStr,
-            checkInMs: Date.now(),
-            checkInSelfie: selfieBase64,
-            checkInLoc: pos,
+          await app.db.collection('companyMembers').doc(`${compDoc.id}_${app.user.uid}`).set({
+            companyId: compDoc.id,
+            userId: app.user.uid,
+            name: app.profile?.name || '',
+            legalName: app.profile?.legalName || app.profile?.name || '',
+            phone: app.profile?.phone || '',
+            jobTitle,
+            role: 'employee',
+            baseSalary: 0,
+            allowances: 0,
+            overtimeAmount: 0,
+            advances: 0,
+            deductions: 0,
+            approvedAbsentDays: 0,
+            status: 'active',
+            joinedDate: app.todayLocal(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
-          await app.sendNotification(this.activeCompanyUid, 'تسجيل حضور موظف', `${app.profile.name} حضر في (${siteName}) الساعة ${timeStr}`);
-          app.toast(`تم تسجيل الحضور في (${siteName}) الساعة ${timeStr}`, 'success');
-        } else {
-          const inMs = existing.exists ? existing.data().checkInMs : Date.now();
-          const hours = Math.max(0.5, Math.round(((Date.now() - inMs) / 3600000) * 10) / 10);
-          await ref.set({
-            companyUid: this.activeCompanyUid,
-            memberUid: app.user.uid,
-            memberName: app.profile.name || '',
-            siteName: (existing.exists && existing.data().siteName) || siteName,
-            date: dateStr,
-            checkOutTime: timeStr,
-            checkOutSelfie: selfieBase64,
-            checkOutLoc: pos,
-            hoursWorked: hours
-          }, { merge: true });
-          await app.sendNotification(this.activeCompanyUid, 'تسجيل انصراف موظف', `${app.profile.name} انصرف الساعة ${timeStr} (${hours} ساعة)`);
-          app.toast(`تم تسجيل الانصراف (${hours} ساعة عمل)`, 'success');
-        }
-      } catch (err) { app.toast(err.message, 'error'); }
-      input.value = '';
+
+          await app.db.collection('users').doc(app.user.uid).update({
+            companyId: compDoc.id,
+            companyCode: comp.code,
+            companyName: comp.name
+          });
+
+          await app.sendNotification(comp.ownerId, 'انضمام موظف جديد للشركة 👷', `انضم ${app.profile?.name} (${jobTitle}) باستخدام كود الشركة.`);
+          app.toast(`تم الانضمام لشركة «${comp.name}» بنجاح ✅`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
     },
 
-    calcPayrollRow(m) {
-      const monthKey = new Date().toISOString().slice(0, 7);
-      const recs = this.attendance.filter((a) => (a.memberUid === m.memberUid || a.memberName === m.memberName) && (a.date || '').startsWith(monthKey));
-      const daysPresent = recs.length;
-      const totalHours = Math.round(recs.reduce((s, r) => s + Number(r.hoursWorked || 8), 0) * 10) / 10;
-      const targetDays = Number(m.workDaysPerMonth || 26);
-      const dayOfMonth = Math.min(targetDays, new Date().getDate());
-      const daysAbsent = Math.max(0, dayOfMonth - daysPresent);
-      const base = Number(m.monthlySalary || 0);
-      const allowances = Number(m.allowances || 0);
-      const overtimePay = Number(m.overtimePay || 0);
-      const deductions = Number(m.deductions || 0);
-      const dailyVal = targetDays > 0 ? base / targetDays : 0;
-      const absenceDeduct = Math.round(daysAbsent * dailyVal);
-      const netSalary = Math.max(0, Math.round(base + allowances + overtimePay - absenceDeduct - deductions));
-      const paidRecord = this.payrolls.find((pr) => pr.memberDocId === m.id && pr.monthKey === monthKey);
-      return { monthKey, daysPresent, daysAbsent, totalHours, base, allowances, overtimePay, absenceDeduct, deductions, netSalary, paidRecord };
+    // ==================== FIXED SITES & GPS GEO-FENCING ====================
+    haversineMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     },
 
-    async disburseSalary(memberDocId, method) {
-      const app = window.DamanApp;
-      const m = this.members.find((x) => x.id === memberDocId);
-      if (!m) return;
-      const pr = this.calcPayrollRow(m);
-      if (pr.paidRecord) return app.toast('تم صرف راتب هذا الشهر لهذا الموظف بالفعل', 'info');
-      if (pr.netSalary <= 0) return app.toast('صافي الراتب 0 ج.م — عدّل الراتب الأساسي أولاً', 'warning');
-
-      if (method === 'wallet') {
-        let targetUid = m.memberUid;
-        if (!targetUid && m.memberPhone) {
-          const uSnap = await app.db.collection('users').where('phone', '==', m.memberPhone).limit(1).get();
-          if (!uSnap.empty) targetUid = uSnap.docs[0].id;
-        }
-        if (!targetUid) return app.toast('هذا الموظف غير مربوط بحساب على التطبيق — استخدم الصرف النقدي/البنكي أو اطلب منه التسجيل بنفس رقم الموبايل', 'warning');
-
-        if (Number(app.profile?.balanceAvailable || 0) < pr.netSalary) {
-          if (window.confirm(`رصيد محفظة الشركة المتاح (${app.fmtMoney(app.profile?.balanceAvailable)} ج.م) أقل من صافي الراتب (${app.fmtMoney(pr.netSalary)} ج.م).\nهل تريد شحن المحفظة الآن؟`)) {
-            if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(pr.netSalary);
-          }
-          return;
-        }
-
-        if (!window.confirm(`تأكيد تحويل راتب شهر (${pr.monthKey}) بمبلغ ${app.fmtMoney(pr.netSalary)} ج.م مباشرة من محفظة الشركة إلى محفظة ${m.memberName}؟`)) return;
-
-        const compRef = app.db.collection('users').doc(app.user.uid);
-        const empRef = app.db.collection('users').doc(targetUid);
-        const payRef = app.db.collection('companyPayrolls').doc(`${this.activeCompanyUid}_${m.id}_${pr.monthKey}`);
-
-        try {
-          await app.db.runTransaction(async (tx) => {
-            const [cDoc, eDoc] = await Promise.all([tx.get(compRef), tx.get(empRef)]);
-            const curComp = Number((cDoc.data() || {}).balanceAvailable || 0);
-            if (curComp < pr.netSalary) throw new Error('رصيد الشركة غير كافٍ');
-            tx.update(compRef, { balanceAvailable: Math.round((curComp - pr.netSalary) * 100) / 100 });
-            tx.update(empRef, { balanceAvailable: Math.round((Number((eDoc.data() || {}).balanceAvailable || 0) + pr.netSalary) * 100) / 100 });
-            tx.set(payRef, {
-              companyUid: this.activeCompanyUid, companyName: this.activeCompanyName,
-              memberDocId: m.id, memberUid: targetUid, memberName: m.memberName, roleTitle: m.roleTitle,
-              monthKey: pr.monthKey, base: pr.base, allowances: pr.allowances, overtimePay: pr.overtimePay,
-              absenceDeduct: pr.absenceDeduct, deductions: pr.deductions, netSalary: pr.netSalary,
-              method: 'محفظة ضمان سايت', paidDate: new Date().toISOString().slice(0, 10),
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-          });
-          await app.sendNotification(targetUid, `تم صرف راتبك الشهري (${pr.monthKey}) ✅`, `حوّلت شركة ${this.activeCompanyName} مبلغ ${app.fmtMoney(pr.netSalary)} ج.م إلى محفظتك.`);
-          app.toast(`تم تحويل الراتب (${app.fmtMoney(pr.netSalary)} ج.م) لمحفظة الموظف بنجاح ✅`, 'success');
-        } catch (err) { app.toast(err.message, 'error'); }
-      } else {
-        if (!window.confirm(`تسجيل صرف راتب ${m.memberName} (${app.fmtMoney(pr.netSalary)} ج.م) نقداً / تحويلاً بنكياً خارجياً لشهر ${pr.monthKey}؟`)) return;
-        try {
-          await app.db.collection('companyPayrolls').doc(`${this.activeCompanyUid}_${m.id}_${pr.monthKey}`).set({
-            companyUid: this.activeCompanyUid, companyName: this.activeCompanyName,
-            memberDocId: m.id, memberUid: m.memberUid || '', memberName: m.memberName, roleTitle: m.roleTitle,
-            monthKey: pr.monthKey, base: pr.base, allowances: pr.allowances, overtimePay: pr.overtimePay,
-            absenceDeduct: pr.absenceDeduct, deductions: pr.deductions, netSalary: pr.netSalary,
-            method: 'نقدي / بنكي', paidDate: new Date().toISOString().slice(0, 10),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          if (m.memberUid) await app.sendNotification(m.memberUid, `تم تسجيل صرف راتبك (${pr.monthKey})`, `صافي الراتب: ${app.fmtMoney(pr.netSalary)} ج.م (نقدي/بنكي) — يمكنك طباعة قسيمة الراتب الآن.`);
-          app.toast('تم توثيق صرف الراتب وإصدار القسيمة بنجاح', 'success');
-        } catch (err) { app.toast(err.message, 'error'); }
+    openAddSiteModal() {
+      if (!this.isManager()) return;
+      let m = document.getElementById('daman-comp-site-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-comp-site-modal';
+        m.className = 'daman-modal fixed inset-0 z-[88] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(m);
       }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-sky-500/50 rounded-3xl p-4 space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-sky-400"><i class="fa-solid fa-map-location-dot me-1"></i> إضافة موقع ثابت بـ GPS</h3>
+            <button onclick="document.getElementById('daman-comp-site-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <form onsubmit="DamanCompany.saveCompanySite(event)" class="space-y-2.5">
+            <input id="cs-name" type="text" required placeholder="اسم الموقع (مثال: كمبوند سعادة - قطاع الفيلات)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">النطاق المسموح للحضور (بالمتر)</label>
+              <input id="cs-rad" type="number" min="50" max="5000" value="250" required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <input id="cs-lat" type="number" step="any" placeholder="خط العرض Lat" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]" />
+              <input id="cs-lng" type="number" step="any" placeholder="خط الطول Lng" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]" />
+            </div>
+            <button type="button" onclick="DamanCompany.captureSiteGps()" class="w-full py-2 rounded-xl bg-sky-500/20 border border-sky-500/50 text-sky-300 font-black">
+              <i class="fa-solid fa-crosshairs me-1"></i> تثبيت إحداثيات موقعي الحالي (GPS)
+            </button>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">حفظ الموقع في القائمة الثابتة</button>
+          </form>
+        </div>`;
     },
 
-    printPayslipA4(memberDocId) {
+    captureSiteGps() {
       const app = window.DamanApp;
-      const m = this.members.find((x) => x.id === memberDocId);
-      if (!m) return;
-      const pr = this.calcPayrollRow(m);
-      const win = window.open('', '_blank');
-      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>قسيمة راتب — ${app.esc(m.memberName)}</title><style>@page{size:A4 portrait;margin:14mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:12px;line-height:1.6;}.sheet{border:2px solid #000;padding:18px 20px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:14px;}table{width:100%;border-collapse:collapse;margin-bottom:14px;}th,td{border:1px solid #000;padding:7px 9px;text-align:right;}th{background:#f2f2f2;width:40%;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:30px;text-align:center;}.sig{border:1px solid #000;padding:10px 8px 46px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ قسيمة الراتب PDF (A4)</button><div class="sheet"><div class="hdr"><div><h2 style="margin:0">قسيمة راتب ومفردات مرتب (Payslip)</h2><div>الشركة: <b>${app.esc(this.activeCompanyName)}</b></div></div><div><div><b>عن شهر:</b> ${pr.monthKey}</div><div><b>حالة الصرف:</b> ${pr.paidRecord ? 'تم الصرف (' + pr.paidRecord.method + ')' : 'مستحق الصرف'}</div></div></div><table><tr><th>اسم الموظف</th><td><b>${app.esc(m.memberName)}</b></td></tr><tr><th>المسمى الوظيفي</th><td>${app.esc(m.roleTitle)}</td></tr><tr><th>أيام الحضور / الغياب / الساعات</th><td>حضور: ${pr.daysPresent} يوم | غياب: ${pr.daysAbsent} يوم | ساعات: ${pr.totalHours} س</td></tr><tr><th>الراتب الأساسي</th><td>${app.fmtMoney(pr.base)} ج.م</td></tr><tr><th>البدلات الشهرية (+)</th><td>+${app.fmtMoney(pr.allowances)} ج.م</td></tr><tr><th>الإضافي والمكافآت (+)</th><td>+${app.fmtMoney(pr.overtimePay)} ج.م</td></tr><tr><th>خصم الغياب (-)</th><td>-${app.fmtMoney(pr.absenceDeduct)} ج.م</td></tr><tr><th>السُلف والخصومات (-)</th><td>-${app.fmtMoney(pr.deductions)} ج.م</td></tr><tr><th style="background:#e5e5e5">صافي الراتب المستحق</th><td style="background:#e5e5e5"><b>${app.fmtMoney(pr.netSalary)} ج.م</b></td></tr></table><div class="sigs"><div class="sig">توقيع الموظف بالاستلام</div><div class="sig">اعتماد إدارة الشركة</div></div></div></body></html>`);
-      win.document.close();
+      if (!navigator.geolocation) return app.toast('جهازك لا يدعم GPS', 'error');
+      app.toast('جارٍ التقاط الإحداثيات الدقيقة...', 'info');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          document.getElementById('cs-lat').value = pos.coords.latitude.toFixed(6);
+          document.getElementById('cs-lng').value = pos.coords.longitude.toFixed(6);
+          app.toast('تم التقاط إحداثيات الموقع بنجاح ✅', 'success');
+        },
+        () => app.toast('يرجى تفعيل صلاحية الموقع GPS', 'error'),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
     },
 
-    printHrPayrollA4() {
+    async saveCompanySite(e) {
+      e.preventDefault();
       const app = window.DamanApp;
-      const activeMembers = this.members.filter((m) => m.status === 'active');
-      if (!activeMembers.length) return app.toast('لا يوجد موظفون نشطون للطباعة', 'warning');
-      const monthStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long' });
-      let grandTotal = 0;
+      if (!this.company) return;
+      const name = document.getElementById('cs-name').value.trim();
+      const radiusMeters = parseInt(document.getElementById('cs-rad').value, 10) || 250;
+      const lat = parseFloat(document.getElementById('cs-lat').value) || null;
+      const lng = parseFloat(document.getElementById('cs-lng').value) || null;
+      if (!name) return;
 
-      const rows = activeMembers.map((m, i) => {
-        const p = this.calcPayrollRow(m);
-        grandTotal += p.netSalary;
-        return `<tr><td>${i + 1}</td><td><b>${app.esc(m.memberName)}</b><br/><small>${app.esc(m.roleTitle)}</small></td><td>${app.fmtMoney(p.base)}</td><td>+${app.fmtMoney(p.allowances + p.overtimePay)}</td><td>${p.daysPresent} / ${p.daysAbsent}</td><td>-${app.fmtMoney(p.absenceDeduct + p.deductions)}</td><td>${p.paidRecord ? 'مدفوع' : 'معلق'}</td><td><b>${app.fmtMoney(p.netSalary)} ج.م</b></td></tr>`;
-      }).join('');
-
-      const win = window.open('', '_blank');
-      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>شيت الرواتب والحضور — ${app.esc(this.activeCompanyName)}</title><style>@page{size:A4 landscape;margin:12mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11px;}.sheet{border:2px solid #000;padding:14px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #000;padding:5px;text-align:right;}th{background:#f0f0f0;}.sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px;text-align:center;}.sig{border:1px solid #000;padding:8px 6px 36px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة / حفظ شيت الرواتب PDF (A4)</button><div class="sheet"><div class="hdr"><div><h2 style="margin:0">كشف الحضور والانصراف والرواتب الشهرية</h2><div>الشركة: <b>${app.esc(this.activeCompanyName)}</b></div></div><div><div><b>الشهر:</b> ${monthStr}</div><div><b>إجمالي الرواتب:</b> ${app.fmtMoney(grandTotal)} ج.م</div></div></div><table><thead><tr><th>#</th><th>الموظف والوظيفة</th><th>الأساسي</th><th>بدلات+إضافي</th><th>حضور/غياب</th><th>خصم غياب+سُلف</th><th>الحالة</th><th>صافي المستحق</th></tr></thead><tbody>${rows}</tbody></table><div class="sigs"><div class="sig">إعداد الـ HR</div><div class="sig">المدير المالي</div><div class="sig">اعتماد مدير الشركة</div></div></div></body></html>`);
-      win.document.close();
-    },
-
-    // ==================== 3. CUSTODY (WITH INVOICE PHOTOS + A4 LIQUIDATION) & LEAVES & CHAT ====================
-    async handleCustodyPhoto(input) {
-      const file = input.files && input.files[0];
-      if (!file) return;
+      const newSite = { id: 'st_' + Date.now(), name, radiusMeters, lat, lng };
+      const updated = this.sites.concat([newSite]);
       try {
-        this.tempCustodyPhoto = await this.compressImage(file, 640);
-        const prev = document.getElementById('cus-photo-prev');
-        if (prev) prev.innerHTML = `<img src="${this.tempCustodyPhoto}" class="max-h-24 mx-auto rounded mt-1.5 border border-amber-500/40" />`;
+        await app.db.collection('companies').doc(this.company.id).update({ sites: updated });
+        document.getElementById('daman-comp-site-modal').classList.add('hidden');
+        app.toast(`تم تثبيت الموقع «${name}» بنجاح ✅`, 'success');
+      } catch (err) { app.toast(err.message, 'error'); }
+    },
+
+    async removeCompanySite(siteId) {
+      if (!this.isManager() || !this.company) return;
+      if (!window.confirm('حذف هذا الموقع من قائمة مواقع الشركة؟')) return;
+      const updated = this.sites.filter((s) => s.id !== siteId);
+      try {
+        await window.DamanApp.db.collection('companies').doc(this.company.id).update({ sites: updated });
+        window.DamanApp.toast('تم حذف الموقع', 'info');
       } catch (e) {}
     },
 
-    async addCustodyItem(e) {
+    // ==================== ATTENDANCE (SELFIE + GEO-FENCING + PREVENT CHECK-OUT BEFORE CHECK-IN) ====================
+    async handleAttendanceSelfie(input) {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      try {
+        this.tempSelfieBase64 = await window.DamanApp.compressImage(f, 520, 0.55);
+        const p = document.getElementById('att-selfie-prev');
+        if (p) p.innerHTML = `<img src="${this.tempSelfieBase64}" class="max-h-20 mx-auto rounded-lg mt-1.5 border border-emerald-500/40" />`;
+      } catch (e) {}
+    },
+
+    async recordAttendance(kind) {
+      const app = window.DamanApp;
+      if (!this.company || !app.user) return;
+      const me = this.getMyMember();
+      if (me && me.status === 'suspended') return app.toast('حسابك موقوف مؤقتاً من إدارة الشركة', 'error');
+
+      const today = app.todayLocal();
+      const myTodayLogs = this.attendance.filter((a) => a.userId === app.user.uid && a.date === today);
+      const hasCheckInToday = myTodayLogs.some((a) => a.kind === 'in');
+      const hasCheckOutToday = myTodayLogs.some((a) => a.kind === 'out');
+
+      if (kind === 'in' && hasCheckInToday) {
+        return app.toast('لقد سجّلت حضورك اليوم بالفعل ✅', 'warning');
+      }
+      if (kind === 'out' && !hasCheckInToday) {
+        return app.toast('⚠️ لا يمكن تسجيل الانصراف قبل تسجيل الحضور أولاً في نفس اليوم!', 'error');
+      }
+      if (kind === 'out' && hasCheckOutToday) {
+        return app.toast('لقد سجّلت انصرافك اليوم بالفعل', 'warning');
+      }
+      if (!this.tempSelfieBase64) {
+        return app.toast('يرجى التقاط صورة سيلفي مباشرة من الموقع أولاً', 'warning');
+      }
+
+      const siteSel = document.getElementById('att-site-select');
+      const customInp = document.getElementById('att-site-custom');
+      const chosenSiteId = siteSel ? siteSel.value : '';
+      const siteObj = this.sites.find((s) => s.id === chosenSiteId) || null;
+      const siteName = siteObj ? siteObj.name : (customInp?.value || '').trim();
+      if (!siteName) return app.toast('اختر الموقع أو اكتب اسمه أولاً', 'warning');
+
+      await app.withLock('att_' + kind, async () => {
+        app.toast('جارٍ التحقق من موقع الـ GPS وحفظ التسجيل...', 'info');
+        const getCoords = () =>
+          new Promise((resolve) => {
+            if (!navigator.geolocation) return resolve(null);
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+              () => resolve(null),
+              { enableHighAccuracy: true, timeout: 10000 }
+            );
+          });
+
+        const coords = await getCoords();
+        let distanceMeters = null;
+        let geoStatus = 'no_pin'; // 'inside' | 'outside' | 'no_pin' | 'no_gps'
+        if (!coords) {
+          geoStatus = 'no_gps';
+        } else if (siteObj && siteObj.lat != null && siteObj.lng != null) {
+          distanceMeters = this.haversineMeters(coords.lat, coords.lng, Number(siteObj.lat), Number(siteObj.lng));
+          const rad = Number(siteObj.radiusMeters || 250);
+          geoStatus = distanceMeters <= rad ? 'inside' : 'outside';
+        }
+
+        try {
+          const selfieMedia = await app.saveMedia(this.tempSelfieBase64, { kind: 'hr_selfie' });
+          const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+          await app.db.collection('companyAttendance').add({
+            companyId: this.company.id,
+            userId: app.user.uid,
+            userName: app.profile?.name || '',
+            jobTitle: me?.jobTitle || '',
+            kind,
+            date: today,
+            time: timeStr,
+            siteId: siteObj?.id || '',
+            siteName,
+            coords,
+            distanceMeters,
+            geoStatus,
+            selfieMedia,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          this.tempSelfieBase64 = '';
+          const msg = geoStatus === 'outside'
+            ? `تم التسجيل — ⚠️ ملاحظة: موقعك يبعد ${distanceMeters >= 1000 ? (distanceMeters / 1000).toFixed(1) + ' كم' : distanceMeters + ' متر'} عن نطاق الموقع`
+            : `تم تسجيل ${kind === 'in' ? 'الحضور' : 'الانصراف'} بنجاح ✅`;
+          app.toast(msg, geoStatus === 'outside' ? 'warning' : 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== TEAM & PAYROLL (FAIR ABSENCE FORMULA + WALLET/CASH + A4 PRINT) ====================
+    calcMemberNetSalary(m) {
+      const base = Number(m.baseSalary || 0);
+      const allow = Number(m.allowances || 0);
+      const ot = Number(m.overtimeAmount || 0);
+      const adv = Number(m.advances || 0);
+      const ded = Number(m.deductions || 0);
+      const absentDays = Math.max(0, Number(m.approvedAbsentDays || 0));
+      const absentCut = Math.round(((base / 30) * absentDays) * 100) / 100;
+      const net = Math.max(0, Math.round((base + allow + ot - adv - ded - absentCut) * 100) / 100);
+      return { base, allow, ot, adv, ded, absentDays, absentCut, net };
+    },
+
+    openEditMemberModal(memberId) {
+      if (!this.isManager()) return;
+      const app = window.DamanApp;
+      const m = this.members.find((x) => x.id === memberId);
+      if (!m) return;
+
+      let modal = document.getElementById('daman-comp-mem-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'daman-comp-mem-modal';
+        modal.className = 'daman-modal fixed inset-0 z-[88] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(modal);
+      }
+      modal.classList.remove('hidden');
+      modal.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-3 text-xs max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400">تعديل بيانات وراتب: ${app.esc(m.name)}</h3>
+            <button onclick="document.getElementById('daman-comp-mem-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <form onsubmit="DamanCompany.saveMemberChanges(event,'${m.id}')" class="space-y-2.5">
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-slate-400 mb-1">المسمى الوظيفي</label><input id="em-title" type="text" value="${app.esc(m.jobTitle || '')}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-1">الصلاحية</label>
+                <select id="em-role" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">
+                  <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>موظف / مشرف</option>
+                  <option value="hr" ${m.role === 'hr' ? 'selected' : ''}>محاسب / HR</option>
+                  <option value="manager" ${m.role === 'manager' ? 'selected' : ''}>مدير مشاريع</option>
+                  ${m.role === 'owner' ? '<option value="owner" selected>مالك الشركة</option>' : ''}
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-emerald-300 font-bold mb-1">الراتب الأساسي (ج.م)</label><input id="em-base" type="number" min="0" step="any" value="${Number(m.baseSalary || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" /></div>
+              <div><label class="block text-[10px] text-sky-300 font-bold mb-1">بدلات (انتقال/موقع)</label><input id="em-allow" type="number" min="0" step="any" value="${Number(m.allowances || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-amber-300 font-bold mb-1">إضافي / مكافآت (+)</label><input id="em-ot" type="number" min="0" step="any" value="${Number(m.overtimeAmount || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-rose-300 font-bold mb-1">أيام غياب معتمدة (بدون الجمعة)</label><input id="em-abs" type="number" min="0" max="30" step="0.5" value="${Number(m.approvedAbsentDays || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-rose-500/40 text-white font-bold" /></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-rose-300 font-bold mb-1">سُلف الشهر (-)</label><input id="em-adv" type="number" min="0" step="any" value="${Number(m.advances || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-rose-300 font-bold mb-1">خصومات / جزاءات (-)</label><input id="em-ded" type="number" min="0" step="any" value="${Number(m.deductions || 0)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            </div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ التعديلات</button>
+          </form>
+        </div>`;
+    },
+
+    async saveMemberChanges(e, memberId) {
+      e.preventDefault();
+      try {
+        await window.DamanApp.db.collection('companyMembers').doc(memberId).update({
+          jobTitle: document.getElementById('em-title').value.trim(),
+          role: document.getElementById('em-role').value,
+          baseSalary: parseFloat(document.getElementById('em-base').value) || 0,
+          allowances: parseFloat(document.getElementById('em-allow').value) || 0,
+          overtimeAmount: parseFloat(document.getElementById('em-ot').value) || 0,
+          approvedAbsentDays: parseFloat(document.getElementById('em-abs').value) || 0,
+          advances: parseFloat(document.getElementById('em-adv').value) || 0,
+          deductions: parseFloat(document.getElementById('em-ded').value) || 0
+        });
+        document.getElementById('daman-comp-mem-modal').classList.add('hidden');
+        window.DamanApp.toast('تم تحديث بيانات الموظف والراتب بنجاح ✅', 'success');
+      } catch (err) { window.DamanApp.toast(err.message, 'error'); }
+    },
+
+    async toggleMemberStatus(memberId) {
+      if (!this.isManager()) return;
+      const m = this.members.find((x) => x.id === memberId);
+      if (!m || m.role === 'owner') return;
+      const next = m.status === 'suspended' ? 'active' : 'suspended';
+      if (!window.confirm(next === 'suspended' ? `إيقاف الموظف ${m.name} مؤقتاً؟` : `إعادة تفعيل الموظف ${m.name}؟`)) return;
+      try {
+        await window.DamanApp.db.collection('companyMembers').doc(memberId).update({ status: next });
+        window.DamanApp.toast(next === 'suspended' ? 'تم إيقاف الموظف' : 'تم إعادة تفعيل الموظف ✅', 'info');
+      } catch (e) {}
+    },
+
+    async payMemberSalary(memberId, method) {
+      const app = window.DamanApp;
+      if (!this.isManager()) return;
+      const m = this.members.find((x) => x.id === memberId);
+      if (!m) return;
+      const calc = this.calcMemberNetSalary(m);
+      if (calc.net <= 0) return app.toast('صافي الراتب صفر — عدّل الراتب الأساسي أولاً', 'warning');
+
+      const month = app.todayLocal().slice(0, 7);
+      const lbl = method === 'wallet' ? 'عبر محفظة ضمان سايت' : 'نقداً (تسجيل فقط)';
+      if (!window.confirm(`تأكيد صرف صافي راتب ${m.name} لشهر ${month} بمبلغ ${app.fmtMoney(calc.net)} ج.م (${lbl})؟\nسيتم تصفير سُلف وإضافي وغياب الشهر تلقائياً بعد الصرف.`)) return;
+
+      await app.withLock('paySal_' + memberId, async () => {
+        const payDocRef = app.db.collection('companyPayroll').doc();
+        const memRef = app.db.collection('companyMembers').doc(memberId);
+
+        try {
+          if (method === 'wallet') {
+            const payerRef = app.db.collection('users').doc(app.user.uid);
+            const empRef = app.db.collection('users').doc(m.userId);
+            await app.db.runTransaction(async (tx) => {
+              const [pDoc, eDoc] = await Promise.all([tx.get(payerRef), tx.get(empRef)]);
+              const curAvail = Number((pDoc.data() || {}).balanceAvailable || 0);
+              if (curAvail < calc.net) throw new Error('رصيدك المتاح في المحفظة لا يكفي لصرف الراتب');
+              tx.update(payerRef, { balanceAvailable: Math.round((curAvail - calc.net) * 100) / 100 });
+              tx.update(empRef, { balanceAvailable: Math.round((Number((eDoc.data() || {}).balanceAvailable || 0) + calc.net) * 100) / 100 });
+              tx.set(app.db.collection('transactions').doc(), {
+                userId: app.user.uid, type: 'salary_out', amount: -calc.net,
+                note: `صرف راتب ${m.name} (${month})`, date: app.todayLocal(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              });
+              tx.set(app.db.collection('transactions').doc(), {
+                userId: m.userId, type: 'salary_in', amount: calc.net,
+                note: `راتب شهر ${month} من ${this.company.name}`, date: app.todayLocal(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              });
+              tx.set(payDocRef, Object.assign({
+                companyId: this.company.id, memberId, userId: m.userId,
+                employeeName: m.legalName || m.name, jobTitle: m.jobTitle || '',
+                month, method: 'wallet', date: app.todayLocal(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              }, calc));
+              tx.update(memRef, { overtimeAmount: 0, advances: 0, deductions: 0, approvedAbsentDays: 0 });
+            });
+          } else {
+            await payDocRef.set(Object.assign({
+              companyId: this.company.id, memberId, userId: m.userId,
+              employeeName: m.legalName || m.name, jobTitle: m.jobTitle || '',
+              month, method: 'cash', date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, calc));
+            await memRef.update({ overtimeAmount: 0, advances: 0, deductions: 0, approvedAbsentDays: 0 });
+          }
+
+          await app.sendNotification(m.userId, `تم صرف راتب شهر ${month} 💰`, `صافي الراتب: ${app.fmtMoney(calc.net)} ج.م (${lbl})`);
+          app.toast(`تم صرف راتب ${m.name} بنجاح ✅`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    printPayrollSheetA4() {
+      const app = window.DamanApp;
+      if (!this.company) return;
+      let totalNet = 0;
+      const rows = this.members.map((m, i) => {
+        const c = this.calcMemberNetSalary(m);
+        totalNet += c.net;
+        return `
+          <tr>
+            <td>${i + 1}</td>
+            <td><b>${app.esc(m.legalName || m.name)}</b><br/><span style="font-size:10px;">${app.esc(m.jobTitle || '')}</span></td>
+            <td>${app.fmtMoney(c.base)}</td>
+            <td>${app.fmtMoney(c.allow)}</td>
+            <td>${app.fmtMoney(c.ot)}</td>
+            <td>${c.absentDays} يوم (${app.fmtMoney(c.absentCut)})</td>
+            <td>${app.fmtMoney(c.adv)}</td>
+            <td>${app.fmtMoney(c.ded)}</td>
+            <td><b>${app.fmtMoney(c.net)} ج.م</b></td>
+            <td style="width:12%;"></td>
+          </tr>`;
+      }).join('');
+
+      const html = `
+        <div style="border:2px solid #000; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+            <div>
+              <h2 style="margin:0; font-size:16px;">كشف رواتب الموظفين — ${app.esc(this.company.name)}</h2>
+              <div style="font-size:11px;">إدارة الموارد البشرية — ضمان سايت</div>
+            </div>
+            <div style="font-size:11px;"><b>الشهر:</b> ${app.todayLocal().slice(0, 7)}<br/><b>التاريخ:</b> ${app.todayLocal()}</div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>#</th><th>الاسم والوظيفة</th><th>الأساسي</th><th>بدلات</th><th>إضافي</th><th>غياب معتمد</th><th>سُلف</th><th>خصومات</th><th>الصافي</th><th>التوقيع</th></tr>
+            </thead>
+            <tbody>
+              ${rows}
+              <tr><th colspan="8" style="text-align:left;">إجمالي الرواتب المستحقة:</th><th colspan="2">${app.fmtMoney(totalNet)} ج.م</th></tr>
+            </tbody>
+          </table>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:22px; text-align:center; font-size:11px;">
+            <div>إعداد الحسابات / HR<br/><br/>.....................................</div>
+            <div>اعتماد المدير العام<br/><br/>.....................................</div>
+          </div>
+        </div>`;
+      window.DamanPrint(html);
+    },
+
+    printPayslipA4(logId) {
+      const app = window.DamanApp;
+      const p = this.payrollLogs.find((x) => x.id === logId);
+      if (!p || !this.company) return;
+      const html = `
+        <div style="border:2px solid #000; padding:16px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:12px;">
+            <div><h2 style="margin:0; font-size:16px;">قسيمة راتب رسمية (Payslip)</h2><div>${app.esc(this.company.name)}</div></div>
+            <div style="font-size:11px;"><b>شهر:</b> ${app.esc(p.month)}<br/><b>تاريخ الصرف:</b> ${app.esc(p.date)}</div>
+          </div>
+          <table style="margin-bottom:12px;">
+            <tr><th>اسم الموظف</th><td><b>${app.esc(p.employeeName)}</b></td><th>الوظيفة</th><td>${app.esc(p.jobTitle)}</td></tr>
+            <tr><th>طريقة الصرف</th><td colspan="3">${p.method === 'wallet' ? 'تحويل عبر محفظة ضمان سايت' : 'صرف نقدي'}</td></tr>
+          </table>
+          <table>
+            <tr><th>الراتب الأساسي</th><td>${app.fmtMoney(p.base)} ج.م</td><th>أيام الغياب المعتمدة (${p.absentDays || 0})</th><td>- ${app.fmtMoney(p.absentCut || 0)} ج.م</td></tr>
+            <tr><th>البدلات</th><td>+ ${app.fmtMoney(p.allow)} ج.م</td><th>السُلف</th><td>- ${app.fmtMoney(p.adv)} ج.م</td></tr>
+            <tr><th>الإضافي والمكافآت</th><td>+ ${app.fmtMoney(p.ot)} ج.م</td><th>الخصومات / الجزاءات</th><td>- ${app.fmtMoney(p.ded)} ج.م</td></tr>
+            <tr><th colspan="2">صافي الراتب المصروف</th><th colspan="2" style="font-size:14px;">${app.fmtMoney(p.net)} ج.م</th></tr>
+          </table>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:26px; text-align:center; font-size:11px;">
+            <div>توقيع المستلم<br/><br/>.....................................</div>
+            <div>اعتماد الإدارة<br/><br/>.....................................</div>
+          </div>
+        </div>`;
+      window.DamanPrint(html);
+    },
+
+    // ==================== CUSTODY (عهدة / العهدة) ====================
+    async handleCustodyPhoto(input) {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      try {
+        this.tempCustodyPhoto = await window.DamanApp.compressImage(f, 760, 0.56);
+        const p = document.getElementById('cu-photo-prev');
+        if (p) p.innerHTML = `<img src="${this.tempCustodyPhoto}" class="max-h-20 mx-auto rounded mt-1" />`;
+      } catch (e) {}
+    },
+
+    async submitCustodyRecord(e) {
       e.preventDefault();
       const app = window.DamanApp;
+      if (!this.company || !app.user) return;
+      const kind = document.getElementById('cu-kind').value; // 'issue' | 'expense'
+      const holderName = document.getElementById('cu-holder').value.trim();
+      const amount = Math.round((parseFloat(document.getElementById('cu-amt').value) || 0) * 100) / 100;
+      const siteName = document.getElementById('cu-site').value.trim();
+      const note = document.getElementById('cu-note').value.trim();
+      if (!holderName || amount <= 0) return;
+
+      await app.withLock('custodySave', async () => {
+        try {
+          const photoMedia = this.tempCustodyPhoto ? await app.saveMedia(this.tempCustodyPhoto, { kind: 'custody_inv' }) : '';
+          await app.db.collection('companyCustody').add({
+            companyId: this.company.id,
+            userId: app.user.uid,
+            kind,
+            holderName,
+            amount,
+            siteName,
+            note,
+            photoMedia,
+            status: this.isManager() ? 'approved' : 'pending',
+            date: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          this.tempCustodyPhoto = '';
+          e.target.reset();
+          app.toast('تم تسجيل حركة العهدة بنجاح ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    async approveCustody(id, st) {
+      if (!this.isManager()) return;
       try {
-        await app.db.collection('companyCustody').add({
-          companyUid: this.activeCompanyUid,
-          byName: app.profile.name || '',
-          kind: document.getElementById('cus-kind').value,
-          amount: parseFloat(document.getElementById('cus-amt').value) || 0,
-          notes: document.getElementById('cus-notes').value.trim(),
-          invoiceBase64: this.tempCustodyPhoto || '',
-          date: new Date().toISOString().slice(0, 10),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        this.tempCustodyPhoto = '';
-        e.target.reset();
-        const prev = document.getElementById('cus-photo-prev');
-        if (prev) prev.innerHTML = '';
-        app.toast('تم تسجيل العُهدة / الفاتورة بنجاح', 'success');
-      } catch (err) { app.toast(err.message, 'error'); }
+        await window.DamanApp.db.collection('companyCustody').doc(id).update({ status: st });
+        window.DamanApp.toast(st === 'approved' ? 'تم اعتماد العهدة ✅' : 'تم رفض البند', 'info');
+      } catch (e) {}
     },
 
     printCustodyA4() {
       const app = window.DamanApp;
-      if (!this.custodyList.length) return app.toast('لا توجد بيانات عُهد للطباعة', 'warning');
-      let totalIn = 0, totalOut = 0;
-      const rows = this.custodyList.map((c, i) => {
-        if (c.kind === 'custody') totalIn += Number(c.amount || 0);
-        else totalOut += Number(c.amount || 0);
-        return `<tr><td>${i + 1}</td><td>${app.esc(c.date)}</td><td>${app.esc(c.byName)}</td><td>${c.kind === 'custody' ? 'استلام عُهدة (+)' : 'مصروف (-)'}</td><td>${app.esc(c.notes)}</td><td><b>${app.fmtMoney(c.amount)} ج.م</b></td></tr>`;
+      if (!this.company) return;
+      let totalIssued = 0, totalSpent = 0;
+      const rows = this.custodies.map((c, i) => {
+        if (c.status !== 'rejected') {
+          if (c.kind === 'issue') totalIssued += Number(c.amount || 0);
+          else totalSpent += Number(c.amount || 0);
+        }
+        return `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${app.esc(c.date || '')}</td>
+            <td>${app.esc(c.holderName)}</td>
+            <td>${c.kind === 'issue' ? 'صرف عهدة (+)' : 'مصروف بفاتورة (-)'}</td>
+            <td>${app.esc(c.siteName || '—')}</td>
+            <td>${app.esc(c.note || '')}</td>
+            <td><b>${app.fmtMoney(c.amount)} ج.م</b></td>
+          </tr>`;
       }).join('');
 
-      const win = window.open('', '_blank');
-      if (!win) return app.toast('اسمح بالنوافذ المنبثقة للطباعة', 'warning');
-      win.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/><title>تصفية عُهدة — ${app.esc(this.activeCompanyName)}</title><style>@page{size:A4 portrait;margin:13mm;}body{font-family:'Cairo',Tahoma,Arial,sans-serif;color:#000;background:#fff;margin:0;font-size:11.5px;}.sheet{border:2px solid #000;padding:16px;}.hdr{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px;}table{width:100%;border-collapse:collapse;margin-bottom:12px;}th,td{border:1px solid #000;padding:5px 7px;text-align:right;}th{background:#f0f0f0;}.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;}.sbox{border:1px solid #000;padding:7px;}.sigs{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;text-align:center;}.sig{border:1px solid #000;padding:8px 6px 40px;font-weight:700;}.btn{display:block;margin:10px auto;padding:8px 24px;background:#000;color:#fff;border:none;font-weight:700;cursor:pointer;}@media print{.btn{display:none;}}</style></head><body><button class="btn" onclick="window.print()">طباعة كشف تصفية العُهد PDF (A4)</button><div class="sheet"><div class="hdr"><div><h2 style="margin:0">كشف تصفية العُهد والمصاريف</h2><div>الشركة: <b>${app.esc(this.activeCompanyName)}</b></div></div><div>التاريخ: ${new Date().toLocaleDateString('ar-EG')}</div></div><table><thead><tr><th>#</th><th>التاريخ</th><th>بواسطة</th><th>النوع</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>${rows}</tbody></table><div class="sum"><div class="sbox">إجمالي العُهد<br/><b>${app.fmtMoney(totalIn)} ج.م</b></div><div class="sbox">إجمالي المصاريف<br/><b>${app.fmtMoney(totalOut)} ج.م</b></div><div class="sbox" style="background:#eee">المتبقي<br/><b>${app.fmtMoney(totalIn - totalOut)} ج.م</b></div></div><div class="sigs"><div class="sig">توقيع المسؤول عن العُهدة</div><div class="sig">اعتماد المدير المالي</div></div></div></body></html>`);
-      win.document.close();
+      const remaining = Math.round((totalIssued - totalSpent) * 100) / 100;
+      const html = `
+        <div style="border:2px solid #000; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+            <div><h2 style="margin:0; font-size:16px;">تصفية كشف العهدة والمصروفات — ${app.esc(this.company.name)}</h2></div>
+            <div style="font-size:11px;"><b>التاريخ:</b> ${app.todayLocal()}</div>
+          </div>
+          <table style="margin-bottom:10px;">
+            <tr><th>إجمالي العهدة المنصرفة</th><td><b>${app.fmtMoney(totalIssued)} ج.م</b></td><th>إجمالي المصروفات بالفواتير</th><td><b>${app.fmtMoney(totalSpent)} ج.م</b></td><th>صافي المتبقي بالعهدة</th><td><b>${app.fmtMoney(remaining)} ج.م</b></td></tr>
+          </table>
+          <table>
+            <thead><tr><th>#</th><th>التاريخ</th><th>حامل العهدة</th><th>النوع</th><th>الموقع</th><th>البيان</th><th>المبلغ</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="7" style="text-align:center;">لا توجد حركات عهدة</td></tr>'}</tbody>
+          </table>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:22px; text-align:center; font-size:11px;">
+            <div>توقيع حامل العهدة<br/><br/>.....................................</div>
+            <div>اعتماد مدير الحسابات / الإدارة<br/><br/>.....................................</div>
+          </div>
+        </div>`;
+      window.DamanPrint(html);
     },
 
-    async submitLeave(e) {
+    // ==================== DAILY SITE REPORT (A4 B&W PRINTABLE) ====================
+    async submitDailyReport(e) {
       e.preventDefault();
       const app = window.DamanApp;
+      if (!this.company || !app.user) return;
+      const report = {
+        companyId: this.company.id,
+        authorUid: app.user.uid,
+        authorName: app.profile?.legalName || app.profile?.name || '',
+        date: app.todayLocal(),
+        siteName: document.getElementById('dr-site').value.trim(),
+        workforceSummary: document.getElementById('dr-workforce').value.trim(),
+        workDone: document.getElementById('dr-work').value.trim(),
+        materials: document.getElementById('dr-mat').value.trim(),
+        obstacles: document.getElementById('dr-obs').value.trim(),
+        tomorrowPlan: document.getElementById('dr-plan').value.trim(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if (!report.siteName || !report.workDone) return;
       try {
-        await app.db.collection('companyLeaves').add({
-          companyUid: this.activeCompanyUid,
-          memberUid: app.user.uid,
-          memberName: app.profile.name || '',
-          leaveType: document.getElementById('lv-type').value,
-          leaveDate: document.getElementById('lv-date').value,
-          reason: document.getElementById('lv-reason').value.trim(),
-          status: 'pending',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.sendNotification(this.activeCompanyUid, 'طلب إجازة / إذن جديد', `${app.profile.name} قدّم طلب إجازة`);
+        await app.db.collection('companyDailyReports').add(report);
         e.target.reset();
-        app.toast('تم إرسال طلب الإجازة للإدارة', 'success');
+        app.toast('تم حفظ التقرير اليومي للموقع بنجاح ✅', 'success');
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
-    async handleLeaveDecision(id, memberUid, status) {
+    printDailyReportA4(repId) {
       const app = window.DamanApp;
-      try {
-        await app.db.collection('companyLeaves').doc(id).update({ status });
-        if (memberUid) await app.sendNotification(memberUid, 'رد الشركة على طلب الإجازة', status === 'approved' ? 'تمت الموافقة على طلبك ✅' : 'تم رفض طلب الإجازة');
-        app.toast('تم تحديث حالة الطلب', 'success');
-      } catch (e) { app.toast(e.message, 'error'); }
+      const r = this.dailyReports.find((x) => x.id === repId);
+      if (!r || !this.company) return;
+      const html = `
+        <div style="border:2px solid #000; padding:15px 18px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:12px;">
+            <div>
+              <h2 style="margin:0; font-size:16px;">التقرير اليومي لأعمال الموقع</h2>
+              <div style="font-size:12px;"><b>${app.esc(this.company.name)}</b></div>
+            </div>
+            <div style="font-size:11px; text-align:left;">
+              <div><b>التاريخ:</b> ${app.esc(r.date)}</div>
+              <div><b>إعداد:</b> ${app.esc(r.authorName)}</div>
+            </div>
+          </div>
+
+          <table style="margin-bottom:12px;">
+            <tr><th style="width:24%;">الموقع / المشروع</th><td><b>${app.esc(r.siteName)}</b></td></tr>
+            <tr><th>بيان العمالة والحضور</th><td style="white-space:pre-line;">${app.esc(r.workforceSummary || '—')}</td></tr>
+            <tr><th>الأعمال المنفذة اليوم</th><td style="white-space:pre-line; min-height:70px;">${app.esc(r.workDone)}</td></tr>
+            <tr><th>الخامات والتوريدات والمعدات</th><td style="white-space:pre-line;">${app.esc(r.materials || '—')}</td></tr>
+            <tr><th>المعوقات والملاحظات الفنية</th><td style="white-space:pre-line;">${app.esc(r.obstacles || 'لا توجد معوقات')}</td></tr>
+            <tr><th>خطة العمل لليوم التالي</th><td style="white-space:pre-line;">${app.esc(r.tomorrowPlan || '—')}</td></tr>
+          </table>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:26px; text-align:center; font-size:11px;">
+            <div>مشرف التنفيذ<br/><br/>..........................</div>
+            <div>مهندس التنفيذ<br/><br/>..........................</div>
+            <div>مدير المشروع<br/><br/>..........................</div>
+          </div>
+        </div>`;
+      window.DamanPrint(html);
     },
 
-    async sendGroupMsg(e) {
+    // ==================== LEAVES & COMPANY GROUP CHAT ====================
+    async submitLeaveRequest(e) {
       e.preventDefault();
       const app = window.DamanApp;
-      const inp = document.getElementById('comp-chat-inp');
+      if (!this.company || !app.user) return;
+      try {
+        await app.db.collection('companyLeaves').add({
+          companyId: this.company.id,
+          userId: app.user.uid,
+          userName: app.profile?.name || '',
+          leaveType: document.getElementById('lv-type').value,
+          fromDate: document.getElementById('lv-from').value,
+          days: parseInt(document.getElementById('lv-days').value, 10) || 1,
+          reason: document.getElementById('lv-reason').value.trim(),
+          status: 'pending',
+          date: app.todayLocal(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await app.sendNotification(this.company.ownerId, 'طلب إجازة جديد', `${app.profile?.name} طلب إجازة.`);
+        e.target.reset();
+        app.toast('تم إرسال طلب الإجازة للمدير ✅', 'success');
+      } catch (err) { app.toast(err.message, 'error'); }
+    },
+
+    async respondLeave(id, st) {
+      if (!this.isManager()) return;
+      const lv = this.leaves.find((x) => x.id === id);
+      try {
+        await window.DamanApp.db.collection('companyLeaves').doc(id).update({ status: st });
+        if (lv) await window.DamanApp.sendNotification(lv.userId, st === 'approved' ? 'تمت الموافقة على إجازتك ✅' : 'تم رفض طلب الإجازة', lv.reason || '');
+        window.DamanApp.toast('تم التحديث', 'success');
+      } catch (e) {}
+    },
+
+    async sendGroupMessage(e) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      const inp = document.getElementById('cg-input');
       const text = inp ? inp.value.trim() : '';
-      if (!text || !this.activeCompanyUid) return;
+      if (!text || !this.company || !app.user) return;
       inp.value = '';
       try {
-        await app.db.collection('companyChats').doc(this.activeCompanyUid).collection('messages').add({
+        await app.db.collection('companyMessages').add({
+          companyId: this.company.id,
           senderId: app.user.uid,
-          senderName: app.profile.name || '',
+          senderName: app.isAdmin() ? '👑 إدارة ضمان سايت' : (app.profile?.name || ''),
+          isPlatformAdmin: app.isAdmin(),
           text,
+          date: app.todayLocal(),
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
     // ==================== RENDER SUB-TABS ====================
-    renderTeamTab(app) {
-      const check = this.canGrantAccess(app);
-      const unlocked = check.allowed || app.isAdmin();
-      const p = app.profile || {};
-      const compCode = p.companyCode || ('CMP-' + app.user.uid.slice(0, 4).toUpperCase());
+    renderOnboarding(app) {
+      return `
+        <div class="space-y-3.5 text-xs">
+          <div class="glass-card rounded-3xl p-4 border-sky-500/40 space-y-2">
+            <h2 class="text-sm font-black text-sky-400"><i class="fa-solid fa-building-user me-1"></i> منظومة إدارة شركات المقاولات والموظفين (HR)</h2>
+            <p class="text-[11px] text-slate-300 leading-relaxed">سجّل حضور ومواقع فريقك بالسيلفي والـ GPS، احسب الرواتب والعهدة بدقة، واطبع التقارير اليومية وكشوف الرواتب A4.</p>
+          </div>
+
+          <form onsubmit="DamanCompany.createCompanyWorkspace(event)" class="glass-card rounded-2xl p-4 space-y-2.5 border-amber-500/40">
+            <h3 class="font-black text-amber-400">1. إنشاء مساحة شركة جديدة (للملاك والشركات والموردين)</h3>
+            <input id="nc-name" type="text" required value="${app.esc(app.profile?.companyName || '')}" placeholder="اسم الشركة / المكتب الهندسي" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div class="grid grid-cols-2 gap-2">
+              <input id="nc-cr" type="text" value="${app.esc(app.profile?.commercialReg || '')}" placeholder="السجل التجاري (اختياري)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="nc-tax" type="text" value="${app.esc(app.profile?.taxCard || '')}" placeholder="البطاقة الضريبية (اختياري)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">إنشاء الشركة وتوليد كود الانضمام</button>
+          </form>
+
+          <form onsubmit="DamanCompany.joinCompanyByCode(event)" class="glass-card rounded-2xl p-4 space-y-2.5 border-emerald-500/40">
+            <h3 class="font-black text-emerald-400">2. الانضمام لشركة قائمة (للمشرفين والمهندسين والموظفين)</h3>
+            <input id="jc-code" type="text" required placeholder="أدخل كود الشركة (مثال: CMP-123456)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white uppercase font-black" />
+            <input id="jc-title" type="text" required placeholder="المسمى الوظيفي (مثال: مشرف تنفيذ / مهندس موقع)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">انضمام للشركة الآن</button>
+          </form>
+        </div>`;
+    },
+
+    renderAttendanceTab(app) {
+      const isMgr = this.isManager();
+      const siteOptions = this.sites.map((s) => `<option value="${s.id}">${app.esc(s.name)} (نطاق ${s.radiusMeters || 250}م)</option>`).join('');
 
       return `
-        <div class="space-y-3.5">
-          ${this.isOwnerView ? `
-            <div class="p-3 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-between text-xs">
-              <div>
-                <div class="text-[10px] text-slate-400">كود دعوة الشركة / المورّد (أعطه لفريقك للانضمام):</div>
-                <div class="text-sm font-black text-sky-300 tracking-widest">${app.esc(compCode)}</div>
+        <div class="space-y-3 text-xs">
+          ${isMgr ? `
+            <div class="glass-card rounded-2xl p-3 space-y-2 border-sky-500/40">
+              <div class="flex items-center justify-between">
+                <span class="font-black text-sky-300"><i class="fa-solid fa-map-pin me-1"></i> مواقع الشركة الثابتة (${this.sites.length})</span>
+                <button onclick="DamanCompany.openAddSiteModal()" class="px-2.5 py-1 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px]">+ تثبيت موقع GPS</button>
               </div>
-              <button onclick="DamanCompany.copySafe('${app.esc(compCode)}','كود الشركة')" class="px-3 py-1.5 rounded-xl bg-sky-500 text-slate-950 font-black text-[10px]">نسخ الكود</button>
+              ${this.sites.length ? `<div class="flex flex-wrap gap-1.5">${this.sites.map((s) => `
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-700 text-[10px]">
+                  <b class="text-white">${app.esc(s.name)}</b> ${s.lat ? '📍' : ''}
+                  <button onclick="DamanCompany.removeCompanySite('${s.id}')" class="text-rose-400">×</button>
+                </span>`).join('')}</div>` : `<div class="text-[10px] text-slate-400">أضف مواقع شركتك بإحداثيات GPS لكشف الحضور خارج الموقع تلقائياً.</div>`}
+            </div>` : ''}
+
+          <!-- Check-In / Check-Out Panel -->
+          <div class="glass-card rounded-2xl p-3.5 space-y-2.5 border-emerald-500/40">
+            <div class="font-black text-emerald-400"><i class="fa-solid fa-fingerprint me-1"></i> تسجيل الحضور والانصراف اليومي (${app.todayLocal()})</div>
+            ${this.sites.length
+              ? `<select id="att-site-select" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${siteOptions}</select>`
+              : `<input id="att-site-custom" type="text" placeholder="اكتب اسم الموقع (مثال: كمبوند سعادة - فيلا 14)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />`}
+
+            <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
+              <span class="font-black text-emerald-300"><i class="fa-solid fa-camera me-1"></i> التقاط سيلفي من الموقع *</span>
+              <input type="file" accept="image/*" capture="user" class="hidden" onchange="DamanCompany.handleAttendanceSelfie(this)" />
+              <div id="att-selfie-prev"></div>
+            </label>
+
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="DamanCompany.recordAttendance('in')" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">🟢 تسجيل حضور</button>
+              <button onclick="DamanCompany.recordAttendance('out')" class="py-2.5 rounded-xl bg-rose-500 text-white font-black">🔴 تسجيل انصراف</button>
             </div>
+          </div>
 
-            ${!unlocked ? `
-              <div class="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-200 space-y-1">
-                <div class="font-black text-rose-300"><i class="fa-solid fa-lock me-1"></i> لفتح إضافة الموظفين (Access):</div>
-                <div>• ${check.isVerified ? '✅ تم التوثيق بالسجل التجاري والضريبية' : '❌ وثّق الحساب بالسجل التجاري والبطاقة الضريبية من المحفظة'}</div>
-                <div>• ${check.hasBalanceOrPlan ? '✅ الرصيد/الباقة مفعّلة' : `❌ اشحن رصيدك (${check.minBal} ج.م على الأقل) أو فعّل باقة الشركات`}</div>
-              </div>` : `
-              <div class="glass-card rounded-2xl p-3.5 space-y-2.5 border-sky-500/30">
-                <div class="flex gap-1.5">
-                  <input id="cm-search-input" type="text" placeholder="ابحث عن موظف برقم الموبايل أو الجيميل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-                  <button type="button" onclick="DamanCompany.searchEmployee()" class="px-3 py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">بحث</button>
-                </div>
-                <form onsubmit="DamanCompany.addTeamMember(event)" class="space-y-2 text-xs">
-                  <div class="grid grid-cols-2 gap-2">
-                    <input id="cm-name" type="text" required value="${app.esc(this.foundUser?.name || '')}" placeholder="اسم الموظف / المهندس" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                    <input id="cm-role" type="text" required placeholder="الوظيفة (مهندس موقع / أمين مخزن)" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                  </div>
-                  <div class="grid grid-cols-2 gap-2">
-                    <input id="cm-phone" type="tel" required value="${app.esc(this.foundUser?.phone || '')}" placeholder="رقم الموبايل" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                    <input id="cm-email" type="email" value="${app.esc(this.foundUser?.email || '')}" placeholder="الإيميل (اختياري)" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                  </div>
-                  <div class="grid grid-cols-2 gap-2">
-                    <input id="cm-salary" type="number" min="0" placeholder="الراتب الأساسي (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" />
-                    <input id="cm-allow" type="number" min="0" value="0" placeholder="البدلات الشهرية (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                  </div>
-                  <div class="grid grid-cols-2 gap-1 text-[10px] text-slate-300">
-                    <label><input id="perm-post" type="checkbox" checked class="accent-sky-500 me-1" />نشر مشاريع وعروض</label>
-                    <label><input id="perm-bid" type="checkbox" checked class="accent-sky-500 me-1" />تقديم عروض أسعار</label>
-                    <label><input id="perm-chat" type="checkbox" checked class="accent-sky-500 me-1" />دردشة العملاء والموردين</label>
-                    <label><input id="perm-supply" type="checkbox" checked class="accent-emerald-500 me-1" />اعتماد استلام توريدات B2B</label>
-                    <label><input id="perm-vip" type="checkbox" checked class="accent-sky-500 me-1" />طلب عمالة VIP</label>
-                  </div>
-                  <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">إضافة الموظف ومنح الصلاحيات</button>
-                </form>
-              </div>`}` : ''}
-
+          <!-- Attendance Logs -->
           <div class="space-y-2">
-            <h4 class="text-xs font-extrabold text-white">أعضاء الفريق (${this.members.length})</h4>
-            ${this.members.map((m) => `
-              <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-xs">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="font-extrabold text-white">${app.esc(m.memberName)} <span class="text-[10px] text-sky-400">(${app.esc(m.roleTitle)})</span></div>
-                    <div class="text-[10px] text-slate-400">${app.esc(m.memberPhone || '')} | أساسي: ${app.fmtMoney(m.monthlySalary)} + بدلات: ${app.fmtMoney(m.allowances || 0)} | ★ ${m.rating || 5}</div>
-                  </div>
-                  <span class="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 font-bold">${app.esc(m.status)}</span>
-                </div>
-                ${this.isOwnerView ? `
-                  <div class="flex gap-1.5 pt-1">
-                    ${m.status === 'pending' ? `<button onclick="DamanCompany.updateMemberStatus('${m.id}','${m.memberUid}','active')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">قبول الانضمام</button>` : ''}
-                    <button onclick="DamanCompany.editSalaryAndRating('${m.id}')" class="flex-1 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[10px]">الراتب والبدلات والتقييم</button>
-                    <button onclick="DamanCompany.updateMemberStatus('${m.id}','${m.memberUid}','${m.status === 'active' ? 'suspended' : 'active'}')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-[10px]">${m.status === 'active' ? 'إيقاف' : 'تفعيل'}</button>
-                  </div>` : ''}
-              </div>`).join('')}
+            ${!this.attendance.length
+              ? `<div class="glass-card rounded-2xl p-6 text-center text-slate-400">لا توجد سجلات حضور بعد.</div>`
+              : this.attendance.slice(0, 40).map((a) => {
+                  const geoBadge = a.geoStatus === 'inside'
+                    ? `<span class="text-emerald-400 font-black">✅ داخل النطاق (${a.distanceMeters}م)</span>`
+                    : a.geoStatus === 'outside'
+                    ? `<span class="text-rose-400 font-black">⚠️ خارج الموقع (${a.distanceMeters >= 1000 ? (a.distanceMeters / 1000).toFixed(1) + ' كم' : a.distanceMeters + 'م'})</span>`
+                    : `<span class="text-slate-400">بدون نطاق GPS</span>`;
+                  return `
+                    <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2">
+                      <div class="min-w-0 space-y-0.5">
+                        <div class="font-black text-white">${a.kind === 'in' ? '🟢 حضور' : '🔴 انصراف'} — ${app.esc(a.userName)}</div>
+                        <div class="text-[10px] text-slate-300">${app.esc(a.siteName)} • ${app.esc(a.date)} (${app.esc(a.time || '')})</div>
+                        <div class="text-[10px]">${geoBadge}</div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        ${a.coords ? `<a href="https://maps.google.com/?q=${a.coords.lat},${a.coords.lng}" target="_blank" class="px-2 py-1 rounded-lg bg-slate-800 text-sky-300 text-[10px] font-bold">GPS</a>` : ''}
+                        ${a.selfieMedia ? `<button onclick="DamanApp.openMediaLightbox('${a.selfieMedia}','سيلفي ${app.esc(a.userName)}')" class="px-2 py-1 rounded-lg bg-slate-800 text-amber-300 text-[10px] font-bold">سيلفي</button>` : ''}
+                      </div>
+                    </div>`;
+                }).join('')}
           </div>
         </div>`;
     },
 
-    renderHrTab(app) {
-      const activeMembers = this.members.filter((m) => m.status === 'active');
-      const myMemberRow = !this.isOwnerView ? activeMembers.find((m) => m.memberUid === app.user.uid || m.memberPhone === app.profile?.phone) : null;
-
+    renderTeamTab(app) {
+      const isMgr = this.isManager();
       return `
-        <div class="space-y-3.5">
-          <!-- Check-In / Check-Out with Site Name + Selfie + GPS -->
-          <div class="glass-card rounded-2xl p-3.5 space-y-2.5 border-emerald-500/40">
-            <div class="text-xs font-black text-emerald-400"><i class="fa-solid fa-camera-retro me-1"></i> تسجيل الحضور والانصراف اليومي (سيلفي + GPS + اسم الموقع)</div>
-            <input id="hr-site-name" type="text" placeholder="اسم المشروع / الموقع الحالي (مثال: مشروع سعادة - التجمع)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-            <div class="grid grid-cols-2 gap-2">
-              <label class="py-3 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs text-center cursor-pointer">
-                <i class="fa-solid fa-right-to-bracket me-1"></i> تسجيل حضور
-                <input type="file" accept="image/*" capture="user" class="hidden" onchange="DamanCompany.recordAttendance('in', this)" />
-              </label>
-              <label class="py-3 rounded-xl bg-rose-500 text-white font-black text-xs text-center cursor-pointer">
-                <i class="fa-solid fa-right-from-bracket me-1"></i> تسجيل انصراف
-                <input type="file" accept="image/*" capture="user" class="hidden" onchange="DamanCompany.recordAttendance('out', this)" />
-              </label>
+        <div class="space-y-2.5 text-xs">
+          ${this.members.map((m) => {
+            const c = this.calcMemberNetSalary(m);
+            return `
+              <div class="glass-card rounded-2xl p-3 space-y-1.5 ${m.status === 'suspended' ? 'border-rose-500/50 opacity-75' : ''}">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="font-black text-white">${app.esc(m.name)} ${m.status === 'suspended' ? '<span class="text-rose-400">(موقوف)</span>' : ''}</div>
+                    <div class="text-[10px] text-amber-300">${app.esc(m.jobTitle || '')} • ${app.esc(m.phone || '')}</div>
+                  </div>
+                  <div class="text-end">
+                    <div class="font-black text-emerald-400">${app.fmtMoney(c.net)} ج.م</div>
+                    <div class="text-[9.5px] text-slate-400">صافي الراتب</div>
+                  </div>
+                </div>
+                ${isMgr ? `
+                  <div class="flex gap-1.5 pt-1">
+                    <button onclick="DamanCompany.openEditMemberModal('${m.id}')" class="flex-1 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10.5px]">تعديل الراتب والصلاحية</button>
+                    ${m.role !== 'owner' ? `<button onclick="DamanCompany.toggleMemberStatus('${m.id}')" class="px-3 py-1.5 rounded-lg ${m.status === 'suspended' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'} font-bold text-[10.5px]">${m.status === 'suspended' ? 'تفعيل' : 'إيقاف'}</button>` : ''}
+                  </div>` : ''}
+              </div>`;
+          }).join('')}
+        </div>`;
+    },
+
+    renderPayrollTab(app) {
+      const isMgr = this.isManager();
+      return `
+        <div class="space-y-3 text-xs">
+          ${isMgr ? `
+            <div class="flex items-center justify-between">
+              <span class="font-black text-amber-400">إدارة وصرف الرواتب (معادلة غياب معتمدة)</span>
+              <button onclick="DamanCompany.printPayrollSheetA4()" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10.5px]"><i class="fa-solid fa-print me-1"></i> شيت الرواتب A4</button>
             </div>
-          </div>
-
-          <!-- Employee own Payslip button -->
-          ${myMemberRow ? `
-            <div class="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-between text-xs">
-              <div>
-                <div class="font-black text-amber-300">قسيمة راتبي للشهر الحالي</div>
-                <div class="text-[10px] text-slate-200">صافي المستحق حتى الآن: <b>${app.fmtMoney(this.calcPayrollRow(myMemberRow).netSalary)} ج.م</b></div>
-              </div>
-              <button onclick="DamanCompany.printPayslipA4('${myMemberRow.id}')" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>قسيمة A4</button>
-            </div>` : ''}
-
-          <!-- Owner Monthly Payroll Sheet & Disbursement -->
-          ${this.isOwnerView ? `
-            <div class="glass-card rounded-2xl p-3.5 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <h4 class="text-xs font-black text-amber-400"><i class="fa-solid fa-file-invoice-dollar me-1"></i> شيت وصرف الرواتب الشهرية</h4>
-                <button onclick="DamanCompany.printHrPayrollA4()" class="px-2.5 py-1.5 rounded-lg bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>شيت A4 PDF</button>
-              </div>
-              ${!activeMembers.length ? '<div class="text-center text-xs text-slate-400 py-3">أضف موظفين من تبويب الفريق أولاً</div>' : activeMembers.map((m) => {
-                const pr = this.calcPayrollRow(m);
+            <div class="space-y-2">
+              ${this.members.filter((m) => m.status !== 'suspended').map((m) => {
+                const c = this.calcMemberNetSalary(m);
                 return `
-                  <div class="p-2.5 rounded-xl bg-slate-950/90 border ${pr.paidRecord ? 'border-emerald-500/50' : 'border-slate-800'} text-xs space-y-1.5">
-                    <div class="flex justify-between font-extrabold">
-                      <span class="text-white">${app.esc(m.memberName)}</span>
-                      <span class="text-emerald-400">صافي: ${app.fmtMoney(pr.netSalary)} ج.م</span>
+                  <div class="glass-card rounded-2xl p-3 space-y-2">
+                    <div class="flex justify-between">
+                      <b class="text-white">${app.esc(m.name)}</b>
+                      <b class="text-emerald-400">الصافي: ${app.fmtMoney(c.net)} ج.م</b>
                     </div>
-                    <div class="text-[10px] text-slate-400">حضور: ${pr.daysPresent} | غياب: ${pr.daysAbsent} (-${app.fmtMoney(pr.absenceDeduct)}) | بدلات+إضافي: +${app.fmtMoney(pr.allowances + pr.overtimePay)} | سُلف: -${app.fmtMoney(pr.deductions)}</div>
-                    <div class="grid grid-cols-3 gap-1 pt-1">
-                      ${pr.paidRecord
-                        ? `<div class="col-span-2 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-black text-[10px] text-center">✓ تم الصرف (${app.esc(pr.paidRecord.method)})</div>`
-                        : `<button onclick="DamanCompany.disburseSalary('${m.id}','wallet')" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[9.5px]">تحويل بالمحفظة</button>
-                           <button onclick="DamanCompany.disburseSalary('${m.id}','cash')" class="py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[9.5px]">صرف نقدي/بنكي</button>`}
-                      <button onclick="DamanCompany.printPayslipA4('${m.id}')" class="py-1.5 rounded-lg bg-white text-slate-950 font-black text-[9.5px]">قسيمة A4</button>
+                    <div class="text-[10px] text-slate-400">أساسي ${app.fmtMoney(c.base)} | بدلات ${app.fmtMoney(c.allow)} | إضافي ${app.fmtMoney(c.ot)} | غياب معتمد ${c.absentDays} يوم (-${app.fmtMoney(c.absentCut)}) | سُلف -${app.fmtMoney(c.adv)} | خصم -${app.fmtMoney(c.ded)}</div>
+                    <div class="grid grid-cols-3 gap-1.5">
+                      <button onclick="DamanCompany.openEditMemberModal('${m.id}')" class="py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10px]">تعديل البنود</button>
+                      <button onclick="DamanCompany.payMemberSalary('${m.id}','wallet')" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">صرف بالمحفظة</button>
+                      <button onclick="DamanCompany.payMemberSalary('${m.id}','cash')" class="py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px]">تسجيل نقداً</button>
                     </div>
                   </div>`;
               }).join('')}
             </div>` : ''}
 
-          <div class="glass-card rounded-2xl p-3.5 space-y-2">
-            <h4 class="text-xs font-extrabold text-white">سجل الحضور الأخير (بالسيلفي والموقع والـ GPS)</h4>
-            ${!this.attendance.length ? '<div class="text-xs text-slate-400 text-center py-3">لا يوجد سجل حضور بعد</div>' : this.attendance.slice(0, 15).map((a) => `
-              <div class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
-                <div class="flex items-center gap-2 min-w-0">
-                  ${a.checkInSelfie ? `<img src="${a.checkInSelfie}" onclick="window.open('${a.checkInSelfie}','_blank')" class="w-10 h-10 rounded-lg object-cover border border-emerald-500/40 shrink-0 cursor-pointer" />` : ''}
-                  <div class="min-w-0">
-                    <div class="font-bold text-white truncate">${app.esc(a.memberName)} — ${app.esc(a.date)}</div>
-                    <div class="text-[10px] text-sky-300 truncate">${app.esc(a.siteName || 'الموقع')}</div>
-                    <div class="text-[10px] text-slate-400">حضور: ${a.checkInTime || '-'} | انصراف: ${a.checkOutTime || '-'} ${a.hoursWorked ? `(${a.hoursWorked} س)` : ''}</div>
-                  </div>
+          <div class="font-black text-slate-300 pt-1">سجل قسائم الرواتب المصروفة (${this.payrollLogs.length})</div>
+          <div class="space-y-2">
+            ${this.payrollLogs.map((p) => `
+              <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2">
+                <div>
+                  <div class="font-black text-white">${app.esc(p.employeeName)} — شهر ${app.esc(p.month)}</div>
+                  <div class="text-[10px] text-slate-400">${p.method === 'wallet' ? 'محفظة ضمان سايت' : 'نقداً'} • ${app.esc(p.date)}</div>
                 </div>
-                ${a.checkInLoc ? `<a href="https://maps.google.com/?q=${a.checkInLoc.lat},${a.checkInLoc.lng}" target="_blank" class="px-2 py-1 rounded-lg bg-sky-500/20 text-sky-300 text-[10px] font-bold shrink-0"><i class="fa-solid fa-location-dot"></i></a>` : ''}
+                <div class="flex items-center gap-2">
+                  <b class="text-emerald-400">${app.fmtMoney(p.net)} ج.م</b>
+                  <button onclick="DamanCompany.printPayslipA4('${p.id}')" class="px-2.5 py-1 rounded-lg bg-white text-slate-950 font-black text-[10px]">قسيمة A4</button>
+                </div>
               </div>`).join('')}
           </div>
         </div>`;
     },
 
     renderCustodyTab(app) {
-      let totalIn = 0, totalOut = 0;
-      this.custodyList.forEach((c) => { if (c.kind === 'custody') totalIn += Number(c.amount || 0); else totalOut += Number(c.amount || 0); });
+      const isMgr = this.isManager();
       return `
-        <div class="space-y-3">
+        <div class="space-y-3 text-xs">
           <div class="flex items-center justify-between">
-            <h4 class="text-xs font-black text-amber-400">سجل العُهد والفواتير وتصفية الموقع</h4>
-            <button onclick="DamanCompany.printCustodyA4()" class="px-2.5 py-1.5 rounded-lg bg-white text-slate-950 font-black text-[10px]"><i class="fa-solid fa-print me-1"></i>كشف A4 PDF</button>
+            <span class="font-black text-amber-400"><i class="fa-solid fa-receipt me-1"></i> العهدة وتصفية فواتير المواقع</span>
+            <button onclick="DamanCompany.printCustodyA4()" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10.5px]"><i class="fa-solid fa-print me-1"></i> تصفية عهدة A4</button>
           </div>
-          <div class="grid grid-cols-3 gap-1.5 text-center text-[10px]">
-            <div class="p-2 rounded-xl bg-slate-900 border border-slate-800"><div class="text-slate-400">إجمالي العُهد</div><div class="text-xs font-black text-emerald-400">${app.fmtMoney(totalIn)}</div></div>
-            <div class="p-2 rounded-xl bg-slate-900 border border-slate-800"><div class="text-slate-400">المصاريف</div><div class="text-xs font-black text-rose-400">${app.fmtMoney(totalOut)}</div></div>
-            <div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/40"><div class="text-amber-200">المتبقي</div><div class="text-xs font-black text-amber-300">${app.fmtMoney(totalIn - totalOut)}</div></div>
-          </div>
-          <form onsubmit="DamanCompany.addCustodyItem(event)" class="glass-card rounded-2xl p-3 space-y-2 text-xs">
+
+          <form onsubmit="DamanCompany.submitCustodyRecord(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
             <div class="grid grid-cols-2 gap-2">
-              <select id="cus-kind" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 font-bold text-white"><option value="custody">استلام عُهدة (+)</option><option value="expense">مصروف بفاتورة (-)</option></select>
-              <input id="cus-amt" type="number" min="1" required placeholder="المبلغ (ج.م)" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
+              <select id="cu-kind" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                <option value="expense">مصروف من العهدة بفاتورة (-)</option>
+                ${isMgr ? '<option value="issue">صرف عهدة جديدة لموظف (+)</option>' : ''}
+              </select>
+              <input id="cu-amt" type="number" min="1" step="any" required placeholder="المبلغ (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
             </div>
-            <input id="cus-notes" type="text" required placeholder="البيان (مثلاً: عهدة م. أحمد / فاتورة خامات)" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div class="grid grid-cols-2 gap-2">
+              <input id="cu-holder" type="text" required value="${app.esc(app.profile?.name || '')}" placeholder="اسم حامل العهدة" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="cu-site" type="text" placeholder="اسم الموقع" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+            <input id="cu-note" type="text" required placeholder="البيان (مثال: شراء سلك رباط / مسامير / نقل خامات)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             <label class="block p-2 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer">
-              <span class="font-bold text-amber-300"><i class="fa-solid fa-receipt me-1"></i> إرفاق صورة الفاتورة (اختياري)</span>
+              <span class="font-bold text-amber-300"><i class="fa-solid fa-camera me-1"></i> إرفاق صورة الفاتورة (اختياري)</span>
               <input type="file" accept="image/*" class="hidden" onchange="DamanCompany.handleCustodyPhoto(this)" />
-              <div id="cus-photo-prev"></div>
+              <div id="cu-photo-prev"></div>
             </label>
-            <button type="submit" class="w-full py-2 rounded-xl bg-amber-500 text-slate-950 font-black">تسجيل في سجل العُهد</button>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ حركة العهدة</button>
           </form>
-          ${this.custodyList.map((c) => `
-            <div class="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-xs">
-              <div class="flex justify-between">
-                <div><div class="font-bold text-white">${app.esc(c.notes)}</div><div class="text-[10px] text-slate-400">${app.esc(c.byName)} • ${app.esc(c.date)}</div></div>
-                <span class="font-black ${c.kind === 'custody' ? 'text-emerald-400' : 'text-rose-400'}">${c.kind === 'custody' ? '+' : '-'}${app.fmtMoney(c.amount)}</span>
-              </div>
-              ${c.invoiceBase64 ? `<img src="${c.invoiceBase64}" onclick="window.open('${c.invoiceBase64}','_blank')" class="max-h-28 rounded border border-slate-700 cursor-pointer" />` : ''}
-            </div>`).join('')}
+
+          <div class="space-y-2">
+            ${this.custodies.map((c) => `
+              <div class="glass-card rounded-2xl p-3 space-y-1.5">
+                <div class="flex justify-between">
+                  <span class="font-black ${c.kind === 'issue' ? 'text-emerald-400' : 'text-amber-300'}">${c.kind === 'issue' ? '+ صرف عهدة' : '- مصروف عهدة'}: ${app.fmtMoney(c.amount)} ج.م</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-200 font-bold">${app.esc(c.status)}</span>
+                </div>
+                <div class="text-[10.5px] text-slate-300">${app.esc(c.holderName)} ${c.siteName ? '• ' + app.esc(c.siteName) : ''} • ${app.esc(c.date)}</div>
+                <div class="text-[11px] text-white">${app.esc(c.note)}</div>
+                <div class="flex items-center gap-2 pt-1">
+                  ${c.photoMedia ? `<button onclick="DamanApp.openMediaLightbox('${c.photoMedia}','فاتورة عهدة')" class="text-[10px] text-sky-300 underline font-bold">عرض الفاتورة</button>` : ''}
+                  ${isMgr && c.status === 'pending' ? `
+                    <button onclick="DamanCompany.approveCustody('${c.id}','approved')" class="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">اعتماد</button>
+                    <button onclick="DamanCompany.approveCustody('${c.id}','rejected')" class="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-black text-[10px]">رفض</button>` : ''}
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    },
+
+    renderReportsTab(app) {
+      return `
+        <div class="space-y-3 text-xs">
+          <form onsubmit="DamanCompany.submitDailyReport(event)" class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/40">
+            <h4 class="font-black text-sky-400"><i class="fa-solid fa-file-lines me-1"></i> إعداد التقرير اليومي للموقع (A4 PDF)</h4>
+            <input id="dr-site" type="text" required placeholder="اسم الموقع / رقم الفيلا" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <input id="dr-workforce" type="text" placeholder="بيان العمالة (مثال: 6 نجارين، 4 حدادين، 2 عمال)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <textarea id="dr-work" rows="3" required placeholder="الأعمال المنفذة اليوم بالتفصيل..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <textarea id="dr-mat" rows="2" placeholder="الخامات الواردة والمستهلكة والمعدات..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <input id="dr-obs" type="text" placeholder="معوقات أو ملاحظات فنية / سلامة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <input id="dr-plan" type="text" placeholder="خطة العمل للغد..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">حفظ التقرير اليومي</button>
+          </form>
+
+          <div class="space-y-2">
+            ${this.dailyReports.map((r) => `
+              <div class="glass-card rounded-2xl p-3 space-y-1.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="font-black text-white">${app.esc(r.siteName)} — ${app.esc(r.date)}</div>
+                    <div class="text-[10px] text-slate-400">إعداد: ${app.esc(r.authorName)}</div>
+                  </div>
+                  <button onclick="DamanCompany.printDailyReportA4('${r.id}')" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10px] shrink-0"><i class="fa-solid fa-print me-1"></i> طباعة A4</button>
+                </div>
+                <p class="text-[11px] text-slate-300 line-clamp-2">${app.esc(r.workDone)}</p>
+              </div>`).join('')}
+          </div>
         </div>`;
     },
 
     renderLeavesTab(app) {
+      const isMgr = this.isManager();
       return `
-        <div class="space-y-3">
-          <form onsubmit="DamanCompany.submitLeave(event)" class="glass-card rounded-2xl p-3 space-y-2 text-xs">
-            <div class="grid grid-cols-2 gap-2">
-              <select id="lv-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 font-bold text-white"><option value="إجازة يوم">إجازة يوم</option><option value="إذن تأخير / انصراف">إذن تأخير / انصراف</option><option value="إجازة مرضي">إجازة مرضي</option></select>
-              <input id="lv-date" type="date" required value="${new Date().toISOString().slice(0, 10)}" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+        <div class="space-y-3 text-xs">
+          <form onsubmit="DamanCompany.submitLeaveRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
+            <h4 class="font-black text-amber-400">تقديم طلب إجازة</h4>
+            <div class="grid grid-cols-3 gap-2">
+              <select id="lv-type" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option></select>
+              <input id="lv-from" type="date" required value="${app.todayLocal()}" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <input id="lv-days" type="number" min="1" value="1" required placeholder="أيام" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
             </div>
-            <input id="lv-reason" type="text" required placeholder="السبب..." class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <button type="submit" class="w-full py-2 rounded-xl bg-sky-500 text-slate-950 font-black">تقديم طلب إجازة / إذن</button>
+            <input id="lv-reason" type="text" required placeholder="سبب الإجازة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <button type="submit" class="w-full py-2 rounded-xl bg-amber-500 text-slate-950 font-black">إرسال الطلب</button>
           </form>
+
           ${this.leaves.map((l) => `
-            <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-xs">
-              <div class="flex justify-between font-bold"><span class="text-white">${app.esc(l.memberName)} — ${app.esc(l.leaveType)}</span><span class="text-[10px] text-amber-300">${app.esc(l.status)}</span></div>
-              <div class="text-[10px] text-slate-400">${app.esc(l.leaveDate)} | ${app.esc(l.reason)}</div>
-              ${this.isOwnerView && l.status === 'pending' ? `
-                <div class="flex gap-1.5 pt-1">
-                  <button onclick="DamanCompany.handleLeaveDecision('${l.id}','${l.memberUid}','approved')" class="flex-1 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة</button>
-                  <button onclick="DamanCompany.handleLeaveDecision('${l.id}','${l.memberUid}','rejected')" class="flex-1 py-1 rounded-lg bg-rose-500 text-white font-black text-[10px]">رفض</button>
-                </div>` : ''}
+            <div class="glass-card rounded-2xl p-3 space-y-1">
+              <div class="flex justify-between"><b class="text-white">${app.esc(l.userName)} (${app.esc(l.leaveType)} — ${l.days} يوم)</b><span class="text-[10px] text-amber-300 font-bold">${app.esc(l.status)}</span></div>
+              <div class="text-[10.5px] text-slate-300">من ${app.esc(l.fromDate)} • ${app.esc(l.reason)}</div>
+              ${isMgr && l.status === 'pending' ? `<div class="flex gap-1.5 pt-1"><button onclick="DamanCompany.respondLeave('${l.id}','approved')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">موافقة</button><button onclick="DamanCompany.respondLeave('${l.id}','rejected')" class="flex-1 py-1.5 rounded-lg bg-rose-500 text-white font-black text-[10px]">رفض</button></div>` : ''}
             </div>`).join('')}
         </div>`;
     },
 
-    renderGroupChatTab(app) {
+    renderGroupTab(app) {
       return `
-        <div class="space-y-2.5">
-          <div class="glass-card rounded-2xl p-3 space-y-2 h-[300px] overflow-y-auto">
-            ${!this.groupMsgs.length ? '<div class="text-center text-xs text-slate-400 py-10">جروب الشركة الداخلي — ابدأ التواصل مع فريقك</div>' : this.groupMsgs.map((m) => `
-              <div class="flex ${m.senderId === app.user.uid ? 'justify-end' : 'justify-start'}">
-                <div class="max-w-[84%] rounded-2xl px-3 py-2 text-xs ${m.senderId === app.user.uid ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-slate-800 text-white'}">
-                  <div class="text-[9px] opacity-75 font-extrabold">${app.esc(m.senderName)}</div>
-                  <div>${app.esc(m.text)}</div>
-                </div>
-              </div>`).join('')}
+        <div class="space-y-2.5 text-xs">
+          <div class="glass-card rounded-2xl p-3 h-[300px] overflow-y-auto space-y-2">
+            ${!this.groupMsgs.length
+              ? `<div class="text-center text-slate-400 py-10">جروب الشركة الداخلي — ابدأ التنسيق مع فريقك</div>`
+              : this.groupMsgs.map((m) => `
+                <div class="p-2.5 rounded-xl ${m.isPlatformAdmin ? 'bg-purple-900/70 border border-amber-400 text-amber-100' : m.senderId === app.user?.uid ? 'bg-amber-500/20 border border-amber-500/40' : 'bg-slate-800 border border-slate-700'}">
+                  <div class="text-[10px] font-black ${m.isPlatformAdmin ? 'text-amber-300' : 'text-sky-300'}">${app.esc(m.senderName)} <span class="text-slate-500 font-normal">• ${app.esc(m.date || '')}</span></div>
+                  <div class="text-white mt-0.5 whitespace-pre-line">${app.esc(m.text)}</div>
+                </div>`).join('')}
           </div>
-          <form onsubmit="DamanCompany.sendGroupMsg(event)" class="flex gap-1.5">
-            <input id="comp-chat-inp" type="text" placeholder="رسالة لفريق الشركة..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white" />
-            <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 text-slate-950 font-black text-xs"><i class="fa-solid fa-paper-plane"></i></button>
+          <form onsubmit="DamanCompany.sendGroupMessage(event)" class="flex gap-2">
+            <input id="cg-input" type="text" required placeholder="اكتب تعليمات أو رسالة لفريق الشركة..." class="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+            <button type="submit" class="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black"><i class="fa-solid fa-paper-plane"></i></button>
           </form>
         </div>`;
     },
@@ -810,52 +1150,48 @@
     render(container, app) {
       this.ensureListeners(app);
       if (!app.user || !app.profile) {
-        container.innerHTML = `<div class="glass-card rounded-2xl p-6 text-center mt-6"><button onclick="DamanApp.openAuthModal('login')" class="px-6 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">${app.t('loginBtn')}</button></div>`;
+        container.innerHTML = `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">سجّل الدخول لإدارة الشركات</button></div>`;
         return;
       }
-
-      if (!this.activeCompanyUid) {
-        container.innerHTML = `
-          <div class="space-y-4 mt-4">
-            <div class="glass-card rounded-2xl p-5 text-center space-y-2">
-              <i class="fa-solid fa-building-user text-3xl text-sky-400"></i>
-              <h3 class="text-sm font-black text-white">انضم لفريق شركتك بكود الشركة (HR & Access)</h3>
-              <p class="text-[11px] text-slate-400">أدخل كود الشركة اللي أخدته من مديرك عشان تسجّل حضورك وانصرافك وتستلم قسيمة راتبك وتشتغل مع الفريق.</p>
-              <form onsubmit="DamanCompany.joinByCompanyCode(event)" class="space-y-2 pt-2 text-start">
-                <input id="join-comp-code" type="text" required placeholder="كود الشركة (مثال: CMP-4821)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-sky-500/40 text-xs text-white font-bold uppercase" />
-                <input id="join-comp-role" type="text" required placeholder="وظيفتك (مثال: مهندس موقع / مشرف)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white" />
-                <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black text-xs">إرسال طلب انضمام للشركة</button>
-              </form>
-            </div>
-          </div>`;
+      if (!app.profile.companyId || !this.company) {
+        container.innerHTML = this.renderOnboarding(app);
         return;
       }
 
       const tabs = [
-        { id: 'team', label: 'الفريق' },
-        { id: 'hr', label: 'HR والرواتب' },
-        { id: 'custody', label: 'العُهد' },
-        { id: 'leaves', label: 'الإجازات' },
-        { id: 'chat', label: 'جروب الشركة' }
+        ['attendance', 'الحضور GPS'],
+        ['team', `الفريق (${this.members.length})`],
+        ['payroll', 'الرواتب'],
+        ['custody', 'العهدة'],
+        ['reports', 'التقرير اليومي'],
+        ['leaves', 'الإجازات'],
+        ['group', 'الجروب']
       ];
-      const body =
-        this.subTab === 'hr' ? this.renderHrTab(app)
-        : this.subTab === 'custody' ? this.renderCustodyTab(app)
-        : this.subTab === 'leaves' ? this.renderLeavesTab(app)
-        : this.subTab === 'chat' ? this.renderGroupChatTab(app)
-        : this.renderTeamTab(app);
+
+      let body = '';
+      if (this.subTab === 'team') body = this.renderTeamTab(app);
+      else if (this.subTab === 'payroll') body = this.renderPayrollTab(app);
+      else if (this.subTab === 'custody') body = this.renderCustodyTab(app);
+      else if (this.subTab === 'reports') body = this.renderReportsTab(app);
+      else if (this.subTab === 'leaves') body = this.renderLeavesTab(app);
+      else if (this.subTab === 'group') body = this.renderGroupTab(app);
+      else body = this.renderAttendanceTab(app);
 
       container.innerHTML = `
-        <div class="space-y-3.5">
-          <div class="rounded-2xl p-3.5 bg-gradient-to-br from-sky-900/50 to-slate-950 border border-sky-500/40 flex items-center justify-between">
-            <div>
-              <div class="text-sm font-black text-white"><i class="fa-solid fa-building-shield text-sky-400 me-1"></i> ${app.esc(this.activeCompanyName)}</div>
-              <div class="text-[10px] text-sky-300">${this.isOwnerView ? 'وضع مدير الشركة / المورّد (تحكم كامل)' : 'وضع موظف / مهندس بالفريق'}</div>
+        <div class="space-y-3">
+          <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2 border-sky-500/40">
+            <div class="min-w-0">
+              <div class="text-xs font-black text-white truncate"><i class="fa-solid fa-building text-sky-400 me-1"></i>${app.esc(this.company.name)}</div>
+              <div class="text-[10px] text-amber-300 font-bold">كود الانضمام: <span class="select-all">${app.esc(this.company.code)}</span></div>
             </div>
+            <button onclick="navigator.clipboard.writeText('${app.esc(this.company.code)}'); DamanApp.toast('تم نسخ كود الشركة ✅','success')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 text-amber-300 text-[10px] font-black shrink-0">نسخ الكود</button>
           </div>
-          <div class="grid grid-cols-5 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-            ${tabs.map((t) => `<button onclick="DamanCompany.setSubTab('${t.id}')" class="py-1.5 rounded-lg text-[10px] font-extrabold ${this.subTab === t.id ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">${t.label}</button>`).join('')}
+
+          <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[10.5px] font-extrabold">
+            ${tabs.map(([k, lbl]) => `
+              <button onclick="DamanCompany.setSubTab('${k}')" class="shrink-0 px-3 py-2 rounded-xl ${this.subTab === k ? 'bg-sky-500 text-slate-950' : 'bg-slate-900 border border-slate-800 text-slate-300'}">${lbl}</button>`).join('')}
           </div>
+
           ${body}
         </div>`;
     }
