@@ -4,18 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>ضمان سايت | DamanSite — منصة المقاولات والتوريدات والضمان المالي</title>
-  <meta name="description" content="ضمان سايت — منصة المقاولات والتوريدات B2B، الضمان المالي للعقود، الاستلام الهندسي، وإدارة شركات المقاولات والموظفين." />
+  <meta name="description" content="ضمان سايت — منصة المقاولات والتوريدات B2B، الضمان المالي للعقود الرسمية، الاستلام الهندسي 3x، وإدارة شركات ومواقع المقاولات." />
   <meta name="theme-color" content="#020617" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="ضمان سايت" />
 
-  <link rel="manifest" href="manifest.json?v=22" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="manifest" href="manifest.json?v=24" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -39,7 +43,7 @@
     @media print {
       @page { size: A4 portrait; margin: 12mm; }
       html, body { background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
-      #app-shell, #daman-lightbox, #daman-toast-container, #daman-global-call-overlay, #daman-offline-banner, #daman-update-banner, .daman-modal, .no-print { display: none !important; }
+      #app-shell, #daman-lightbox, #daman-toast-container, #daman-global-call-overlay, #daman-incoming-call-bar, #daman-offline-banner, #daman-update-banner, #daman-announcement-bar, .daman-modal, .no-print { display: none !important; }
       #daman-print-area { display: block !important; width: 100% !important; background: #fff !important; color: #000 !important; font-family: 'Cairo', Tahoma, Arial, sans-serif !important; font-size: 11.5px !important; line-height: 1.55 !important; }
       #daman-print-area * { color: #000 !important; box-shadow: none !important; }
       #daman-print-area table { width: 100%; border-collapse: collapse; }
@@ -83,8 +87,8 @@
         <button onclick="DamanApp.switchTab('home')" class="flex items-center gap-2 text-start min-w-0">
           <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center font-black text-base shadow-lg shadow-amber-500/20 shrink-0"><i class="fa-solid fa-shield-halved"></i></div>
           <div class="min-w-0">
-            <div class="text-sm font-black text-white leading-tight truncate">ضمان سايت <span class="text-amber-400 text-[10px]">DamanSite</span></div>
-            <div class="text-[9.5px] text-slate-400 font-bold truncate" id="daman-header-sub">الضمان المالي والمقاولات B2B</div>
+            <div id="daman-header-brand" class="text-sm font-black text-white leading-tight truncate">ضمان سايت <span class="text-amber-400 text-[10px]">DamanSite</span></div>
+            <div id="daman-header-sub" class="text-[9.5px] text-slate-400 font-bold truncate">الضمان المالي والمقاولات B2B</div>
           </div>
         </button>
 
@@ -185,7 +189,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=22').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=24').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -216,11 +220,11 @@
     });
   </script>
 
-  <script src="app-core.js?v=22"></script>
-  <script src="wallet-kyc.js?v=22"></script>
-  <script src="chat-support.js?v=22"></script>
-  <script src="projects-escrow.js?v=22"></script>
-  <script src="company-panel.js?v=22"></script>
-  <script src="admin.js?v=22"></script>
+  <script src="app-core.js?v=24"></script>
+  <script src="wallet-kyc.js?v=24"></script>
+  <script src="chat-support.js?v=24"></script>
+  <script src="projects-escrow.js?v=24"></script>
+  <script src="company-panel.js?v=24"></script>
+  <script src="admin.js?v=24"></script>
 </body>
 </html>
