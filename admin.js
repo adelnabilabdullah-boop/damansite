@@ -1,21 +1,18 @@
 (function () {
   const AdminMod = {
-    subTab: 'treasury', // 'treasury' | 'payments' | 'wallet' | 'kyc' | 'contracts' | 'market' | 'ads' | 'companies' | 'users' | 'comms' | 'security' | 'settings'
+    subTab: 'treasury', // 'treasury' | 'payments' | 'wallet' | 'kyc' | 'contracts' | 'market' | 'ads' | 'companies' | 'users' | 'comms' | 'security' | 'db' | 'settings'
     loading: false,
     initialized: false,
     lastErrors: [],
 
-    // Filters & Search
     periodFilter: 'all', // 'all' | 'today' | '7d' | '30d'
     userSearch: '',
     omniQuery: '',
     omniResults: null,
     pageLimits: { kyc: 20, wallet: 25, users: 30, comms: 20 },
 
-    // Live Pending Counters (Action Center)
     counts: { kyc: 0, dep: 0, wd: 0, signed: 0, disputes: 0, posts: 0, reports: 0, tickets: 0 },
 
-    // Data Stores
     users: [],
     kycReqs: [],
     walletReqs: [],
@@ -37,7 +34,11 @@
     auditLogs: [],
     mediaStats: null,
 
-    // Temp upload buffers
+    // Live DB Explorer State
+    dbCol: 'users',
+    dbDocs: [],
+    dbFilter: '',
+
     tempPayoutReceipts: {},
 
     detachListeners() {
@@ -64,6 +65,7 @@
       this.callRecordings = [];
       this.tickets = [];
       this.auditLogs = [];
+      this.dbDocs = [];
       this.tempPayoutReceipts = {};
     },
 
@@ -74,12 +76,44 @@
       }
     },
 
+    statusAr(st) {
+      const map = {
+        pending: 'قيد المراجعة ⏳',
+        pending_review: 'قيد المراجعة ⏳',
+        pending_admin: 'بانتظار اعتماد الإدارة ⏳',
+        approved: 'معتمد ✅',
+        verified: 'موثّق ✅',
+        rejected: 'مرفوض ❌',
+        cancelled: 'ملغى ↩️',
+        draft: 'مسودة',
+        funded: 'محجوز 100% ✅',
+        paid: 'مدفوع ✅',
+        quoted: 'تم التسعير 💰',
+        settled: 'تمت التسوية 🏁',
+        refunded: 'تم رد الضمان ↩️',
+        completed: 'مكتمل 🏁',
+        disputed: 'قيد النزاع ⚖️',
+        open: 'مفتوح 🚨',
+        closed: 'مغلق ✅',
+        resolved: 'تم الفصل ⚖️',
+        active: 'نشط ✅',
+        banned: 'محظور 🚫',
+        suspended: 'موقوف 🚫',
+        none: 'غير موثّق'
+      };
+      return map[st] || st || '—';
+    },
+
+    channelAr(ch) {
+      return { vodafone_cash: 'محفظة إلكترونية', instapay: 'إنستا باي', bank: 'تحويل بنكي' }[ch] || ch || '—';
+    },
+
     setSubTab(t) {
       const app = window.DamanApp;
-      if (['treasury', 'payments', 'settings', 'security'].includes(t) && !app.isAdmin()) {
+      if (['treasury', 'payments', 'settings', 'security', 'db', 'ads'].includes(t) && !app.isAdmin()) {
         return app.toast('هذا القسم للأدمن الرئيسي فقط', 'error');
       }
-      if (!app.canMod(t) && !['ads'].includes(t)) {
+      if (!app.canMod(t) && !['ads', 'db'].includes(t)) {
         return app.toast('ليس لديك صلاحية لهذا القسم', 'error');
       }
       this.subTab = t;
@@ -136,7 +170,7 @@
     async loadTabData(tab) {
       const app = window.DamanApp;
       if (!app || !app.hasAdminAccess()) return;
-      if (!app.isAdmin() && ['treasury', 'payments', 'settings', 'security'].includes(tab)) {
+      if (!app.isAdmin() && ['treasury', 'payments', 'settings', 'security', 'db', 'ads'].includes(tab)) {
         tab = 'kyc';
         this.subTab = 'kyc';
       }
@@ -217,6 +251,8 @@
             receipts: mv.filter((x) => String(x.kind || '').includes('receipt')).length,
             kyc: mv.filter((x) => String(x.kind || '').startsWith('kyc_')).length
           };
+        } else if (tab === 'db') {
+          this.dbDocs = this.sortDesc(await this.safeDocs(db.collection(this.dbCol).limit(60).get(), this.dbCol));
         }
       } finally {
         this.loading = false;
@@ -224,7 +260,7 @@
       }
     },
 
-    // ==================== OMNI-SEARCH (CONTRACTS / TXREF / NID / PHONE / COMPANIES) ====================
+    // ==================== OMNI-SEARCH ====================
     async runOmniSearch(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -235,7 +271,7 @@
       const db = app.db;
       const qUp = q.toUpperCase();
       const qNorm = app.normalizeAr(q);
-      app.toast('جارٍ البحث الشامل في قواعد البيانات...', 'info');
+      app.toast('جارٍ البحث الشامل...', 'info');
 
       try {
         const [uSnap, wSnap, aSnap, cSnap] = await Promise.all([
@@ -259,7 +295,7 @@
       } catch (err) { app.toast(err.message, 'error'); }
     },
 
-    // ==================== 1. DOUBLE-ENTRY ACCOUNTING & TRIAL BALANCE ENGINE ====================
+    // ==================== 1. DOUBLE-ENTRY ACCOUNTING & TRIAL BALANCE ====================
     inPeriod(dateStr) {
       if (this.periodFilter === 'all' || !dateStr) return true;
       const today = window.DamanApp.todayLocal();
@@ -286,7 +322,6 @@
       });
       const totalUsersTrust = Math.round((usersAvail + usersEscrow + usersHoldW + usersFrozen) * 100) / 100;
 
-      // All-time Trial Balance (Must be All-Time to reconcile physical cash!)
       let grossCashProfitAll = 0, bonusUsedAll = 0;
       this.platformFees.forEach((f) => {
         grossCashProfitAll += f.cashPaid != null ? Number(f.cashPaid) : Number(f.amount || 0);
@@ -337,7 +372,6 @@
       const expectedTotalCash = Math.round((totalOpening + totalUsersTrust + netCashProfitAll) * 100) / 100;
       const trialDiff = Math.round((actualChannelsTotal - expectedTotalCash) * 100) / 100;
 
-      // Filtered Period KPIs
       const periodFees = this.platformFees.filter((f) => this.inPeriod(f.date))
         .reduce((s, f) => s + (f.cashPaid != null ? Number(f.cashPaid) : Number(f.amount || 0)), 0);
       const periodExp = this.adminExpenses.filter((x) => this.inPeriod(x.date))
@@ -458,7 +492,7 @@
       app.toast('تم تصدير دفتر الحسابات Excel/CSV ✅', 'success');
     },
 
-    // ==================== 2. PAYMENT SWITCHBOARD (3 DEPOSIT / 2 WITHDRAW + BACKUP POOLS) ====================
+    // ==================== 2. PAYMENT SWITCHBOARD ====================
     async savePaymentSwitchboard(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -523,7 +557,7 @@
       app.toast(`تم تفعيل الحساب النشط فوراً: ${val} ✅`, 'success');
     },
 
-    // ==================== 3. WALLET REQUESTS (ACTUAL RECEIVED AMOUNT + PAYOUT RECEIPT + TRANSFER COST) ====================
+    // ==================== 3. WALLET REQUESTS ====================
     async handlePayoutReceiptFile(input, reqId) {
       const f = input.files && input.files[0];
       if (!f) return;
@@ -583,7 +617,7 @@
                 tx.set(app.db.collection('transactions').doc(), {
                   userId: r.userId, type: 'deposit_approved', amount: actualAmount,
                   balanceBefore: curAvail, balanceAfter: afterAvail,
-                  note: `شحن محفظة معتمد (${r.channel} — مرجع ${r.txRef || ''})${actualAmount !== amt ? ' [تم التصحيح حسب المبلغ الواصل]' : ''}`,
+                  note: `شحن محفظة معتمد (${this.channelAr(r.channel)} — مرجع ${r.txRef || ''})${actualAmount !== amt ? ' [تم التصحيح حسب المبلغ الواصل]' : ''}`,
                   date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
               }
@@ -703,7 +737,82 @@
       this.loadTabData('kyc');
     },
 
-    // ==================== 5. CONTRACTS & DISPUTES (INCLUDING EMERGENCY FORCE CANCEL) ====================
+    // ==================== 5. CONTRACTS (FULL INSPECT / EDIT / PRINT / DISPUTE / FORCE CANCEL) ====================
+    openContractAdminModal(agId) {
+      const app = window.DamanApp;
+      const a = this.agreements.find((x) => x.id === agId);
+      if (!a) return;
+      let m = document.getElementById('daman-adm-ct-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-adm-ct-modal';
+        m.className = 'daman-modal fixed inset-0 z-[92] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400">📄 إدارة وتعديل العقد: ${app.esc(a.ticketNumber)}</h3>
+            <button onclick="document.getElementById('daman-adm-ct-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px]">
+            <div>صاحب العمل: <b class="text-white">${app.esc(a.payerLegalName || a.payerName)}</b> (قومي: ${app.esc(a.payerNationalId || '—')})</div>
+            <div>المنفّذ / المورّد: <b class="text-white">${app.esc(a.providerLegalName || a.providerName)}</b> (قومي: ${app.esc(a.providerNationalId || '—')})</div>
+            <div>القيمة: <b class="text-emerald-400">${app.fmtMoney(a.totalAmount)} ج.م</b> | المتبقي بالضمان: <b class="text-amber-300">${app.fmtMoney(a.remainingEscrow || 0)} ج.م</b> | العمولة المحجوزة: <b>${app.fmtMoney(a.lockedFee || 0)} ج.م</b></div>
+          </div>
+          <form onsubmit="DamanAdmin.saveContractAdminEdit(event,'${a.id}')" class="space-y-2">
+            <div><label class="block text-[10px] text-slate-400 mb-0.5">عنوان البند / المشروع</label><input id="act-title" type="text" required value="${app.esc(a.title || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-slate-400 mb-0.5">تاريخ البداية</label><input id="act-start" type="date" value="${app.esc(a.startDate || a.date || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="block text-[10px] text-slate-400 mb-0.5">تاريخ التسليم</label><input id="act-end" type="date" value="${app.esc(a.endDate || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            </div>
+            <div><label class="block text-[10px] text-slate-400 mb-0.5">موقع التنفيذ</label><input id="act-loc" type="text" value="${app.esc(a.location || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            <div><label class="block text-[10px] text-slate-400 mb-0.5">حالة اعتماد النسخة الموقّعة</label>
+              <select id="act-cstat" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                <option value="unsigned" ${a.contractStatus === 'unsigned' ? 'selected' : ''}>غير مرفوع بعد</option>
+                <option value="pending_admin" ${a.contractStatus === 'pending_admin' ? 'selected' : ''}>قيد مراجعة الإدارة</option>
+                <option value="approved" ${a.contractStatus === 'approved' ? 'selected' : ''}>معتمد ومفعّل ✅</option>
+                <option value="rejected" ${a.contractStatus === 'rejected' ? 'selected' : ''}>مرفوض ❌</option>
+              </select>
+            </div>
+            <div><label class="block text-[10px] text-slate-400 mb-0.5">المواصفات والشروط الفنية</label><textarea id="act-scope" rows="3" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(a.scopeDetails || '')}</textarea></div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ تعديلات العقد</button>
+          </form>
+          <div class="grid grid-cols-2 gap-1.5">
+            ${a.signedContractMedia ? `<button onclick="DamanApp.openMediaLightbox('${a.signedContractMedia}','صورة العقد الموقّع')" class="py-2 rounded-xl bg-slate-800 text-sky-300 font-bold text-[10.5px]">👁️ صورة العقد الموقّع</button>` : ''}
+            <button onclick="DamanAdmin.printAnyContractA4('${a.id}')" class="py-2 rounded-xl bg-white text-slate-950 font-black text-[10.5px]">🖨️ طباعة العقد A4</button>
+          </div>
+        </div>`;
+    },
+
+    async saveContractAdminEdit(e, agId) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      const patch = {
+        title: document.getElementById('act-title').value.trim(),
+        startDate: document.getElementById('act-start').value,
+        endDate: document.getElementById('act-end').value,
+        location: document.getElementById('act-loc').value.trim(),
+        contractStatus: document.getElementById('act-cstat').value,
+        scopeDetails: document.getElementById('act-scope').value.trim()
+      };
+      await app.db.collection('chatAgreements').doc(agId).update(patch);
+      await app.logAudit('admin_edit_contract', `تعديل العقد ${agId}: ${patch.title}`, agId);
+      document.getElementById('daman-adm-ct-modal').classList.add('hidden');
+      app.toast('تم حفظ تعديلات العقد ✅', 'success');
+      this.loadTabData('contracts');
+    },
+
+    printAnyContractA4(agId) {
+      const a = this.agreements.find((x) => x.id === agId);
+      if (!a || !window.DamanChat) return;
+      const prev = window.DamanChat.agreements;
+      window.DamanChat.agreements = [a];
+      window.DamanChat.printContractA4(agId);
+      setTimeout(() => { window.DamanChat.agreements = prev; }, 500);
+    },
+
     async reviewSignedContract(agId, approve) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -830,7 +939,58 @@
       } catch (e) { app.toast(e.message, 'error'); }
     },
 
-    // ==================== 6. MARKET, 3x INSPECTION (+ REPORT UPLOAD) & VIP LABOR ====================
+    // ==================== 6. MARKET (FULL EDIT + MODERATE), 3x INSPECTION & VIP LABOR ====================
+    openEditProjectAdminModal(pid) {
+      const app = window.DamanApp;
+      const p = this.projects.find((x) => x.id === pid);
+      if (!p) return;
+      let m = document.getElementById('daman-adm-proj-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-adm-proj-modal';
+        m.className = 'daman-modal fixed inset-0 z-[92] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-2.5 text-xs">
+          <div class="flex justify-between items-center"><h3 class="text-sm font-black text-amber-400">✏️ تعديل إعلان السوق</h3><button onclick="document.getElementById('daman-adm-proj-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          <form onsubmit="DamanAdmin.saveProjectAdminEdit(event,'${p.id}')" class="space-y-2">
+            <div><label class="block text-[10px] text-slate-400">العنوان</label><input id="ap-title" type="text" required value="${app.esc(p.title || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10px] text-slate-400">الميزانية / السعر (ج.م)</label><input id="ap-budget" type="number" step="any" value="${Number(p.budget || 0)}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-slate-400">المدينة</label><input id="ap-city" type="text" value="${app.esc(p.city || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            </div>
+            <div><label class="block text-[10px] text-slate-400">الحالة</label>
+              <select id="ap-status" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                <option value="approved" ${p.status === 'approved' ? 'selected' : ''}>منشور ✅</option>
+                <option value="pending_review" ${p.status === 'pending_review' ? 'selected' : ''}>قيد المراجعة ⏳</option>
+                <option value="rejected" ${p.status === 'rejected' ? 'selected' : ''}>مرفوض ❌</option>
+                <option value="closed" ${p.status === 'closed' ? 'selected' : ''}>مغلق 🔒</option>
+              </select>
+            </div>
+            <div><label class="block text-[10px] text-slate-400">التفاصيل</label><textarea id="ap-desc" rows="3" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(p.description || '')}</textarea></div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ تعديلات الإعلان</button>
+          </form>
+        </div>`;
+    },
+
+    async saveProjectAdminEdit(e, pid) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      await app.db.collection('projects').doc(pid).update({
+        title: document.getElementById('ap-title').value.trim(),
+        budget: parseFloat(document.getElementById('ap-budget').value) || 0,
+        city: document.getElementById('ap-city').value.trim(),
+        status: document.getElementById('ap-status').value,
+        description: document.getElementById('ap-desc').value.trim()
+      });
+      await app.logAudit('admin_edit_project', `تعديل الإعلان ${pid}`, pid);
+      document.getElementById('daman-adm-proj-modal').classList.add('hidden');
+      app.toast('تم حفظ تعديل الإعلان ✅', 'success');
+      this.loadTabData('market');
+    },
+
     async moderateProject(pid, status) {
       const app = window.DamanApp;
       const p = this.projects.find((x) => x.id === pid);
@@ -924,7 +1084,7 @@
       });
     },
 
-    // ==================== 7. ADS, ANNOUNCEMENT BAR & DYNAMIC BRANDING (EVERY WORD IN APP) ====================
+    // ==================== 7. ADS, ANNOUNCEMENT BAR & DYNAMIC BRANDING ====================
     async saveAnnouncementAndBranding(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -980,7 +1140,7 @@
       app.toast('تم حذف الإعلان', 'info');
     },
 
-    // ==================== 8. COMPANIES FULL CONTROL ====================
+    // ==================== 8. COMPANIES FULL 360° CONTROL ====================
     async toggleCompanyStatus(compId, curSt) {
       if (!window.DamanApp.isAdmin()) return;
       const next = curSt === 'suspended' ? 'active' : 'suspended';
@@ -1003,20 +1163,39 @@
       }
       m.classList.remove('hidden');
       m.innerHTML = `<div class="w-full max-w-md bg-slate-900 border border-purple-500/50 rounded-3xl p-5 text-center text-xs text-slate-300">جارٍ التحميل...</div>`;
-      const [memSnap, cusSnap] = await Promise.all([
+      const [memSnap, cusSnap, repSnap, opsSnap] = await Promise.all([
         app.db.collection('companyMembers').where('companyId', '==', compId).limit(100).get(),
-        app.db.collection('companyCustody').where('companyId', '==', compId).limit(40).get()
+        app.db.collection('companyCustody').where('companyId', '==', compId).limit(40).get(),
+        app.db.collection('companyDailyReports').where('companyId', '==', compId).limit(20).get(),
+        app.db.collection('companyOps').where('companyId', '==', compId).limit(40).get()
       ]);
       const mems = memSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
       const custs = cusSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      const reps = repSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      const ops = opsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
       m.innerHTML = `
-        <div class="w-full max-w-md bg-slate-900 border border-purple-500/50 rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
+        <div class="w-full max-w-md bg-slate-900 border border-purple-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between"><h3 class="text-sm font-black text-purple-300">👑 ${app.esc(comp.name)}</h3><button onclick="document.getElementById('daman-admin-comp-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">الكود: <b class="text-amber-300">${app.esc(comp.code)}</b> • المالك: <b>${app.esc(comp.ownerName || '—')}</b> • المواقع: <b>${(comp.sites || []).length}</b></div>
+
+          ${app.isAdmin() ? `
+            <form onsubmit="DamanAdmin.saveCompanyMetaEdit(event,'${compId}')" class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div class="font-bold text-amber-300">تعديل بيانات الشركة</div>
+              <input id="ac-name" type="text" required value="${app.esc(comp.name || '')}" placeholder="اسم الشركة" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
+              <div class="grid grid-cols-2 gap-1.5">
+                <input id="ac-cr" type="text" value="${app.esc(comp.commercialReg || '')}" placeholder="السجل التجاري" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
+                <input id="ac-tax" type="text" value="${app.esc(comp.taxCard || '')}" placeholder="البطاقة الضريبية" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
+              </div>
+              <button type="submit" class="w-full py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black">حفظ بيانات الشركة</button>
+            </form>` : ''}
+
+          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">الكود: <b class="text-amber-300">${app.esc(comp.code)}</b> • المالك: <b>${app.esc(comp.ownerName || '—')}</b> • المواقع: <b>${(comp.sites || []).length}</b> • العمليات: <b>${ops.length}</b> • التقارير: <b>${reps.length}</b></div>
+
           <form onsubmit="DamanAdmin.sendAdminCompanyMsg(event,'${compId}')" class="flex gap-1.5">
             <input id="adm-comp-msg" type="text" required placeholder="إرسال تنبيه رسمي لجروب الشركة..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white" />
             <button type="submit" class="px-3 py-2 rounded-xl bg-purple-500 text-white font-black">إرسال</button>
           </form>
+
           <div class="font-black text-amber-400">أعضاء الشركة (${mems.length})</div>
           ${mems.map((mem) => `
             <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
@@ -1026,9 +1205,24 @@
                 <button onclick="DamanAdmin.adminToggleCompMember('${mem.id}','${compId}','${mem.status || 'active'}')" class="px-3 py-1 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">${mem.status === 'suspended' ? 'تفعيل' : 'إيقاف'}</button>
               </div>
             </div>`).join('')}
-          <div class="font-black text-sky-400">آخر حركات العهدة (${custs.length})</div>
-          ${custs.slice(0, 8).map((c) => `<div class="p-2 rounded-xl bg-slate-950 border border-slate-800 flex justify-between text-[10.5px]"><span>${app.esc(c.holderName)}: ${app.esc(c.note)}</span><b class="text-amber-300">${app.fmtMoney(c.amount)} ج.م</b></div>`).join('') || '<div class="text-slate-500">لا توجد عهدة</div>'}
+
+          <div class="font-black text-sky-400">آخر حركات العهدة (${custs.length}) والتقارير (${reps.length})</div>
+          ${custs.slice(0, 6).map((c) => `<div class="p-2 rounded-xl bg-slate-950 border border-slate-800 flex justify-between text-[10.5px]"><span>🧾 ${app.esc(c.holderName)}: ${app.esc(c.note)}</span><b class="text-amber-300">${app.fmtMoney(c.amount)} ج.م</b></div>`).join('')}
+          ${reps.slice(0, 5).map((r) => `<div class="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10.5px]"><b class="text-sky-300">📝 ${app.esc(r.siteName)} (${app.esc(r.date)})</b>: ${app.esc((r.workDone || '').slice(0, 80))}</div>`).join('')}
         </div>`;
+    },
+
+    async saveCompanyMetaEdit(e, compId) {
+      e.preventDefault();
+      await window.DamanApp.db.collection('companies').doc(compId).update({
+        name: document.getElementById('ac-name').value.trim(),
+        commercialReg: document.getElementById('ac-cr').value.trim(),
+        taxCard: document.getElementById('ac-tax').value.trim()
+      });
+      await window.DamanApp.logAudit('admin_edit_company', `تعديل بيانات الشركة ${compId}`, compId);
+      window.DamanApp.toast('تم حفظ بيانات الشركة ✅', 'success');
+      this.loadTabData('companies');
+      this.openCompanyControlModal(compId);
     },
 
     async sendAdminCompanyMsg(e, compId) {
@@ -1057,7 +1251,7 @@
       this.openCompanyControlModal(compId);
     },
 
-    // ==================== 9. USER 360° GOD-MODE DOSSIER + DOUBLE-ENTRY MANUAL BALANCE + BROADCAST ====================
+    // ==================== 9. USER 360° FULL CONTROL (VIEW KYC PHOTOS + EDIT EVERY FIELD + MANUAL BALANCE) ====================
     async openUser360Modal(uid) {
       const app = window.DamanApp;
       let m = document.getElementById('daman-user360-modal');
@@ -1071,15 +1265,19 @@
       m.innerHTML = `<div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-6 text-center text-xs text-amber-300">جارٍ تحميل الملف الشامل 360°...</div>`;
 
       try {
-        const [uDoc, txSnap, agSnap] = await Promise.all([
+        const [uDoc, kycDoc, txSnap, agSnap, wrSnap] = await Promise.all([
           app.db.collection('users').doc(uid).get(),
+          app.db.collection('kycRequests').doc(uid).get().catch(() => null),
           app.db.collection('transactions').where('userId', '==', uid).limit(20).get(),
-          app.db.collection('chatAgreements').where('participants', 'array-contains', uid).limit(15).get()
+          app.db.collection('chatAgreements').where('participants', 'array-contains', uid).limit(15).get(),
+          app.db.collection('walletRequests').where('userId', '==', uid).limit(15).get()
         ]);
         if (!uDoc.exists) return m.classList.add('hidden');
         const u = Object.assign({ id: uDoc.id }, uDoc.data());
+        const kyc = kycDoc && kycDoc.exists ? kycDoc.data() : null;
         const txs = this.sortDesc(txSnap.docs.map((d) => d.data()));
         const ags = this.sortDesc(agSnap.docs.map((d) => d.data()));
+        const wrs = this.sortDesc(wrSnap.docs.map((d) => d.data()));
 
         m.innerHTML = `
           <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
@@ -1088,12 +1286,7 @@
               <button onclick="document.getElementById('daman-user360-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
             </div>
 
-            <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] space-y-0.5">
-              <div>الرباعي: <b class="text-white">${app.esc(u.legalName || '—')}</b> | القومي: <b class="text-emerald-400">${app.esc(u.nationalId || '—')}</b></div>
-              <div>الميلاد: <b>${app.esc(u.birthDate || '—')}</b> | الموبايل: <b>${app.esc(u.phone || '—')}</b></div>
-              <div>الإيميل: <b>${app.esc(u.email || '—')}</b> | الحالة: <b class="text-amber-300">${app.esc(u.kycStatus)} / ${app.esc(u.status)}</b></div>
-            </div>
-
+            <!-- 4 Balances -->
             <div class="grid grid-cols-4 gap-1.5 text-center text-[10px]">
               <div class="p-1.5 rounded-xl bg-slate-950 border border-emerald-500/40"><div class="text-slate-400">كاش</div><b class="text-emerald-400">${app.fmtMoney(u.balanceAvailable || 0)}</b></div>
               <div class="p-1.5 rounded-xl bg-slate-950 border border-amber-500/40"><div class="text-slate-400">ضمان</div><b class="text-amber-400">${app.fmtMoney(u.balanceEscrow || 0)}</b></div>
@@ -1101,22 +1294,68 @@
               <div class="p-1.5 rounded-xl bg-slate-950 border border-rose-500/40"><div class="text-slate-400">مجمّد</div><b class="text-rose-400">${app.fmtMoney(u.balanceFrozen || 0)}</b></div>
             </div>
 
+            <!-- KYC Documents Viewer -->
+            ${kyc ? `
+              <div class="p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-1.5">
+                <div class="font-black text-amber-300">🪪 مستندات التوثيق المرفوعة:</div>
+                <div class="flex flex-wrap gap-1.5">
+                  ${kyc.idFrontMedia ? `<button onclick="DamanApp.openMediaLightbox('${kyc.idFrontMedia}','وش البطاقة')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[10px]">وش البطاقة</button>` : ''}
+                  ${kyc.idBackMedia ? `<button onclick="DamanApp.openMediaLightbox('${kyc.idBackMedia}','ضهر البطاقة')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[10px]">ضهر البطاقة</button>` : ''}
+                  ${kyc.selfieMedia ? `<button onclick="DamanApp.openMediaLightbox('${kyc.selfieMedia}','سيلفي')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-[10px]">سيلفي</button>` : ''}
+                  ${kyc.crMedia ? `<button onclick="DamanApp.openMediaLightbox('${kyc.crMedia}','السجل التجاري')" class="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 font-bold text-[10px]">سجل تجاري</button>` : ''}
+                  ${kyc.taxMedia ? `<button onclick="DamanApp.openMediaLightbox('${kyc.taxMedia}','البطاقة الضريبية')" class="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 font-bold text-[10px]">بطاقة ضريبية</button>` : ''}
+                </div>
+              </div>` : ''}
+
             ${app.isAdmin() ? `
+              <!-- FULL EDIT USER PROFILE & LEGAL DATA -->
+              <form onsubmit="DamanAdmin.saveUserFullProfileEdit(event,'${uid}')" class="p-3 rounded-2xl bg-slate-950 border border-sky-500/40 space-y-2">
+                <div class="font-black text-sky-400">✏️ تعديل كل بيانات المستخدم والبيانات القانونية</div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <div><label class="text-[9.5px] text-slate-400">اسم العرض</label><input id="ue-name" type="text" value="${app.esc(u.name || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">رقم الموبايل</label><input id="ue-phone" type="text" value="${app.esc(u.phone || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">الاسم الرباعي (للعقود)</label><input id="ue-legal" type="text" value="${app.esc(u.legalName || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">الرقم القومي (14 رقم)</label><input id="ue-nid" type="text" maxlength="14" value="${app.esc(u.nationalId || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-bold" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">تاريخ الميلاد</label><input id="ue-bday" type="date" value="${app.esc(u.birthDate || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">حالة التوثيق</label>
+                    <select id="ue-kyc" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-emerald-500/40 text-emerald-300 font-bold">
+                      <option value="verified" ${u.kycStatus === 'verified' ? 'selected' : ''}>موثّق ✅</option>
+                      <option value="pending" ${u.kycStatus === 'pending' ? 'selected' : ''}>قيد المراجعة</option>
+                      <option value="rejected" ${u.kycStatus === 'rejected' ? 'selected' : ''}>مرفوض</option>
+                      <option value="none" ${!u.kycStatus || u.kycStatus === 'none' ? 'selected' : ''}>غير موثّق</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <div><label class="text-[9.5px] text-slate-400">نوع الحساب</label>
+                    <select id="ue-type" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold">
+                      <option value="individual" ${u.accountType === 'individual' ? 'selected' : ''}>فرد / مقاول</option>
+                      <option value="company" ${u.accountType === 'company' ? 'selected' : ''}>شركة مقاولات</option>
+                      <option value="supplier" ${u.accountType === 'supplier' ? 'selected' : ''}>مورّد B2B</option>
+                    </select>
+                  </div>
+                  <div><label class="text-[9.5px] text-slate-400">العنوان بالبطاقة</label><input id="ue-addr" type="text" value="${app.esc(u.legalAddress || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                </div>
+                <button type="submit" class="w-full py-2 rounded-xl bg-sky-500 text-slate-950 font-black">حفظ تعديلات بيانات المستخدم</button>
+              </form>
+
               <!-- Double-Entry Manual Balance Adjustment -->
               <form onsubmit="DamanAdmin.applyManualBalance(event,'${uid}')" class="p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2">
                 <div class="font-black text-emerald-400">💰 تعديل / تجميد رصيد يدوي (بقيد محاسبي مزدوج)</div>
                 <div class="grid grid-cols-2 gap-1.5">
-                  <select id="mb-mode" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold text-[10.5px]">
-                    <option value="bonus_add">+ إضافة رصيد هدايا (غير نقدي)</option>
-                    <option value="cash_gift">+ إضافة كاش (من أرباح الإدارة)</option>
-                    <option value="cash_vf">+ إيداع كاش يدوي (محفظة كاش)</option>
-                    <option value="cash_ip">+ إيداع كاش يدوي (إنستا باي)</option>
-                    <option value="cash_bk">+ إيداع كاش يدوي (البنك)</option>
-                    <option value="cash_deduct">- خصم من الكاش (لخزنة الأرباح)</option>
-                    <option value="freeze">🔒 تجميد مبلغ من المتاح</option>
-                    <option value="unfreeze">🔓 فك تجميد وإرجاع للمتاح</option>
-                  </select>
-                  <input id="mb-amt" type="number" min="1" step="any" required placeholder="المبلغ (ج.م)" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-emerald-500/40 text-white font-black" />
+                  <div><label class="text-[9.5px] text-slate-400">نوع العملية</label>
+                    <select id="mb-mode" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold text-[10.5px]">
+                      <option value="bonus_add">+ إضافة رصيد هدايا (غير نقدي)</option>
+                      <option value="cash_gift">+ إضافة كاش (من أرباح الإدارة)</option>
+                      <option value="cash_vf">+ إيداع كاش يدوي (محفظة كاش)</option>
+                      <option value="cash_ip">+ إيداع كاش يدوي (إنستا باي)</option>
+                      <option value="cash_bk">+ إيداع كاش يدوي (البنك)</option>
+                      <option value="cash_deduct">- خصم من الكاش (لخزنة الأرباح)</option>
+                      <option value="freeze">🔒 تجميد مبلغ من المتاح</option>
+                      <option value="unfreeze">🔓 فك تجميد وإرجاع للمتاح</option>
+                    </select>
+                  </div>
+                  <div><label class="text-[9.5px] text-slate-400">المبلغ (ج.م)</label><input id="mb-amt" type="number" min="1" step="any" required placeholder="0" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-emerald-500/40 text-white font-black" /></div>
                 </div>
                 <input id="mb-note" type="text" required placeholder="السبب (يظهر بكشف الحساب وسجل الرقابة)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
                 <button type="submit" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">تنفيذ القيد المالي</button>
@@ -1139,13 +1378,35 @@
               <button onclick="DamanAdmin.toggleBanUser('${uid}')" class="py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">${u.status === 'banned' ? 'فك الحظر' : 'حظر'}</button>
             </div>
 
-            <div class="font-bold text-slate-300">آخر العقود (${ags.length}) والحركات (${txs.length})</div>
-            <div class="space-y-1 max-h-36 overflow-y-auto">
-              ${ags.map((a) => `<div class="p-1.5 rounded bg-slate-950 text-[10px] flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)} (${a.status})</b></div>`).join('')}
+            <div class="font-bold text-slate-300">عقوده (${ags.length}) | طلباته (${wrs.length}) | حركاته (${txs.length})</div>
+            <div class="space-y-1 max-h-40 overflow-y-auto">
+              ${ags.map((a) => `<div class="p-1.5 rounded bg-slate-950 text-[10px] flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)} (${this.statusAr(a.status)})</b></div>`).join('')}
+              ${wrs.map((w) => `<div class="p-1.5 rounded bg-slate-950 text-[10px] flex justify-between"><span>${w.type === 'deposit' ? '⬇️ شحن' : '⬆️ سحب'} ${app.esc(w.date)}</span><b class="text-sky-300">${app.fmtMoney(w.actualAmount || w.amount)} (${this.statusAr(w.status)})</b></div>`).join('')}
               ${txs.slice(0, 10).map((t) => `<div class="p-1.5 rounded bg-slate-950 text-[10px] flex justify-between"><span>${app.esc(t.date)} ${app.esc(t.note || t.type)}</span><b class="${Number(t.amount || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${app.fmtMoney(t.amount)}</b></div>`).join('')}
             </div>
           </div>`;
       } catch (e) { app.toast(e.message, 'error'); }
+    },
+
+    async saveUserFullProfileEdit(e, uid) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      if (!app.isAdmin()) return;
+      const patch = {
+        name: document.getElementById('ue-name').value.trim(),
+        phone: app.normalizePhone(document.getElementById('ue-phone').value),
+        legalName: document.getElementById('ue-legal').value.trim(),
+        nationalId: document.getElementById('ue-nid').value.replace(/\D/g, ''),
+        birthDate: document.getElementById('ue-bday').value,
+        kycStatus: document.getElementById('ue-kyc').value,
+        accountType: document.getElementById('ue-type').value,
+        legalAddress: document.getElementById('ue-addr').value.trim()
+      };
+      await app.db.collection('users').doc(uid).update(patch);
+      await app.logAudit('admin_edit_user', `تعديل بيانات المستخدم ${patch.name} (توثيق=${patch.kycStatus})`, uid);
+      app.toast('تم حفظ تعديلات بيانات المستخدم ✅', 'success');
+      this.openUser360Modal(uid);
+      if (this.subTab === 'users') this.loadTabData('users');
     },
 
     async applyManualBalance(e, uid) {
@@ -1187,7 +1448,7 @@
               const afterA = Math.round((curAvail + amt) * 100) / 100;
               tx.update(uRef, { balanceAvailable: afterA });
               tx.set(app.db.collection('walletRequests').doc(), { type: 'deposit', userId: uid, userName: u.name || '', channel: ch, amount: amt, actualAmount: amt, txRef: 'MANUAL-' + Date.now(), adminNote: note, status: 'approved', date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-              tx.set(app.db.collection('transactions').doc(), { userId: uid, type: 'deposit_approved', amount: amt, balanceBefore: curAvail, balanceAfter: afterA, note: `شحن يدوي معتمد (${ch}): ${note}`, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+              tx.set(app.db.collection('transactions').doc(), { userId: uid, type: 'deposit_approved', amount: amt, balanceBefore: curAvail, balanceAfter: afterA, note: `شحن يدوي معتمد (${this.channelAr(ch)}): ${note}`, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
             }
           } else if (mode === 'freeze') {
             if (curAvail < amt) throw new Error('الرصيد المتاح لا يكفي للتجميد');
@@ -1251,7 +1512,7 @@
       e.preventDefault();
       const app = window.DamanApp;
       if (!app.isAdmin()) return;
-      const segment = document.getElementById('bc-seg').value; // 'all' | 'company' | 'supplier' | 'individual'
+      const segment = document.getElementById('bc-seg').value;
       const title = document.getElementById('bc-title').value.trim();
       const body = document.getElementById('bc-body').value.trim();
       if (!title || !body) return;
@@ -1343,12 +1604,23 @@
       this.loadTabData('users');
     },
 
+    async togglePromoCode(code, curActive) {
+      await window.DamanApp.db.collection('promoCodes').doc(code).update({ active: !curActive });
+      this.loadTabData('users');
+    },
+
+    async deletePromoCode(code) {
+      if (!window.confirm(`حذف كود الهدية ${code}؟`)) return;
+      await window.DamanApp.db.collection('promoCodes').doc(code).delete();
+      this.loadTabData('users');
+    },
+
     async resolveReport(id, st) {
       await window.DamanApp.db.collection('reports').doc(id).update({ status: st });
       this.loadTabData('users');
     },
 
-    // ==================== 10. COMMS, RBAC MODERATORS, MEDIA CLEANER & KILL-SWITCHES ====================
+    // ==================== 10. COMMS, RBAC, LIVE DB INSPECTOR & KILL-SWITCHES ====================
     async toggleFreezeChat(chatId, curFrozen) {
       await window.DamanApp.db.collection('chats').doc(chatId).update({ frozen: !curFrozen });
       this.loadTabData('comms');
@@ -1388,6 +1660,70 @@
       await window.DamanApp.db.collection('supportTickets').doc(tid).update({ adminReply: reply.trim(), status: 'closed' });
       await window.DamanApp.sendNotification(userId, 'تم الرد على تذكرة الدعم', reply.trim());
       this.loadTabData('comms');
+    },
+
+    // Live DB Inspector (View & Edit ANY Firestore Document Safely — Main Admin Only)
+    selectDbCollection(col) {
+      this.dbCol = col;
+      this.loadTabData('db');
+    },
+
+    openDbDocEditor(docId) {
+      const app = window.DamanApp;
+      if (!app.isAdmin()) return;
+      const doc = this.dbDocs.find((d) => d.id === docId);
+      if (!doc) return;
+      const clean = {};
+      Object.keys(doc).forEach((k) => {
+        if (k === 'id') return;
+        const v = doc[k];
+        if (v && typeof v === 'object' && typeof v.seconds === 'number') return; // skip Firestore Timestamp objects in JSON edit
+        clean[k] = v;
+      });
+      let m = document.getElementById('daman-db-ed-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-db-ed-modal';
+        m.className = 'daman-modal fixed inset-0 z-[94] bg-black/92 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-2.5 text-xs">
+          <div class="flex justify-between items-center"><h3 class="text-sm font-black text-amber-400">🗄️ تعديل سجل: ${app.esc(this.dbCol)} / ${app.esc(docId)}</h3><button onclick="document.getElementById('daman-db-ed-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          <textarea id="db-json-area" rows="13" dir="ltr" class="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-[11px]">${app.esc(JSON.stringify(clean, null, 2))}</textarea>
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="DamanAdmin.saveDbDocJson('${app.esc(docId)}')" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">حفظ التعديلات</button>
+            <button onclick="DamanAdmin.deleteDbDoc('${app.esc(docId)}')" class="py-2.5 rounded-xl bg-rose-600 text-white font-black">حذف السجل نهائياً</button>
+          </div>
+        </div>`;
+    },
+
+    async saveDbDocJson(docId) {
+      const app = window.DamanApp;
+      if (!app.isAdmin()) return;
+      try {
+        const parsed = JSON.parse(document.getElementById('db-json-area').value);
+        await app.db.collection(this.dbCol).doc(docId).set(parsed, { merge: true });
+        await app.logAudit('db_direct_edit', `تعديل مباشر في ${this.dbCol}/${docId}`, docId);
+        document.getElementById('daman-db-ed-modal').classList.add('hidden');
+        app.toast('تم حفظ التعديل المباشر في قاعدة البيانات ✅', 'success');
+        this.loadTabData('db');
+      } catch (err) {
+        app.toast('صيغة JSON غير صحيحة: ' + err.message, 'error');
+      }
+    },
+
+    async deleteDbDoc(docId) {
+      const app = window.DamanApp;
+      if (!app.isAdmin()) return;
+      if (this.dbCol === 'settings' || this.dbCol === 'auditLogs') return app.toast('ممنوع حذف الإعدادات أو سجل الرقابة', 'error');
+      if (!window.confirm(`تأكيد حذف السجل ${this.dbCol}/${docId} نهائياً؟`)) return;
+      await app.db.collection(this.dbCol).doc(docId).delete();
+      await app.logAudit('db_direct_delete', `حذف مباشر ${this.dbCol}/${docId}`, docId);
+      document.getElementById('daman-db-ed-modal').classList.add('hidden');
+      app.toast('تم حذف السجل', 'info');
+      this.loadTabData('db');
     },
 
     async saveModeratorRBAC(e) {
@@ -1489,7 +1825,6 @@
 
       return `
         <div class="space-y-3 text-xs">
-          <!-- Trial Balance Status Banner -->
           <div class="p-3 rounded-2xl border-2 ${balanced ? 'bg-emerald-500/15 border-emerald-500' : 'bg-rose-500/20 border-rose-500'} space-y-1">
             <div class="flex items-center justify-between gap-2">
               <span class="font-black ${balanced ? 'text-emerald-300' : 'text-rose-300'}">
@@ -1505,7 +1840,6 @@
             </div>
           </div>
 
-          <!-- Separated Vaults -->
           <div class="grid grid-cols-2 gap-2.5">
             <div class="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500 space-y-1">
               <div class="text-[10px] text-emerald-300 font-black">💰 خزنة أرباحك الصافية (كاش)</div>
@@ -1522,7 +1856,6 @@
             🎁 إجمالي رصيد الهدايا عند المستخدمين (غير قابل للسحب ولا يؤثر على الكاش): <b>${app.fmtMoney(s.usersBonus)} ج.م</b>
           </div>
 
-          <!-- Period Filter KPIs -->
           <div class="glass-card rounded-2xl p-3 space-y-2">
             <div class="flex items-center justify-between">
               <span class="font-black text-amber-400">📊 ملخص الحركة حسب الفترة</span>
@@ -1538,9 +1871,8 @@
             </div>
           </div>
 
-          <!-- 3-Channel Reconciliation + Today's Inflow Limit Monitor -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/40">
-            <div class="font-black text-sky-400">⚖️ الجرد الفعلي لقنوات الدفع الثلاث + وارد اليوم (لمتابعة السقف اليومي)</div>
+            <div class="font-black text-sky-400">⚖️ الجرد الفعلي لقنوات الدفع الثلاث + وارد اليوم</div>
             <div class="grid grid-cols-3 gap-2 text-center">
               ${[['vodafone_cash', 'محافظ كاش'], ['instapay', 'إنستا باي'], ['bank', 'البنك']].map(([k, lbl]) => {
                 const c = s.channels[k];
@@ -1555,26 +1887,24 @@
             </div>
           </div>
 
-          <!-- Internal Treasury Transfer Between Channels -->
           <form onsubmit="DamanAdmin.recordTreasuryTransfer(event)" class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/30">
             <div class="font-black text-sky-300">🔁 تحويل داخلي بين قنواتك (مثلاً من فودافون كاش للبنك)</div>
             <div class="grid grid-cols-2 gap-2">
-              <select id="tt-from" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="vodafone_cash">من: محافظ كاش</option><option value="instapay">من: إنستا باي</option><option value="bank">من: البنك</option></select>
-              <select id="tt-to" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="bank">إلى: البنك</option><option value="instapay">إلى: إنستا باي</option><option value="vodafone_cash">إلى: محافظ كاش</option></select>
-              <input id="tt-amt" type="number" min="1" step="any" required placeholder="المبلغ المحوّل (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-black" />
-              <input id="tt-fee" type="number" min="0" step="any" value="0" placeholder="رسوم التحويل (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <div><label class="text-[9.5px] text-slate-400">من قناة</label><select id="tt-from" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="vodafone_cash">محافظ كاش</option><option value="instapay">إنستا باي</option><option value="bank">البنك</option></select></div>
+              <div><label class="text-[9.5px] text-slate-400">إلى قناة</label><select id="tt-to" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="bank">البنك</option><option value="instapay">إنستا باي</option><option value="vodafone_cash">محافظ كاش</option></select></div>
+              <div><label class="text-[9.5px] text-slate-400">المبلغ المحوّل (ج.م)</label><input id="tt-amt" type="number" min="1" step="any" required placeholder="0" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-black" /></div>
+              <div><label class="text-[9.5px] text-slate-400">رسوم التحويل (ج.م)</label><input id="tt-fee" type="number" min="0" step="any" value="0" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
             <input id="tt-note" type="text" placeholder="ملاحظة التحويل..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             <button type="submit" class="w-full py-2 rounded-xl bg-sky-500 text-slate-950 font-black">تسجيل التحويل الداخلي</button>
           </form>
 
-          <!-- Record Admin Profit Withdrawal / Expense -->
           <form onsubmit="DamanAdmin.recordAdminExpense(event)" class="glass-card rounded-2xl p-3.5 space-y-2 border-purple-500/40">
             <div class="font-black text-purple-300">💸 سحب أرباح / تسجيل مصروف تشغيل من قناة محددة</div>
             <div class="grid grid-cols-3 gap-1.5">
-              <input id="ae-amt" type="number" min="1" step="any" required placeholder="المبلغ ج.م" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white font-black" />
-              <select id="ae-ch" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-amber-300 font-bold"><option value="vodafone_cash">من: محافظ كاش</option><option value="instapay">من: إنستا باي</option><option value="bank">من: البنك</option></select>
-              <select id="ae-cat" class="px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="profit_withdraw">سحب أرباح</option><option value="marketing">إعلانات</option><option value="operations">تشغيل</option></select>
+              <div><label class="text-[9.5px] text-slate-400">المبلغ (ج.م)</label><input id="ae-amt" type="number" min="1" step="any" required placeholder="0" class="w-full px-2 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white font-black" /></div>
+              <div><label class="text-[9.5px] text-slate-400">من قناة</label><select id="ae-ch" class="w-full px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-amber-300 font-bold"><option value="vodafone_cash">محافظ كاش</option><option value="instapay">إنستا باي</option><option value="bank">البنك</option></select></div>
+              <div><label class="text-[9.5px] text-slate-400">التصنيف</label><select id="ae-cat" class="w-full px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="profit_withdraw">سحب أرباح</option><option value="marketing">إعلانات</option><option value="operations">تشغيل</option></select></div>
             </div>
             <input id="ae-note" type="text" required placeholder="البيان..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             <button type="submit" class="w-full py-2 rounded-xl bg-purple-500 text-white font-black">تسجيل الخصم من الأرباح والقناة</button>
@@ -1593,7 +1923,6 @@
 
       return `
         <form onsubmit="DamanAdmin.savePaymentSwitchboard(event)" class="space-y-3 text-xs">
-          <!-- Instant Enable/Disable Toggles -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-emerald-500/40">
             <div class="font-black text-emerald-400">🔌 تشغيل / إيقاف وسائل الإيداع (3) والسحب (2)</div>
             <div class="grid grid-cols-3 gap-1.5 text-[10.5px] font-bold">
@@ -1606,7 +1935,6 @@
             </div>
           </div>
 
-          <!-- Active Accounts + 1-Click Backup Rotator -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2.5 border-amber-500/40">
             <div class="font-black text-amber-400">📱 الحسابات النشطة حالياً (تظهر بمهلة العدّاد)</div>
             <div class="grid grid-cols-2 gap-2">
@@ -1618,27 +1946,24 @@
             <div><label class="block text-[10px] text-slate-400 mb-1">بيانات الحساب البنكي النشط</label><textarea id="sw-bk-info" rows="2" class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-sky-500/40 text-white">${app.esc(acc.bankInfo || '')}</textarea></div>
             <div><label class="block text-[10px] text-slate-400 mb-1">رقم IBAN (اختياري)</label><input id="sw-bk-iban" type="text" value="${app.esc(acc.bankIban || '')}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
 
-            <!-- 1-Click Backup Switch Buttons -->
             ${(bkup.vodafoneCash || []).length ? `<div class="space-y-1"><div class="text-[10px] text-amber-300 font-bold">تبديل سريع لأرقام المحافظ الاحتياطية:</div><div class="flex flex-wrap gap-1">${bkup.vodafoneCash.map((v) => `<button type="button" onclick="DamanAdmin.quickActivateBackup('vodafoneCash','${app.esc(v).replace(/'/g, "\\'")}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-[10px] font-bold">${app.esc(v)}</button>`).join('')}</div></div>` : ''}
             ${(bkup.instaPay || []).length ? `<div class="space-y-1"><div class="text-[10px] text-purple-300 font-bold">تبديل سريع لعناوين إنستا باي الاحتياطية:</div><div class="flex flex-wrap gap-1">${bkup.instaPay.map((v) => `<button type="button" onclick="DamanAdmin.quickActivateBackup('instaPay','${app.esc(v).replace(/'/g, "\\'")}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-purple-500 text-[10px] font-bold">${app.esc(v)}</button>`).join('')}</div></div>` : ''}
           </div>
 
-          <!-- Backup Pools Editor -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2">
-            <div class="font-black text-sky-400">🔄 قوائم الحسابات الاحتياطية (اكتب كل رقم في سطر)</div>
-            <textarea id="sw-bkup-vf" rows="2" placeholder="أرقام فودافون/كاش احتياطية (كل رقم بسطر)" class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.vodafoneCash || []).join('\n'))}</textarea>
-            <textarea id="sw-bkup-ip" rows="2" placeholder="عناوين إنستا باي احتياطية (كل عنوان بسطر)" class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.instaPay || []).join('\n'))}</textarea>
-            <textarea id="sw-bkup-bk" rows="2" placeholder="حسابات بنكية احتياطية (كل حساب بسطر)" class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.bank || []).join('\n'))}</textarea>
+            <div class="font-black text-sky-400">🔄 قوائم الحسابات الاحتياطية (كل رقم/حساب في سطر)</div>
+            <textarea id="sw-bkup-vf" rows="2" placeholder="أرقام محافظ احتياطية..." class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.vodafoneCash || []).join('\n'))}</textarea>
+            <textarea id="sw-bkup-ip" rows="2" placeholder="عناوين إنستا باي احتياطية..." class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.instaPay || []).join('\n'))}</textarea>
+            <textarea id="sw-bkup-bk" rows="2" placeholder="حسابات بنكية احتياطية..." class="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc((bkup.bank || []).join('\n'))}</textarea>
           </div>
 
-          <!-- Limits, Countdown, Per-Channel Withdraw Fees & Opening Balances -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2.5">
             <div class="font-black text-slate-200">⏱️ الحدود، العدّاد، رسوم السحب لكل وسيلة، والأرصدة الافتتاحية</div>
             <div class="grid grid-cols-3 gap-1.5">
               <div><label class="text-[9.5px] text-slate-400">عدّاد الإيداع (دقيقة)</label><input id="sw-mins" type="number" min="2" max="30" value="${Number(cfg.depositSessionMinutes || 10)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
-              <div><label class="text-[9.5px] text-slate-400">أدنى إيداع</label><input id="sw-mindep" type="number" value="${Number(cfg.minDeposit || 100)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
-              <div><label class="text-[9.5px] text-slate-400">أقصى إيداع</label><input id="sw-maxdep" type="number" value="${Number(cfg.maxDeposit || 250000)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
-              <div><label class="text-[9.5px] text-slate-400">أدنى سحب</label><input id="sw-minwd" type="number" value="${Number(cfg.minWithdraw || 100)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">أدنى إيداع (ج.م)</label><input id="sw-mindep" type="number" value="${Number(cfg.minDeposit || 100)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">أقصى إيداع (ج.م)</label><input id="sw-maxdep" type="number" value="${Number(cfg.maxDeposit || 250000)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">أدنى سحب (ج.م)</label><input id="sw-minwd" type="number" value="${Number(cfg.minWithdraw || 100)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
               <div class="col-span-2"><label class="text-[9.5px] text-slate-400">الحد الأقصى للسحب اليومي للمستخدم (ج.م)</label><input id="sw-maxwd" type="number" value="${Number(cfg.maxWithdrawDaily || 50000)}" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
             </div>
 
@@ -1675,7 +2000,7 @@
                 <b class="${r.type === 'deposit' ? 'text-emerald-400' : 'text-amber-400'}">${r.type === 'deposit' ? '⬇️ شحن / إيداع' : '⬆️ سحب كاش'} — ${app.fmtMoney(r.amount)} ج.م</b>
                 <button onclick="DamanAdmin.openUser360Modal('${r.userId}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[10px] font-bold">ملف 360°</button>
               </div>
-              <div class="text-[11px] text-slate-200">${app.esc(r.userLegalName || r.userName)} (${app.esc(r.userPhone || '')}) • ${app.esc(r.channel)} • ${app.esc(r.date || '')}</div>
+              <div class="text-[11px] text-slate-200">${app.esc(r.userLegalName || r.userName)} (${app.esc(r.userPhone || '')}) • ${this.channelAr(r.channel)} • ${app.esc(r.date || '')}</div>
               ${r.txRef ? `<div class="text-[10.5px] text-amber-300">المرجع: <b class="select-all">${app.esc(r.txRef)}</b> | من: ${app.esc(r.senderAccount || '')}</div>` : ''}
               ${r.targetAccountUsed ? `<div class="text-[10px] text-slate-400">الحساب المستلم وقت الطلب: ${app.esc(r.targetAccountUsed)}</div>` : ''}
               ${r.destAccount ? `<div class="text-[11px] text-emerald-300 font-black">تحويل إلى: <span class="select-all">${app.esc(r.destAccount)}</span> (الصافي: ${app.fmtMoney(r.netPayout || r.amount)} ج.م)</div>` : ''}
@@ -1705,7 +2030,7 @@
             </div>`).join('')}
 
           <div class="font-bold text-slate-400 pt-2">آخر العمليات المنفّذة (${done.length})</div>
-          ${done.slice(0, 15).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${r.type === 'deposit' ? '⬇️' : '⬆️'} ${app.esc(r.userName)} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م (${app.esc(r.channel)})</span><b class="${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${app.esc(r.status)}</b></div>`).join('')}
+          ${done.slice(0, 15).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${r.type === 'deposit' ? '⬇️' : '⬆️'} ${app.esc(r.userName)} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م (${this.channelAr(r.channel)})</span><b class="${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(r.status)}</b></div>`).join('')}
           <button onclick="DamanAdmin.loadMore('wallet')" class="w-full py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 font-bold">تحميل المزيد</button>
         </div>`;
     },
@@ -1729,10 +2054,10 @@
                   ${k.taxMedia ? `<button onclick="DamanApp.openMediaLightbox('${k.taxMedia}','البطاقة الضريبية')" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">📄 ضريبية</button>` : ''}
                 </div>
                 <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                  <input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" placeholder="الاسم الرباعي" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" />
-                  <input id="kyc-ed-nid-${k.id}" type="text" maxlength="14" value="${app.esc(k.nationalId || '')}" placeholder="الرقم القومي" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-black" />
-                  <input id="kyc-ed-addr-${k.id}" type="text" value="${app.esc(k.legalAddress || '')}" placeholder="العنوان" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
-                  ${isComp ? `<input id="kyc-ed-comp-${k.id}" type="text" value="${app.esc(k.companyName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><div class="grid grid-cols-2 gap-1.5"><input id="kyc-ed-cr-${k.id}" type="text" value="${app.esc(k.commercialReg || '')}" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><input id="kyc-ed-tax-${k.id}" type="text" value="${app.esc(k.taxCard || '')}" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>` : ''}
+                  <div><label class="text-[9.5px] text-slate-400">الاسم الرباعي (للعقود)</label><input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">الرقم القومي (14 رقم)</label><input id="kyc-ed-nid-${k.id}" type="text" maxlength="14" value="${app.esc(k.nationalId || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-black" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">العنوان بالبطاقة</label><input id="kyc-ed-addr-${k.id}" type="text" value="${app.esc(k.legalAddress || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                  ${isComp ? `<div><label class="text-[9.5px] text-slate-400">اسم الشركة</label><input id="kyc-ed-comp-${k.id}" type="text" value="${app.esc(k.companyName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div><div class="grid grid-cols-2 gap-1.5"><input id="kyc-ed-cr-${k.id}" type="text" value="${app.esc(k.commercialReg || '')}" placeholder="سجل تجاري" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><input id="kyc-ed-tax-${k.id}" type="text" value="${app.esc(k.taxCard || '')}" placeholder="بطاقة ضريبية" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>` : ''}
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <button onclick="DamanAdmin.approveKyc('${k.id}')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">✅ اعتماد وتثبيت</button>
@@ -1740,13 +2065,12 @@
                 </div>
               </div>`;
           }).join('')}
-          ${others.slice(0, 10).map((k) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${app.esc(k.legalName)} (${app.esc(k.nationalId)})</span><b class="${k.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${app.esc(k.status)}</b></div>`).join('')}
+          ${others.slice(0, 10).map((k) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${app.esc(k.legalName)} (${app.esc(k.nationalId)})</span><b class="${k.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(k.status)}</b></div>`).join('')}
         </div>`;
     },
 
     renderContractsTab(app) {
       const pendingSigned = this.agreements.filter((a) => a.contractStatus === 'pending_admin');
-      const activeFunded = this.agreements.filter((a) => a.status === 'funded');
       const openDisputes = this.disputes.filter((d) => d.status === 'open');
       return `
         <div class="space-y-3 text-xs">
@@ -1774,11 +2098,17 @@
               </div>
             </div>`).join('')}
 
-          <div class="font-black text-sky-400 pt-2">🛡️ العقود النشطة المموّلة (${activeFunded.length})</div>
-          ${activeFunded.slice(0, 15).map((a) => `
+          <div class="font-black text-sky-400 pt-2">🛡️ كل العقود المسجّلة (${this.agreements.length})</div>
+          ${this.agreements.slice(0, 25).map((a) => `
             <div class="glass-card rounded-xl p-2.5 flex justify-between items-center gap-2">
-              <div class="min-w-0"><b class="text-white truncate block">${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</b><span class="text-[10px] text-slate-400">متبقي: ${app.fmtMoney(a.remainingEscrow)} ج.م • تسليم: ${app.esc(a.endDate || '')}</span></div>
-              ${app.isAdmin() ? `<button onclick="DamanAdmin.forceRefundActiveContract('${a.id}')" class="px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 font-black text-[10px] shrink-0">فسخ طارئ</button>` : ''}
+              <div class="min-w-0">
+                <b class="text-white truncate block">${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</b>
+                <span class="text-[10px] text-slate-400">${this.statusAr(a.status)} • متبقي: ${app.fmtMoney(a.remainingEscrow || 0)} ج.م • تسليم: ${app.esc(a.endDate || '')}</span>
+              </div>
+              <div class="flex gap-1 shrink-0">
+                <button onclick="DamanAdmin.openContractAdminModal('${a.id}')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">فحص/تعديل</button>
+                ${app.isAdmin() && a.status === 'funded' ? `<button onclick="DamanAdmin.forceRefundActiveContract('${a.id}')" class="px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 font-black text-[10px]">فسخ</button>` : ''}
+              </div>
             </div>`).join('')}
         </div>`;
     },
@@ -1793,8 +2123,9 @@
               <div class="glass-card rounded-2xl p-3 space-y-1.5 border-amber-500/40">
                 <div class="font-black text-white">${app.esc(p.title)} (${app.esc(p.ownerName)})</div>
                 <p class="text-[11px] text-slate-300">${app.esc(p.description)}</p>
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-3 gap-1.5">
                   <button onclick="DamanAdmin.moderateProject('${p.id}','approved')" class="py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black">✅ نشر</button>
+                  <button onclick="DamanAdmin.openEditProjectAdminModal('${p.id}')" class="py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black">✏️ تعديل</button>
                   <button onclick="DamanAdmin.moderateProject('${p.id}','rejected')" class="py-1.5 rounded-xl bg-rose-500 text-white font-black">❌ رفض</button>
                 </div>
               </div>`).join('')}
@@ -1804,8 +2135,8 @@
             <div class="font-black text-emerald-400">🛡️ طلبات الاستلام الهندسي 3x (${this.inspections.length})</div>
             ${this.inspections.slice(0, 15).map((r) => `
               <div class="glass-card rounded-2xl p-3 space-y-1.5">
-                <div class="flex justify-between"><b class="text-white">${app.esc(r.element)} — ${app.esc(r.userName)}</b><span class="text-amber-300 font-bold">${app.esc(r.status)}</span></div>
-                <div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • ${app.esc(r.userPhone || '')}</div>
+                <div class="flex justify-between"><b class="text-white">${app.esc(r.element)} — ${app.esc(r.userName)}</b><span class="text-amber-300 font-bold">${this.statusAr(r.status)}</span></div>
+                <div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • المساحة: ${app.esc(r.area || '—')} • ${app.esc(r.userPhone || '')}</div>
                 <div class="flex flex-wrap gap-1.5">
                   ${['pending', 'quoted'].includes(r.status) ? `<button onclick="DamanAdmin.quoteInspection('${r.id}')" class="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">تسعير الطلب</button>` : ''}
                   ${r.status === 'paid' ? `<label class="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px] cursor-pointer">📄 رفع التقرير الهندسي وإغلاق<input type="file" accept="image/*" class="hidden" onchange="DamanAdmin.uploadInspectionReport(this,'${r.id}')" /></label>` : ''}
@@ -1818,20 +2149,20 @@
             <div class="font-black text-purple-300">👷 طلبات عمالة VIP (${this.vipLabors.length})</div>
             ${this.vipLabors.slice(0, 15).map((r) => `
               <div class="glass-card rounded-2xl p-3 space-y-1.5">
-                <div class="flex justify-between"><b class="text-white">${app.esc(r.trade)} (${r.workersCount} × ${r.days} يوم)</b><span class="text-purple-300 font-bold">${app.esc(r.status)}</span></div>
-                <div class="text-[10.5px] text-slate-400">${app.esc(r.userName)} • ${app.esc(r.location)}</div>
+                <div class="flex justify-between"><b class="text-white">${app.esc(r.trade)} (${r.workersCount} عامل × ${r.days} يوم)</b><span class="text-purple-300 font-bold">${this.statusAr(r.status)}</span></div>
+                <div class="text-[10.5px] text-slate-400">${app.esc(r.userName)} • ${app.esc(r.location)} • بداية: ${app.esc(r.startDate || r.date || '')}</div>
                 <div class="flex gap-1.5">
                   ${['pending', 'quoted'].includes(r.status) ? `<button onclick="DamanAdmin.quoteVipLabor('${r.id}')" class="flex-1 py-1.5 rounded-lg bg-purple-500 text-white font-black text-[10px]">تسعير (+ VIP)</button>` : ''}
-                  ${r.status === 'funded' ? `<button onclick="DamanAdmin.settleVipLabor('${r.id}','settle')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">✅ تسوية</button><button onclick="DamanAdmin.settleVipLabor('${r.id}','refund')" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">ردّ</button>` : ''}
+                  ${r.status === 'funded' ? `<button onclick="DamanAdmin.settleVipLabor('${r.id}','settle')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px]">✅ تسوية</button><button onclick="DamanAdmin.settleVipLabor('${r.id}','refund')" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">ردّ الضمان</button>` : ''}
                 </div>
               </div>`).join('') || '<div class="glass-card rounded-xl p-4 text-center text-slate-400">لا توجد طلبات</div>'}
           </div>
 
           <div class="space-y-1.5">
-            <div class="font-black text-slate-300">إدارة كل إعلانات المستخدمين (${this.projects.length})</div>
-            ${this.projects.slice(0, 15).map((p) => {
+            <div class="font-black text-slate-300">إدارة وتعديل كل إعلانات المستخدمين (${this.projects.length})</div>
+            ${this.projects.slice(0, 20).map((p) => {
               const boosted = Number(p.boostedUntil || 0) > Date.now();
-              return `<div class="glass-card rounded-xl p-2.5 flex justify-between items-center gap-2"><span class="truncate text-white font-bold">${boosted ? '★ ' : ''}${app.esc(p.title)}</span><div class="flex gap-1 shrink-0"><button onclick="DamanAdmin.toggleBoostProject('${p.id}',${boosted})" class="px-2 py-1 rounded bg-purple-500/20 text-purple-200 text-[10px] font-bold">${boosted ? 'إلغاء ★' : 'تمييز ★'}</button><button onclick="DamanAdmin.deleteProjectAdmin('${p.id}')" class="px-2 py-1 rounded bg-rose-500/20 text-rose-300 text-[10px]">حذف</button></div></div>`;
+              return `<div class="glass-card rounded-xl p-2.5 flex justify-between items-center gap-2"><span class="truncate text-white font-bold">${boosted ? '★ ' : ''}${app.esc(p.title)}</span><div class="flex gap-1 shrink-0"><button onclick="DamanAdmin.openEditProjectAdminModal('${p.id}')" class="px-2 py-1 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">تعديل</button><button onclick="DamanAdmin.toggleBoostProject('${p.id}',${boosted})" class="px-2 py-1 rounded bg-purple-500/20 text-purple-200 text-[10px] font-bold">${boosted ? 'إلغاء ★' : 'تمييز ★'}</button><button onclick="DamanAdmin.deleteProjectAdmin('${p.id}')" class="px-2 py-1 rounded bg-rose-500/20 text-rose-300 text-[10px]">حذف</button></div></div>`;
             }).join('')}
           </div>
         </div>`;
@@ -1845,14 +2176,13 @@
 
       return `
         <div class="space-y-3.5 text-xs">
-          <!-- Global Announcement Bar + Dynamic Branding Texts -->
           <form onsubmit="DamanAdmin.saveAnnouncementAndBranding(event)" class="glass-card rounded-2xl p-4 space-y-2.5 border-amber-500/40">
             <div class="font-black text-amber-400">📣 الشريط العاجل أعلى التطبيق + التحكم في كل حرف بالتطبيق</div>
             <label class="flex items-center gap-2 p-2 rounded-xl bg-slate-950 font-bold text-amber-300"><input id="an-en" type="checkbox" ${ann.enabled ? 'checked' : ''} class="accent-amber-500" /> تفعيل شريط التنبيه العاجل فوق التطبيق</label>
-            <input id="an-txt" type="text" value="${app.esc(ann.text || '')}" placeholder="نص الشريط العاجل (مثال: خصم 20% على استلام الأسقف 3x هذا الأسبوع!)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div><label class="text-[10px] text-slate-400">نص الشريط العاجل</label><input id="an-txt" type="text" value="${app.esc(ann.text || '')}" placeholder="مثال: خصم 20% على استلام الأسقف 3x هذا الأسبوع!" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <div class="grid grid-cols-2 gap-2">
-              <select id="an-col" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="amber" ${ann.color === 'amber' ? 'selected' : ''}>لون ذهبي</option><option value="emerald" ${ann.color === 'emerald' ? 'selected' : ''}>لون أخضر</option><option value="rose" ${ann.color === 'rose' ? 'selected' : ''}>لون أحمر عاجل</option><option value="sky" ${ann.color === 'sky' ? 'selected' : ''}>لون أزرق</option></select>
-              <select id="an-act" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="none">بدون انتقال</option><option value="inspection" ${ann.action === 'inspection' ? 'selected' : ''}>يفتح استلام 3x</option><option value="viplabor" ${ann.action === 'viplabor' ? 'selected' : ''}>يفتح عمالة VIP</option><option value="market" ${ann.action === 'market' ? 'selected' : ''}>يفتح السوق</option><option value="whatsapp" ${ann.action === 'whatsapp' ? 'selected' : ''}>يفتح واتساب</option></select>
+              <div><label class="text-[10px] text-slate-400">لون الشريط</label><select id="an-col" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="amber" ${ann.color === 'amber' ? 'selected' : ''}>ذهبي</option><option value="emerald" ${ann.color === 'emerald' ? 'selected' : ''}>أخضر</option><option value="rose" ${ann.color === 'rose' ? 'selected' : ''}>أحمر عاجل</option><option value="sky" ${ann.color === 'sky' ? 'selected' : ''}>أزرق</option></select></div>
+              <div><label class="text-[10px] text-slate-400">إجراء عند الضغط</label><select id="an-act" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="none">بدون انتقال</option><option value="inspection" ${ann.action === 'inspection' ? 'selected' : ''}>يفتح استلام 3x</option><option value="viplabor" ${ann.action === 'viplabor' ? 'selected' : ''}>يفتح عمالة VIP</option><option value="market" ${ann.action === 'market' ? 'selected' : ''}>يفتح السوق</option><option value="whatsapp" ${ann.action === 'whatsapp' ? 'selected' : ''}>يفتح واتساب</option></select></div>
             </div>
 
             <div class="grid grid-cols-2 gap-2 pt-1">
@@ -1861,10 +2191,10 @@
               <div><label class="text-[10px] text-slate-400">الشعار الفرعي (عربي)</label><input id="br-tag-ar" type="text" value="${app.esc(br.taglineAr || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
               <div><label class="text-[10px] text-slate-400">الشعار الفرعي (EN)</label><input id="br-tag-en" type="text" value="${app.esc(br.taglineEn || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
-            <input id="br-hw" type="text" value="${app.esc(br.heroWelcome || '')}" placeholder="سطر الترحيب بالرئيسية" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" />
-            <input id="br-ht" type="text" value="${app.esc(br.heroGuestTitle || '')}" placeholder="العنوان الرئيسي للزوار" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" />
-            <textarea id="br-hd" rows="2" placeholder="الوصف للزوار..." class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(br.heroGuestDesc || '')}</textarea>
-            <div><label class="text-[10px] text-slate-400">نص سياسة الخصوصية والشروط الكامل:</label><textarea id="br-priv" rows="3" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(br.privacyText || '')}</textarea></div>
+            <div><label class="text-[10px] text-slate-400">سطر الترحيب بالرئيسية</label><input id="br-hw" type="text" value="${app.esc(br.heroWelcome || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            <div><label class="text-[10px] text-slate-400">العنوان الرئيسي للزوار</label><input id="br-ht" type="text" value="${app.esc(br.heroGuestTitle || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            <div><label class="text-[10px] text-slate-400">الوصف الترحيبي للزوار</label><textarea id="br-hd" rows="2" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(br.heroGuestDesc || '')}</textarea></div>
+            <div><label class="text-[10px] text-slate-400">نص سياسة الخصوصية والشروط الكامل</label><textarea id="br-priv" rows="3" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white">${app.esc(br.privacyText || '')}</textarea></div>
             <div class="grid grid-cols-2 gap-2 text-[10.5px] font-bold">
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="ad-hide-demo" type="checkbox" ${cfg.hideDemoPosts ? 'checked' : ''} class="accent-rose-500" /> إخفاء الـ 20 منشور توضيحي</label>
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="ad-hide-off" type="checkbox" ${cfg.hideOfficialBanners ? 'checked' : ''} class="accent-rose-500" /> إخفاء الـ 6 بانرات الرسمية</label>
@@ -1872,18 +2202,17 @@
             <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ وتطبيق النصوص والشريط فوراً</button>
           </form>
 
-          <!-- Add Custom Home Banner -->
           <form onsubmit="DamanAdmin.addCustomHomeBanner(event)" class="glass-card rounded-2xl p-4 space-y-2 border-emerald-500/40">
             <div class="font-black text-emerald-400">+ إضافة إعلان / بانر جديد خاص بك على الرئيسية</div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="hb-badge" type="text" placeholder="شارة فوق (عرض خاص 🔥)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <select id="hb-theme" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-amber-300 font-bold"><option value="amber">ذهبي</option><option value="emerald">أخضر</option><option value="purple">بنفسجي</option><option value="sky">أزرق</option></select>
+              <div><label class="text-[10px] text-slate-400">شارة الإعلان فوق</label><input id="hb-badge" type="text" placeholder="عرض خاص 🔥" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[10px] text-slate-400">لون البطاقة</label><select id="hb-theme" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-amber-300 font-bold"><option value="amber">ذهبي</option><option value="emerald">أخضر</option><option value="purple">بنفسجي</option><option value="sky">أزرق</option></select></div>
             </div>
-            <input id="hb-title" type="text" required placeholder="عنوان الإعلان" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" />
-            <textarea id="hb-sub" rows="2" required placeholder="تفاصيل الإعلان..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            <div><label class="text-[10px] text-slate-400">عنوان الإعلان *</label><input id="hb-title" type="text" required placeholder="عنوان الإعلان" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" /></div>
+            <div><label class="text-[10px] text-slate-400">تفاصيل الإعلان *</label><textarea id="hb-sub" rows="2" required placeholder="تفاصيل الإعلان..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea></div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="hb-cta" type="text" value="اطلب الآن" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <select id="hb-act" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="admin_chat">شات الإدارة</option><option value="inspection">استلام 3x</option><option value="viplabor">عمالة VIP</option><option value="market">السوق</option><option value="company">الشركات</option><option value="whatsapp">واتساب</option></select>
+              <div><label class="text-[10px] text-slate-400">نص الزر</label><input id="hb-cta" type="text" value="اطلب الآن" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[10px] text-slate-400">وجهة الزر</label><select id="hb-act" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"><option value="admin_chat">شات الإدارة</option><option value="inspection">استلام 3x</option><option value="viplabor">عمالة VIP</option><option value="market">السوق</option><option value="company">الشركات</option><option value="whatsapp">واتساب</option></select></div>
             </div>
             <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">نشر الإعلان على الرئيسية</button>
           </form>
@@ -1900,7 +2229,7 @@
             <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2 ${c.status === 'suspended' ? 'border-rose-500/50 opacity-75' : ''}">
               <div class="min-w-0"><div class="font-black text-white truncate">${app.esc(c.name)} ${c.status === 'suspended' ? '🚫' : ''}</div><div class="text-[10px] text-amber-300">الكود: ${app.esc(c.code)} • ${app.esc(c.ownerName || '')} • مواقع: ${(c.sites || []).length}</div></div>
               <div class="flex gap-1 shrink-0">
-                <button onclick="DamanAdmin.openCompanyControlModal('${c.id}')" class="px-2.5 py-1.5 rounded-xl bg-purple-500 text-white font-black text-[10px]">تحكّم</button>
+                <button onclick="DamanAdmin.openCompanyControlModal('${c.id}')" class="px-2.5 py-1.5 rounded-xl bg-purple-500 text-white font-black text-[10px]">تحكّم 360°</button>
                 ${app.isAdmin() ? `<button onclick="DamanAdmin.toggleCompanyStatus('${c.id}','${c.status || 'active'}')" class="px-2 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-[10px]">${c.status === 'suspended' ? 'تفعيل' : 'إيقاف'}</button>` : ''}
               </div>
             </div>`).join('')}
@@ -1916,19 +2245,17 @@
 
       return `
         <div class="space-y-3 text-xs">
-          <!-- Broadcast Form -->
           ${app.isAdmin() ? `
             <form onsubmit="DamanAdmin.sendBroadcastNotification(event)" class="glass-card rounded-2xl p-3.5 space-y-2 border-purple-500/40">
               <div class="font-black text-purple-300">📣 إرسال إشعار جماعي فوري (Broadcast)</div>
               <div class="grid grid-cols-2 gap-1.5">
-                <select id="bc-seg" class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold"><option value="all">كل المستخدمين (${this.users.length})</option><option value="company">الشركات فقط</option><option value="supplier">الموردين B2B فقط</option><option value="individual">الأفراد والمقاولين</option></select>
-                <input id="bc-title" type="text" required placeholder="عنوان الإشعار" class="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" />
+                <div><label class="text-[9.5px] text-slate-400">الفئة المستهدفة</label><select id="bc-seg" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold"><option value="all">كل المستخدمين (${this.users.length})</option><option value="company">الشركات فقط</option><option value="supplier">الموردين B2B فقط</option><option value="individual">الأفراد والمقاولين</option></select></div>
+                <div><label class="text-[9.5px] text-slate-400">عنوان الإشعار</label><input id="bc-title" type="text" required placeholder="العنوان" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
               </div>
               <input id="bc-body" type="text" required placeholder="نص الرسالة الجماعية..." class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" />
               <button type="submit" class="w-full py-2 rounded-xl bg-purple-500 text-white font-black">إرسال الإشعار الجماعي</button>
             </form>` : ''}
 
-          <!-- Birthdays Today -->
           <div class="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 space-y-2">
             <div class="font-black text-amber-300">🎂 أعياد ميلاد اليوم (${bdays.length})</div>
             ${!bdays.length ? `<div class="text-[10.5px] text-slate-400">لا يوجد أعياد ميلاد اليوم.</div>` : bdays.map((u) => `<div class="flex items-center justify-between bg-slate-950/70 p-2 rounded-xl"><b class="text-white">${app.esc(u.legalName || u.name)}</b><button onclick="DamanAdmin.sendBirthdayGift('${u.id}','${app.esc(u.name || '').replace(/'/g, "\\'")}')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">🎁 هدية</button></div>`).join('')}
@@ -1943,7 +2270,7 @@
               <div class="text-[10px] text-slate-400">${app.esc(u.phone || '')} • ${app.esc(u.email || '')} • قومي: ${app.esc(u.nationalId || '—')}</div>
               ${u.adminCrmNote ? `<div class="text-[10px] text-amber-300">📌 ملاحظة سرية: ${app.esc(u.adminCrmNote)}</div>` : ''}
               <div class="flex gap-1.5 pt-1">
-                <button onclick="DamanAdmin.openUser360Modal('${u.id}')" class="flex-1 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">🔎 ملف 360° وتحكم مالي</button>
+                <button onclick="DamanAdmin.openUser360Modal('${u.id}')" class="flex-1 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">🔎 ملف 360° وتعديل كامل</button>
                 <button onclick="DamanApp.openPublicProfile('${u.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-sky-300 font-bold text-[10px]">صفحته</button>
                 <button onclick="DamanAdmin.deleteUserSafely('${u.id}')" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">حذف</button>
               </div>
@@ -1952,15 +2279,25 @@
 
           <form onsubmit="DamanAdmin.addBlacklistEntry(event)" class="glass-card rounded-2xl p-3 space-y-2 border-rose-500/40">
             <div class="font-black text-rose-400">🚫 القائمة السوداء (${this.blacklist.length})</div>
-            <div class="grid grid-cols-2 gap-2"><input id="bl-val" type="text" required placeholder="رقم قومي / موبايل / إيميل" class="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /><input id="bl-reason" type="text" placeholder="السبب" class="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="text-[9.5px] text-slate-400">الرقم القومي / الموبايل / الإيميل</label><input id="bl-val" type="text" required class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">سبب الحظر</label><input id="bl-reason" type="text" placeholder="حظر دائم" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            </div>
             <button type="submit" class="w-full py-1.5 rounded-lg bg-rose-500 text-white font-black">إضافة للحظر الدائم</button>
             <div class="flex flex-wrap gap-1">${this.blacklist.map((b) => `<span class="px-2 py-0.5 rounded bg-slate-950 text-[10px] text-rose-300">${app.esc(b.value)} <button type="button" onclick="DamanAdmin.removeBlacklist('${b.id}')" class="text-white ms-1">×</button></span>`).join('')}</div>
           </form>
 
           <form onsubmit="DamanAdmin.createPromoCode(event)" class="glass-card rounded-2xl p-3 space-y-2 border-sky-500/40">
-            <div class="font-black text-sky-400">🎁 إنشاء كود هدية (يضاف لرصيد الهدايا فقط)</div>
-            <div class="grid grid-cols-3 gap-1.5"><input id="pr-code" type="text" required placeholder="DAMAN50" class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white uppercase font-bold" /><input id="pr-amt" type="number" min="5" required placeholder="المبلغ" class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /><input id="pr-max" type="number" min="1" value="20" required class="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white" /></div>
+            <div class="font-black text-sky-400">🎁 إنشاء وإدارة أكواد الهدايا (${this.promoCodes.length})</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div><label class="text-[9.5px] text-slate-400">كود الهدية</label><input id="pr-code" type="text" required placeholder="DAMAN50" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white uppercase font-bold" /></div>
+              <div><label class="text-[9.5px] text-slate-400">قيمة الهدية (ج.م)</label><input id="pr-amt" type="number" min="5" required placeholder="50" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+              <div><label class="text-[9.5px] text-slate-400">أقصى عدد مستخدمين</label><input id="pr-max" type="number" min="1" value="20" required class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold" /></div>
+            </div>
             <button type="submit" class="w-full py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black">إنشاء الكود</button>
+            <div class="space-y-1 pt-1">
+              ${this.promoCodes.map((pr) => `<div class="p-2 rounded-lg bg-slate-950 flex justify-between items-center text-[10.5px]"><span><b class="text-amber-300">${app.esc(pr.code || pr.id)}</b> — ${app.fmtMoney(pr.amount)} ج.م (${(pr.usedBy || []).length}/${pr.maxUses})</span><div class="flex gap-1"><button type="button" onclick="DamanAdmin.togglePromoCode('${app.esc(pr.id)}',${!!pr.active})" class="px-2 py-0.5 rounded bg-slate-800 ${pr.active ? 'text-emerald-400' : 'text-rose-400'} font-bold">${pr.active ? 'مفعّل' : 'موقوف'}</button><button type="button" onclick="DamanAdmin.deletePromoCode('${app.esc(pr.id)}')" class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">حذف</button></div></div>`).join('')}
+            </div>
           </form>
         </div>`;
     },
@@ -1990,7 +2327,6 @@
 
       return `
         <div class="space-y-3.5 text-xs">
-          <!-- Granular RBAC Moderators -->
           <form onsubmit="DamanAdmin.saveModeratorRBAC(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5 border-purple-500/40">
             <div class="font-black text-purple-300">🛡️ صلاحيات المشرفين المساعدين (RBAC — بدون خزنة أو إعدادات)</div>
             <input id="rb-email" type="email" required placeholder="إيميل المشرف (example@gmail.com)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
@@ -2011,14 +2347,12 @@
             }).join('')}
           </form>
 
-          <!-- Media Vault Storage Monitor -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/40">
             <div class="font-black text-sky-400">🧹 مراقبة وتنظيف خزنة المرفقات (Media Vault)</div>
             <div class="text-[11px] text-slate-300">إجمالي الملفات: <b>${ms.total}</b> (بطاقات: ${ms.kyc} | إيصالات: ${ms.receipts} | تسجيلات: ${ms.recordings})</div>
             <button onclick="DamanAdmin.cleanupExpiredRecordings()" class="w-full py-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 font-black">تنظيف تسجيلات المكالمات المنتهية (&gt;30 يوم)</button>
           </div>
 
-          <!-- Immutable Audit Log -->
           <div class="space-y-1.5">
             <div class="font-black text-amber-400">📜 سجل الرقابة والتدقيق الإداري (Audit Log — آخر ${this.auditLogs.length} عملية)</div>
             ${this.auditLogs.map((l) => `
@@ -2027,6 +2361,49 @@
                 <div class="text-white">${app.esc(l.details)}</div>
                 <div class="text-[9.5px] text-slate-400">بواسطة: ${app.esc(l.actorEmail || l.actorName)}</div>
               </div>`).join('') || '<div class="glass-card rounded-xl p-4 text-center text-slate-400">لا توجد عمليات مسجّلة بعد</div>'}
+          </div>
+        </div>`;
+    },
+
+    renderDbTab(app) {
+      const cols = [
+        ['users', 'المستخدمين (users)'],
+        ['walletRequests', 'طلبات المحفظة (walletRequests)'],
+        ['chatAgreements', 'العقود (chatAgreements)'],
+        ['projects', 'إعلانات السوق (projects)'],
+        ['kycRequests', 'طلبات التوثيق (kycRequests)'],
+        ['companies', 'الشركات (companies)'],
+        ['companyOps', 'عمليات الشركات (companyOps)'],
+        ['vipRequests', 'الاستلام 3x (vipRequests)'],
+        ['vipLaborRequests', 'عمالة VIP (vipLaborRequests)'],
+        ['platformFees', 'الأرباح (platformFees)'],
+        ['adminExpenses', 'مصروفات الإدارة (adminExpenses)'],
+        ['treasuryTransfers', 'تحويلات داخلية (treasuryTransfers)'],
+        ['disputes', 'النزاعات (disputes)'],
+        ['supportTickets', 'التذاكر (supportTickets)'],
+        ['promoCodes', 'أكواد الهدايا (promoCodes)'],
+        ['blacklist', 'القائمة السوداء (blacklist)'],
+        ['settings', 'الإعدادات (settings)']
+      ];
+      const q = app.normalizeAr(this.dbFilter);
+      const list = this.dbDocs.filter((d) => !q || app.normalizeAr(JSON.stringify(d)).includes(q));
+
+      return `
+        <div class="space-y-3 text-xs">
+          <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200">
+            <b>🗄️ مستكشف وتعديل قاعدة البيانات المباشر:</b> اختر أي جدول لمشاهدة وتعديل أي سجل في التطبيق بالكامل.
+          </div>
+          <div class="grid grid-cols-1 gap-2">
+            <select onchange="DamanAdmin.selectDbCollection(this.value)" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-purple-500/40 text-purple-200 font-black">
+              ${cols.map(([k, lbl]) => `<option value="${k}" ${this.dbCol === k ? 'selected' : ''}>${lbl}</option>`).join('')}
+            </select>
+            <input type="text" value="${app.esc(this.dbFilter)}" oninput="DamanAdmin.dbFilter=this.value; DamanAdmin.rerender()" placeholder="تصفية السجلات..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+          </div>
+          <div class="space-y-1.5">
+            ${list.map((d) => {
+              const title = d.name || d.title || d.ticketNumber || d.code || d.userName || d.subject || d.id;
+              return `<div class="glass-card rounded-xl p-2.5 flex justify-between items-center gap-2"><div class="min-w-0"><b class="text-white block truncate">${app.esc(title)}</b><span class="text-[9.5px] text-slate-400">ID: ${app.esc(d.id)} ${d.status ? '• ' + this.statusAr(d.status) : ''}</span></div><button onclick="DamanAdmin.openDbDocEditor('${app.esc(d.id)}')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">عرض / تعديل</button></div>`;
+            }).join('') || '<div class="glass-card rounded-xl p-5 text-center text-slate-400">لا توجد سجلات في هذا الجدول</div>'}
           </div>
         </div>`;
     },
@@ -2048,7 +2425,7 @@
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="ks-nopost" type="checkbox" ${cfg.disableMarketPosting ? 'checked' : ''} class="accent-amber-500" /> إيقاف النشر بالسوق</label>
               <label class="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-1.5 text-emerald-300"><input id="ks-reqkyc" type="checkbox" ${cfg.requireKycForActions !== false ? 'checked' : ''} class="accent-emerald-500" /> توثيق البطاقة إجباري</label>
             </div>
-            <input id="ks-maint-msg" type="text" value="${app.esc(cfg.maintenanceMessage || '')}" placeholder="رسالة شاشة الصيانة..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div><label class="text-[10px] text-slate-400">رسالة شاشة الصيانة</label><input id="ks-maint-msg" type="text" value="${app.esc(cfg.maintenanceMessage || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
 
             <div class="font-black text-amber-400 pt-1">⚙️ العمولات، أسعار الباقات، الواتساب والـ TURN</div>
             <div class="grid grid-cols-2 gap-2">
@@ -2056,12 +2433,12 @@
               <div><label class="text-[10px] text-slate-400">عمولة عمالة VIP %</label><input id="st-vipcomm" type="number" step="0.5" value="${(Number(cfg.vipCommissionRate || 0.10) * 100).toFixed(1)}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
             </div>
             <div class="grid grid-cols-3 gap-2">
-              <div><label class="text-[9.5px] text-slate-400">باقة أفراد</label><input id="st-pkg-ind" type="number" value="${Number(pkgs.individualMonthly || 150)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-              <div><label class="text-[9.5px] text-slate-400">باقة شركات</label><input id="st-pkg-comp" type="number" value="${Number(pkgs.companyMonthly || 450)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-              <div><label class="text-[9.5px] text-slate-400">تمييز إعلان</label><input id="st-pkg-boost" type="number" value="${Number(pkgs.boostAdPrice || 75)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">باقة أفراد (ج.م)</label><input id="st-pkg-ind" type="number" value="${Number(pkgs.individualMonthly || 150)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">باقة شركات (ج.م)</label><input id="st-pkg-comp" type="number" value="${Number(pkgs.companyMonthly || 450)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="text-[9.5px] text-slate-400">تمييز إعلان (ج.م)</label><input id="st-pkg-boost" type="number" value="${Number(pkgs.boostAdPrice || 75)}" class="w-full px-2 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
-            <input id="st-wa" type="text" value="${app.esc(cfg.supportWhatsapp || '201030374787')}" placeholder="رقم واتساب الدعم بدون +" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <input id="st-turn" type="text" value="${app.esc(cfg.turnServer || '')}" placeholder="سيرفر TURN للمكالمات (اختياري: url|user|pass)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div><label class="text-[10px] text-slate-400">رقم واتساب الدعم (بدون +)</label><input id="st-wa" type="text" value="${app.esc(cfg.supportWhatsapp || '201030374787')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <div><label class="text-[10px] text-slate-400">سيرفر TURN للمكالمات (اختياري)</label><input id="st-turn" type="text" value="${app.esc(cfg.turnServer || '')}" placeholder="url|user|pass" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">حفظ وتطبيق كل الإعدادات فوراً</button>
           </form>
 
@@ -2092,12 +2469,12 @@
         app.canMod('users') ? ['users', '👥 المستخدمين 360°'] : null,
         app.canMod('comms') ? ['comms', '🎙️ الشات والتذاكر'] : null,
         isMain ? ['security', '🛡️ المشرفين والسجل'] : null,
+        isMain ? ['db', '🗄️ قاعدة البيانات'] : null,
         isMain ? ['settings', '⚙️ الطوارئ والنسخ'] : null
       ].filter(Boolean);
 
       if (!tabs.some(([k]) => k === this.subTab) && tabs.length) this.subTab = tabs[0][0];
 
-      // Action Center Red Counters
       const c = this.counts;
       const pills = [
         c.kyc ? `<button onclick="DamanAdmin.setSubTab('kyc')" class="px-2 py-1 rounded-lg bg-rose-600 text-white font-black text-[10px]">توثيق: ${c.kyc}</button>` : '',
@@ -2114,9 +2491,9 @@
         <div class="glass-card rounded-2xl p-3 border-amber-500/50 space-y-2 text-[11px]">
           <div class="flex justify-between"><b class="text-amber-400">نتائج البحث الشامل: "${app.esc(this.omniQuery)}"</b><button onclick="DamanAdmin.omniResults=null; DamanAdmin.rerender()" class="text-rose-400 font-bold">إغلاق ×</button></div>
           ${this.omniResults.users.map((u) => `<div onclick="DamanAdmin.openUser360Modal('${u.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>👤 ${app.esc(u.name)} (${app.esc(u.phone || '')})</span><b class="text-sky-300">ملف 360°</b></div>`).join('')}
-          ${this.omniResults.wallets.map((w) => `<div onclick="DamanAdmin.setSubTab('wallet')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>💳 ${app.esc(w.userName)} (${app.esc(w.txRef || w.destAccount || '')})</span><b class="text-emerald-400">${app.fmtMoney(w.amount)} (${w.status})</b></div>`).join('')}
-          ${this.omniResults.contracts.map((a) => `<div onclick="DamanAdmin.setSubTab('contracts')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)}</b></div>`).join('')}
-          ${this.omniResults.companies.map((co) => `<div onclick="DamanAdmin.setSubTab('companies')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>🏢 ${app.esc(co.name)} (${app.esc(co.code)})</span><b class="text-purple-300">شركة</b></div>`).join('')}
+          ${this.omniResults.wallets.map((w) => `<div onclick="DamanAdmin.setSubTab('wallet')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>💳 ${app.esc(w.userName)} (${app.esc(w.txRef || w.destAccount || '')})</span><b class="text-emerald-400">${app.fmtMoney(w.amount)} (${this.statusAr(w.status)})</b></div>`).join('')}
+          ${this.omniResults.contracts.map((a) => `<div onclick="DamanAdmin.openContractAdminModal('${a.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)}</b></div>`).join('')}
+          ${this.omniResults.companies.map((co) => `<div onclick="DamanAdmin.openCompanyControlModal('${co.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>🏢 ${app.esc(co.name)} (${app.esc(co.code)})</span><b class="text-purple-300">تحكّم</b></div>`).join('')}
           ${!this.omniResults.users.length && !this.omniResults.wallets.length && !this.omniResults.contracts.length && !this.omniResults.companies.length ? '<div class="text-slate-400 text-center">لا توجد نتائج مطابقة</div>' : ''}
         </div>` : '';
 
@@ -2133,6 +2510,7 @@
         else if (this.subTab === 'users') body = this.renderUsersTab(app);
         else if (this.subTab === 'comms') body = this.renderCommsTab(app);
         else if (this.subTab === 'security') body = this.renderSecurityTab(app);
+        else if (this.subTab === 'db') body = this.renderDbTab(app);
         else if (this.subTab === 'settings') body = this.renderSettingsTab(app);
         else body = this.renderTreasuryTab(app);
       } catch (e) {
@@ -2148,7 +2526,6 @@
 
           ${pills.length ? `<div class="flex flex-wrap gap-1.5 p-2 rounded-2xl bg-slate-900/90 border border-rose-500/40">${pills.join('')}</div>` : ''}
 
-          <!-- Omni-Search -->
           <form onsubmit="DamanAdmin.runOmniSearch(event)" class="flex gap-1.5 text-xs">
             <input id="adm-omni-q" type="text" value="${app.esc(this.omniQuery)}" placeholder="بحث شامل: TKT- / CMP- / رقم مرجعي / رقم قومي / موبايل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
             <button type="submit" class="px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black"><i class="fa-solid fa-magnifying-glass"></i></button>
