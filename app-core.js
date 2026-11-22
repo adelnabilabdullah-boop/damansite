@@ -1,1898 +1,1302 @@
 (function () {
-  const FIREBASE_CONFIG = {
-    apiKey: 'AIzaSyDSkWNxg9B5Ot_jIDdao2OIFCboMl_yRxU',
-    authDomain: 'daman-site-36583.firebaseapp.com',
-    projectId: 'daman-site-36583',
-    storageBucket: 'daman-site-36583.firebasestorage.app',
-    messagingSenderId: '1053020809096',
-    appId: '1:1053020809096:web:damansite'
-  };
+  const WalletMod = {
+    subTab: 'overview', // 'overview' | 'requests' | 'packages'
+    txFilter: 'all', // 'all' | 'in' | 'out' | 'escrow' | 'bonus'
+    txSearch: '',
+    requests: [],
+    transactions: [],
+    attachedUid: null,
+    unsubReqs: null,
+    unsubTxs: null,
 
-  if (!firebase.apps.length) {
-    firebase.initializeApp(FIREBASE_CONFIG);
-  }
-  const auth = firebase.auth();
-  const db = firebase.firestore();
+    depositTimer: null,
+    depositSecondsLeft: 0,
+    depositExpired: false,
+    freshAppConfig: null,
+    selectedDepositChannel: 'vodafone_cash',
+    tempReceiptBase64: '',
 
-  db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+    kycPhotos: { idFront: '', idBack: '', selfie: '', crDoc: '', taxDoc: '' },
 
-  const ADMIN_EMAIL = 'adelnabilabdullah@gmail.com';
-  const APP_VERSION = '24';
-
-  const MODULE_FILES = {
-    wallet: `wallet-kyc.js?v=${APP_VERSION}`,
-    chat: `chat-support.js?v=${APP_VERSION}`,
-    projects: `projects-escrow.js?v=${APP_VERSION}`,
-    company: `company-panel.js?v=${APP_VERSION}`,
-    admin: `admin.js?v=${APP_VERSION}`
-  };
-
-  // 6 Official Built-in DamanSite Home Promo Ads (Editable/Toggleable from Admin)
-  const OFFICIAL_HOME_BANNERS = [
-    {
-      id: 'off_1',
-      badge: '🛡️ الأكثر طلباً — ضمان مالي 3 أضعاف (3x)',
-      title: 'باقة استلام السقف الكاملة (3 زيارات هندسية بـ 9,000 ج.م)',
-      subtitle: 'استلام الخامات + الشدة والحدادة قبل الصب + الإشراف أثناء الصب بتقرير هندسي معتمد وضمان مادي 3 أضعاف.',
-      ctaText: 'احجز استلام 3x الآن',
-      action: 'inspection',
-      theme: 'emerald'
-    },
-    {
-      id: 'off_2',
-      badge: '🔒 حماية أموالك 100% — نظام الضمان المالي',
-      title: 'تعاقد بعقد رسمي A4 بالرقم القومي وتواريخ التنفيذ بدون قلق',
-      subtitle: 'احجز 100% من قيمة الشغل بالمحفظة، وقّع باللمس، واطبع عقدك بكود QR — ولا يُصرف جنيه قبل الاستلام الفعلي.',
-      ctaText: 'تصفح السوق وتعاقد',
-      action: 'market',
-      theme: 'amber'
-    },
-    {
-      id: 'off_3',
-      badge: '👷 توريد فوري للمواقع — عمالة VIP',
-      title: 'فرق نجارين وحدادين ومحارة وتشطيبات مختبرة بضمان المنصة',
-      subtitle: 'اطلب عدد العمال والتخصص والموقع، ونجهزلك فرقة محترفة جاهزة للنزول الفوري بضمان الالتزام والجودة.',
-      ctaText: 'اطلب فرقة VIP',
-      action: 'viplabor',
-      theme: 'purple'
-    },
-    {
-      id: 'off_4',
-      badge: '🚚 توريدات B2B بأسعار المصنع',
-      title: 'حديد وأسمنت وخرسانة جاهزة وشدات معدنية بدفع آمن عند الاستلام',
-      subtitle: 'تواصل مباشرة مع موردين موثّقين بالضمان المالي واستلم خامات موقعك بالوزن والمواصفة المعتمدة.',
-      ctaText: 'دليل الموردين B2B',
-      action: 'suppliers',
-      theme: 'sky'
-    },
-    {
-      id: 'off_5',
-      badge: '🏢 منظومة شركات المقاولات والـ HR',
-      title: 'أدِر مواقعك وموظفيك بالـ GPS والرواتب والعهدة والتقارير اليومية',
-      subtitle: 'كشف تلقائي للحضور خارج الموقع، مستخلصات مقاولين، إشعارات خصم، جرد، صب خرسانة، ورواتب A4.',
-      ctaText: 'افتح لوحة الشركات',
-      action: 'company',
-      theme: 'sky'
-    },
-    {
-      id: 'off_6',
-      badge: '★ ضاعف شغلك ومبيعاتك',
-      title: 'ميّز إعلانك بأعلى السوق أو اشترك في باقة VIP الآن',
-      subtitle: 'اظهر في الصفحة الرئيسية وأول نتائج البحث أمام آلاف المقاولين وشركات التطوير والموردين في مصر.',
-      ctaText: 'عرض الباقات والتمييز',
-      action: 'wallet',
-      theme: 'amber'
-    }
-  ];
-
-  const CATEGORIES = [
-    { id: 'concrete', ar: 'خرسانات وشدات خشبية ومعدنية', en: 'Concrete & Formwork' },
-    { id: 'steel', ar: 'حدادة مسلحة', en: 'Rebar & Steel' },
-    { id: 'masonry', ar: 'مباني وطوب', en: 'Masonry & Bricks' },
-    { id: 'plaster', ar: 'محارة وبياض', en: 'Plastering' },
-    { id: 'plumbing', ar: 'سباكة وتأسيس صحي', en: 'Plumbing' },
-    { id: 'electrical', ar: 'كهرباء وتأسيس سمارت', en: 'Electrical & Smart' },
-    { id: 'ceramic', ar: 'سيراميك وبورسلين ورخام', en: 'Ceramics & Marble' },
-    { id: 'gypsum', ar: 'جبسمبورد وديكورات أسقف', en: 'Gypsum Board' },
-    { id: 'painting', ar: 'نقاشة ودهانات', en: 'Painting' },
-    { id: 'carpentry', ar: 'نجارة باب وشباك وأثاث', en: 'Carpentry' },
-    { id: 'aluminum', ar: 'ألوميتال وواجهات زجاج', en: 'Aluminum & Glass' },
-    { id: 'insulation', ar: 'عزل مائي وحراري', en: 'Waterproofing & Insulation' },
-    { id: 'hvac', ar: 'تكييف وتبريد وتهوية', en: 'HVAC' },
-    { id: 'landscape', ar: 'لاندسكيب وحمامات سباحة', en: 'Landscape & Pools' },
-    { id: 'materials', ar: 'توريد خامات ومواد بناء B2B', en: 'B2B Building Materials' },
-    { id: 'equipment', ar: 'تأجير معدات وشدات وأوناش', en: 'Equipment Rental' },
-    { id: 'general', ar: 'مقاولات عامة وتشطيب كامل', en: 'General Contracting' }
-  ];
-
-  const I18N = {
-    ar: {
-      appName: 'ضمان سايت',
-      tagline: 'الضمان المالي والمقاولات B2B',
-      navHome: 'الرئيسية', navProjects: 'السوق', navChat: 'الشات',
-      navCompany: 'الشركات', navWallet: 'المحفظة', navProfile: 'صفحتي',
-      loginBtn: 'تسجيل الدخول', registerBtn: 'حساب جديد', logoutBtn: 'خروج',
-      currency: 'ج.م'
-    },
-    en: {
-      appName: 'DamanSite',
-      tagline: 'Escrow & B2B Contracting',
-      navHome: 'Home', navProjects: 'Market', navChat: 'Chat',
-      navCompany: 'Companies', navWallet: 'Wallet', navProfile: 'Profile',
-      loginBtn: 'Sign In', registerBtn: 'Sign Up', logoutBtn: 'Logout',
-      currency: 'EGP'
-    }
-  };
-
-  const DEFAULT_PRIVACY = `1. التوثيق الإلزامي بالهوية: تُحفظ صور بطاقة الرقم القومي والسيلفي والسجل التجاري بسرية تامة داخل خزنة مشفّرة، وتُستخدم البيانات القانونية (الاسم الرباعي، الرقم القومي، العنوان) داخل العقود الرسمية فقط ولا تُعرض للعامة.
-2. الضمان المالي 100%: لا يُعتمد أي عقد إلا بعد حجز 100% من قيمته + عمولة المنصة في المحفظة، وتوقيع العقد ورفع صورته لاعتماد الإدارة.
-3. تسجيل المكالمات: تُسجّل المكالمات الصوتية داخل التطبيق تلقائياً لحفظ الحقوق عند النزاعات، وتُحذف بعد 30 يوماً ما لم يتم تثبيتها لنزاع قائم.
-4. رصيد الهدايا والبرومو: يُستخدم في الباقات وتمييز الإعلانات والخدمات ولا يُسحب نقداً.
-5. النزاعات والتحكيم: قرار إدارة ضمان سايت في النزاعات ملزم للطرفين استناداً إلى العقد الموقّع والمحادثات والصور وتقارير الحضور.`;
-
-  const DamanApp = {
-    auth,
-    db,
-    ADMIN_EMAIL,
-    APP_VERSION,
-    CATEGORIES,
-    OFFICIAL_HOME_BANNERS,
-    lang: localStorage.getItem('daman_lang') || 'ar',
-    activeTab: 'home',
-    user: null,
-    profile: null,
-
-    // Complete Dynamic AppConfig Controlled 100% from Admin Panel
-    appConfig: {
-      branding: {
-        appNameAr: 'ضمان سايت',
-        appNameEn: 'DamanSite',
-        taglineAr: 'الضمان المالي والمقاولات B2B',
-        taglineEn: 'Escrow & B2B Contracting',
-        heroWelcome: 'أهلاً بك في ضمان سايت 🏗️',
-        heroGuestTitle: 'أقوى منصة مقاولات وضمان مالي في مصر',
-        heroGuestDesc: 'عقود رسمية بضمان مالي 100%، توريد خامات B2B، استلام هندسي بضمان 3 أضعاف، وإدارة متكاملة لشركات المقاولات والموظفين.',
-        facebookUrl: '',
-        privacyText: DEFAULT_PRIVACY
-      },
-      announcement: {
-        enabled: false,
-        text: '',
-        color: 'amber', // 'amber' | 'emerald' | 'rose' | 'sky'
-        action: 'none'
-      },
-      commissionRate: 0.035,
-      vipCommissionRate: 0.10,
-      minDeposit: 100,
-      maxDeposit: 250000,
-      minWithdraw: 100,
-      maxWithdrawDaily: 50000,
-      withdrawFeePct: 0,
-      withdrawFeeFlat: 0,
-      channelWithdrawFees: {
-        vodafone_cash: { pct: '', flat: '' },
-        instapay: { pct: '', flat: '' },
-        bank: { pct: '', flat: '' }
-      },
-      depositSessionMinutes: 10,
-      depositChannels: { vodafone_cash: true, instapay: true, bank: true },
-      withdrawChannels: { vodafone_cash: true, instapay: true, bank: false },
-      openingBalances: { vodafone_cash: 0, instapay: 0, bank: 0 },
-      backupAccounts: { vodafoneCash: [], instaPay: [], bank: [] },
-      paymentAccounts: {
-        vodafoneCash: '01030374787',
-        vodafoneHolder: 'ضمان سايت',
-        instaPay: 'adelnabil@instapay',
-        instaPayHolder: 'ضمان سايت',
-        bankInfo: 'سيتم التحديث من لوحة الإدارة',
-        bankIban: ''
-      },
-      packages: {
-        individualMonthly: 150,
-        companyMonthly: 450,
-        boostAdPrice: 75
-      },
-      requireKycForActions: true,
-      maintenanceMode: false,
-      maintenanceMessage: 'نقوم حالياً بتحديثات سريعة لتحسين الخدمة، سنعود خلال دقائق.',
-      disableRegistrations: false,
-      disableDeposits: false,
-      disableWithdrawals: false,
-      disableCalls: false,
-      disableNewContracts: false,
-      disableMarketPosting: false,
-      hideOfficialBanners: false,
-      hideDemoPosts: false,
-      customHomeBanners: [],
-      moderators: [],
-      moderatorPerms: {},
-      supportWhatsapp: '201030374787',
-      turnServer: '',
-      forceReloadVersion: 0
-    },
-
-    modules: {},
-    loadingMods: {},
-    failedMods: {},
-    notifications: [],
-    unsubProfile: null,
-    unsubConfig: null,
-    unsubNotifs: null,
-
-    viewingPublicUid: null,
-    publicProfileData: null,
-    profileSubTab: 'posts',
-    profilePosts: [],
-    profilePortfolio: [],
-    profileReviews: [],
-    mediaCache: {},
-    pendingDeepLink: null,
-    dismissedAnnText: '',
-
-    // ==================== CORE HELPERS ====================
-    t(key) {
-      const br = this.appConfig?.branding || {};
-      if (key === 'appName') return this.lang === 'ar' ? (br.appNameAr || I18N.ar.appName) : (br.appNameEn || I18N.en.appName);
-      if (key === 'tagline') return this.lang === 'ar' ? (br.taglineAr || I18N.ar.tagline) : (br.taglineEn || I18N.en.tagline);
-      return (I18N[this.lang] && I18N[this.lang][key]) || I18N.ar[key] || key;
-    },
-
-    esc(str) {
-      return String(str == null ? '' : str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    },
-
-    fmtMoney(n) {
-      const num = Number(n || 0);
-      return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-    },
-
-    todayLocal() {
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    },
-
-    addDaysLocal(baseDateStr, days) {
-      const base = baseDateStr ? new Date(baseDateStr + 'T12:00:00') : new Date();
-      base.setDate(base.getDate() + (parseInt(days, 10) || 0));
-      return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
-    },
-
-    normalizeAr(str) {
-      return String(str || '')
-        .toLowerCase()
-        .replace(/[\u064B-\u065F\u0670]/g, '')
-        .replace(/[أإآٱ]/g, 'ا')
-        .replace(/ة/g, 'ه')
-        .replace(/ى/g, 'ي')
-        .replace(/ؤ/g, 'و')
-        .replace(/ئ/g, 'ي')
-        .trim();
-    },
-
-    normalizePhone(raw) {
-      let p = String(raw || '').replace(/[^\d]/g, '');
-      if (p.startsWith('0020')) p = p.slice(3);
-      else if (p.startsWith('20') && p.length === 12) p = '0' + p.slice(2);
-      else if (p.length === 10 && p.startsWith('1')) p = '0' + p;
-      return p;
-    },
-
-    maskNationalId(nid) {
-      const s = String(nid || '').trim();
-      if (s.length < 8) return '—';
-      return s.slice(0, 3) + '********' + s.slice(-3);
-    },
-
-    parseEgyptianNationalId(rawNid) {
-      const nid = String(rawNid || '').replace(/\D/g, '');
-      if (nid.length !== 14) return { valid: false, error: 'الرقم القومي يجب أن يكون 14 رقماً بالضبط' };
-      const centuryDigit = nid[0];
-      if (centuryDigit !== '2' && centuryDigit !== '3') return { valid: false, error: 'صيغة الرقم القومي غير صحيحة' };
-      const year = (centuryDigit === '2' ? 1900 : 2000) + parseInt(nid.slice(1, 3), 10);
-      const month = parseInt(nid.slice(3, 5), 10);
-      const day = parseInt(nid.slice(5, 7), 10);
-      if (month < 1 || month > 12 || day < 1 || day > 31) return { valid: false, error: 'تاريخ الميلاد داخل الرقم القومي غير صحيح' };
-      const bd = new Date(year, month - 1, day);
-      if (bd.getFullYear() !== year || bd.getMonth() !== month - 1 || bd.getDate() !== day) {
-        return { valid: false, error: 'تاريخ الميلاد داخل الرقم القومي غير صالح' };
+    ensureListeners(app) {
+      if (!app.user) {
+        this.detachListeners();
+        return;
       }
-      const now = new Date();
-      let age = now.getFullYear() - year;
-      const mDiff = now.getMonth() - (month - 1);
-      if (mDiff < 0 || (mDiff === 0 && now.getDate() < day)) age--;
-      if (age < 18) return { valid: false, error: 'السن القانوني للتعاقد على ضمان سايت 18 سنة على الأقل' };
-      const birthDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      return { valid: true, nid, birthDate, age };
-    },
+      if (this.attachedUid === app.user.uid) return;
+      this.detachListeners();
+      this.attachedUid = app.user.uid;
 
-    compressImage(file, maxW = 820, quality = 0.6) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Read error'));
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onerror = () => reject(new Error('Image error'));
-          img.onload = () => {
-            let w = img.width, h = img.height;
-            if (w > maxW) { h = Math.round((h * maxW) / w); w = maxW; }
-            const c = document.createElement('canvas');
-            c.width = w; c.height = h;
-            c.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve(c.toDataURL('image/jpeg', quality));
-          };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      });
-    },
-
-    async saveMedia(base64, meta = {}) {
-      if (!base64) return '';
-      const ref = await db.collection('mediaVault').add({
-        data: base64,
-        ownerId: this.user ? this.user.uid : '',
-        kind: meta.kind || 'image',
-        date: this.todayLocal(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      this.mediaCache[ref.id] = base64;
-      return ref.id;
-    },
-
-    async fetchMedia(mediaIdOrBase64) {
-      if (!mediaIdOrBase64) return '';
-      if (String(mediaIdOrBase64).startsWith('data:')) return mediaIdOrBase64;
-      if (this.mediaCache[mediaIdOrBase64]) return this.mediaCache[mediaIdOrBase64];
-      try {
-        const snap = await db.collection('mediaVault').doc(mediaIdOrBase64).get();
-        if (snap.exists && snap.data().data) {
-          this.mediaCache[mediaIdOrBase64] = snap.data().data;
-          return snap.data().data;
-        }
-      } catch (e) {}
-      return '';
-    },
-
-    async openMediaLightbox(mediaIdOrBase64, title = 'معاينة المرفق') {
-      if (!mediaIdOrBase64) return this.toast('لا يوجد مرفق متاح', 'warning');
-      const openFn = (src) => {
-        if (window.DamanLightbox) window.DamanLightbox.open(src, title);
-        else window.open(src, '_blank');
-      };
-      if (String(mediaIdOrBase64).startsWith('data:')) return openFn(mediaIdOrBase64);
-      this.toast('جارٍ تحميل الصورة...', 'info');
-      const src = await this.fetchMedia(mediaIdOrBase64);
-      if (src) openFn(src);
-      else this.toast('تعذر تحميل الصورة', 'error');
-    },
-
-    async withLock(key, fn) {
-      this._locks = this._locks || {};
-      if (this._locks[key]) return;
-      this._locks[key] = true;
-      try { return await fn(); } finally { setTimeout(() => { this._locks[key] = false; }, 600); }
-    },
-
-    toast(msg, type = 'info') {
-      let box = document.getElementById('daman-toast-container');
-      if (!box) {
-        box = document.createElement('div');
-        box.id = 'daman-toast-container';
-        box.className = 'fixed top-16 inset-x-3 z-[125] max-w-md mx-auto space-y-2 pointer-events-none';
-        document.body.appendChild(box);
-      }
-      const colors = {
-        success: 'bg-emerald-600 border-emerald-400 text-white',
-        error: 'bg-rose-600 border-rose-400 text-white',
-        warning: 'bg-amber-500 border-amber-300 text-slate-950',
-        info: 'bg-slate-800 border-slate-600 text-white'
-      };
-      const el = document.createElement('div');
-      el.className = `pointer-events-auto px-3.5 py-2.5 rounded-xl border text-xs font-extrabold shadow-2xl transition-all duration-300 ${colors[type] || colors.info}`;
-      el.textContent = msg;
-      box.appendChild(el);
-      setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3600);
-    },
-
-    async sendNotification(targetUid, title, body) {
-      if (!targetUid) return;
-      try {
-        await db.collection('notifications').add({
-          userId: targetUid,
-          title: String(title || '').slice(0, 120),
-          body: String(body || '').slice(0, 300),
-          read: false,
-          date: this.todayLocal(),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } catch (e) {}
-    },
-
-    async logAudit(action, details, targetId = '') {
-      if (!this.user) return;
-      try {
-        await db.collection('auditLogs').add({
-          actorUid: this.user.uid,
-          actorEmail: this.user.email || '',
-          actorName: this.profile?.name || this.user.email || '',
-          action,
-          details: String(details || '').slice(0, 400),
-          targetId: String(targetId || ''),
-          date: this.todayLocal(),
-          time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } catch (e) {}
-    },
-
-    // ==================== ROLES, RBAC, CONFIG & BLACKLIST ====================
-    isAdmin() {
-      return !!(this.user && (this.user.email || '').toLowerCase() === ADMIN_EMAIL);
-    },
-
-    isMod() {
-      if (!this.user || this.isAdmin()) return false;
-      const email = (this.user.email || '').toLowerCase();
-      const mods = Array.isArray(this.appConfig?.moderators) ? this.appConfig.moderators : [];
-      if (mods.map((x) => String(x || '').toLowerCase().trim()).includes(email)) return true;
-      const permsMap = this.appConfig?.moderatorPerms || {};
-      return !!permsMap[email];
-    },
-
-    hasAdminAccess() {
-      return this.isAdmin() || this.isMod();
-    },
-
-    // Granular RBAC check for Admin Tabs/Actions
-    canMod(perm) {
-      if (this.isAdmin()) return true;
-      if (!this.isMod()) return false;
-      // Treasury, Settings, Balance Edits, Backup are STRICTLY Main Admin Only
-      if (['treasury', 'settings', 'backup', 'balance_edit'].includes(perm)) return false;
-      const email = (this.user.email || '').toLowerCase();
-      const perms = (this.appConfig?.moderatorPerms && this.appConfig.moderatorPerms[email]) || null;
-      if (!perms) return true; // Legacy moderator without restricted map
-      return perms[perm] !== false;
-    },
-
-    isKycVerified() {
-      if (this.hasAdminAccess()) return true;
-      if (this.appConfig?.requireKycForActions === false) return true;
-      return !!(this.profile && this.profile.kycStatus === 'verified');
-    },
-
-    getCommissionRate(userProf) {
-      const p = userProf || this.profile;
-      if (p && p.customCommissionRate != null && p.customCommissionRate !== '') {
-        const cr = Number(p.customCommissionRate);
-        if (!isNaN(cr) && cr >= 0 && cr <= 0.3) return cr;
-      }
-      const r = Number(this.appConfig?.commissionRate);
-      return !isNaN(r) && r >= 0 && r <= 0.3 ? r : 0.035;
-    },
-
-    getVipCommissionRate() {
-      const r = Number(this.appConfig?.vipCommissionRate);
-      return !isNaN(r) && r >= 0 && r <= 0.4 ? r : 0.10;
-    },
-
-    isSubscriptionActive(prof) {
-      const p = prof || this.profile;
-      if (!p) return false;
-      if (this.hasAdminAccess() && !prof) return true;
-      return Number(p.subscriptionExpiresAt || 0) > Date.now();
-    },
-
-    async checkBlacklist({ email, phone, nationalId, commercialReg }) {
-      try {
-        const snap = await db.collection('blacklist').limit(300).get();
-        const normP = this.normalizePhone(phone);
-        const normE = String(email || '').toLowerCase().trim();
-        const normN = String(nationalId || '').replace(/\D/g, '');
-        const normC = String(commercialReg || '').trim();
-        for (const doc of snap.docs) {
-          const val = String(doc.data().value || '').trim();
-          const low = val.toLowerCase();
-          if (normE && low === normE) return doc.data().reason || 'حساب محظور';
-          if (normP && this.normalizePhone(val) === normP) return doc.data().reason || 'رقم هاتف محظور';
-          if (normN && val.replace(/\D/g, '') === normN) return doc.data().reason || 'رقم قومي محظور';
-          if (normC && val === normC) return doc.data().reason || 'سجل تجاري محظور';
-        }
-      } catch (e) {}
-      return null;
-    },
-
-    // ==================== CACHE KILLER & DYNAMIC MODULE LOADER ====================
-    async forceClearCacheAndReload() {
-      try {
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map((r) => r.unregister()));
-        }
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map((k) => caches.delete(k)));
-        }
-      } catch (e) {}
-      window.location.replace(window.location.pathname + `?v=${APP_VERSION}&t=` + Date.now());
-    },
-
-    loadMissingModule(tab) {
-      const file = MODULE_FILES[tab];
-      if (!file || this.modules[tab] || this.loadingMods[tab]) return;
-      this.loadingMods[tab] = true;
-      this.failedMods[tab] = false;
-      const sc = document.createElement('script');
-      sc.src = file + '&t=' + Date.now();
-      sc.onload = () => {
-        this.loadingMods[tab] = false;
-        if (!this.modules[tab]) this.failedMods[tab] = true;
-        this.renderCurrentTab();
-      };
-      sc.onerror = () => {
-        this.loadingMods[tab] = false;
-        this.failedMods[tab] = true;
-        this.renderCurrentTab();
-      };
-      document.body.appendChild(sc);
-    },
-
-    registerModule(name, mod) {
-      this.modules[name] = mod;
-      this.loadingMods[name] = false;
-      this.failedMods[name] = false;
-      if (this.activeTab === name || (name === 'projects' && this.activeTab === 'home')) {
-        this.renderCurrentTab();
-      }
-    },
-
-    // ==================== BOOT & GOOGLE REDIRECT HANDLER ====================
-    init() {
-      if (!document.getElementById('daman-admin-header-btn')) {
-        if (!sessionStorage.getItem('daman_healed_v' + APP_VERSION)) {
-          sessionStorage.setItem('daman_healed_v' + APP_VERSION, '1');
-          this.forceClearCacheAndReload();
-          return;
-        }
-      }
-
-      this.applyLanguageDOM();
-      this.parseUrlDeepLinks();
-
-      // Handle Google Sign-In Redirect Result (Mobile / APK WebView safe)
-      auth.getRedirectResult().then(async (res) => {
-        if (res && res.user) {
-          await this.finalizeGoogleUser(res.user);
-        }
-      }).catch((err) => {
-        if (err && err.code && err.code !== 'auth/no-auth-event') {
-          this.toast('تعذر إكمال الدخول بجوجل: ' + (err.message || ''), 'error');
-        }
-      });
-
-      this.unsubConfig = db.collection('settings').doc('appConfig').onSnapshot((snap) => {
-        if (snap.exists) {
-          const data = snap.data();
-          this.appConfig = Object.assign({}, this.appConfig, data, {
-            branding: Object.assign({}, this.appConfig.branding, data.branding || {}),
-            announcement: Object.assign({}, this.appConfig.announcement, data.announcement || {}),
-            paymentAccounts: Object.assign({}, this.appConfig.paymentAccounts, data.paymentAccounts || {}),
-            packages: Object.assign({}, this.appConfig.packages, data.packages || {}),
-            depositChannels: Object.assign({}, this.appConfig.depositChannels, data.depositChannels || {}),
-            withdrawChannels: Object.assign({}, this.appConfig.withdrawChannels, data.withdrawChannels || {}),
-            openingBalances: Object.assign({}, this.appConfig.openingBalances, data.openingBalances || {}),
-            backupAccounts: Object.assign({}, this.appConfig.backupAccounts, data.backupAccounts || {})
-          });
-
-          // Remote Force Reload trigger from Admin Panel
-          const remoteVer = Number(data.forceReloadVersion || 0);
-          const localVer = Number(localStorage.getItem('daman_force_ver') || 0);
-          if (remoteVer > 0 && localVer > 0 && remoteVer > localVer) {
-            localStorage.setItem('daman_force_ver', String(remoteVer));
-            this.forceClearCacheAndReload();
-            return;
-          } else if (remoteVer > 0 && !localVer) {
-            localStorage.setItem('daman_force_ver', String(remoteVer));
-          }
-        }
-        this.applyBrandingDOM();
-        this.renderAnnouncementBar();
-        this.syncHeaderButtons();
-        this.renderCurrentTab();
-      }, () => {});
-
-      auth.onAuthStateChanged((u) => {
-        this.user = u || null;
-        if (this.unsubProfile) { try { this.unsubProfile(); } catch (e) {} this.unsubProfile = null; }
-        if (this.unsubNotifs) { try { this.unsubNotifs(); } catch (e) {} this.unsubNotifs = null; }
-
-        if (!u) {
-          this.profile = null;
-          this.notifications = [];
-          this.resetAllModules();
-          this.syncHeaderButtons();
-          this.handlePendingDeepLink();
-          this.renderCurrentTab();
-          return;
-        }
-
-        this.unsubProfile = db.collection('users').doc(u.uid).onSnapshot(
+      this.unsubReqs = app.db
+        .collection('walletRequests')
+        .where('userId', '==', app.user.uid)
+        .limit(50)
+        .onSnapshot(
           (snap) => {
-            if (snap.exists) {
-              this.profile = Object.assign({ uid: u.uid }, snap.data());
-              this.checkBirthdayAndAlerts();
-            } else {
-              const isAdm = (u.email || '').toLowerCase() === ADMIN_EMAIL;
-              const refCode = 'DMN-' + u.uid.slice(0, 6).toUpperCase();
-              const base = {
-                name: u.displayName || (isAdm ? 'إدارة ضمان سايت' : 'مستخدم ضمان سايت'),
-                email: (u.email || '').toLowerCase(),
-                phone: '',
-                avatarPhoto: u.photoURL || '',
-                accountType: 'individual',
-                authProvider: (u.providerData && u.providerData[0]?.providerId) || 'password',
-                needsOnboarding: !isAdm,
-                referralCode: refCode,
-                kycStatus: isAdm ? 'verified' : 'none',
-                status: 'active',
-                balanceAvailable: 0,
-                balanceEscrow: 0,
-                balancePendingWithdraw: 0,
-                balanceBonus: 0,
-                balanceFrozen: 0,
-                ratingAvg: 5,
-                ratingCount: 0,
-                followers: [],
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-              };
-              db.collection('users').doc(u.uid).set(base, { merge: true }).catch(() => {});
-              this.profile = Object.assign({ uid: u.uid }, base);
-            }
-            this.syncHeaderButtons();
-            this.handlePendingDeepLink();
-            this.renderCurrentTab();
-          },
-          () => { this.renderCurrentTab(); }
-        );
-
-        const notifTargets = this.hasAdminAccess() ? [u.uid, 'ADMIN'] : [u.uid];
-        this.unsubNotifs = db
-          .collection('notifications')
-          .where('userId', 'in', notifTargets)
-          .limit(35)
-          .onSnapshot((snap) => {
-            this.notifications = snap.docs
+            this.requests = snap.docs
               .map((d) => Object.assign({ id: d.id }, d.data()))
               .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            this.updateNotifBadge();
-          }, () => {});
-      });
+            if (app.activeTab === 'wallet') this.rerender();
+          },
+          () => {}
+        );
+
+      this.unsubTxs = app.db
+        .collection('transactions')
+        .where('userId', '==', app.user.uid)
+        .limit(100)
+        .onSnapshot(
+          (snap) => {
+            this.transactions = snap.docs
+              .map((d) => Object.assign({ id: d.id }, d.data()))
+              .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            if (app.activeTab === 'wallet') this.rerender();
+          },
+          () => {}
+        );
     },
 
-    applyBrandingDOM() {
-      const br = this.appConfig?.branding || {};
-      const titleEl = document.getElementById('daman-header-brand');
-      const subEl = document.getElementById('daman-header-sub');
-      if (titleEl) {
-        titleEl.innerHTML = `${this.esc(br.appNameAr || 'ضمان سايت')} <span class="text-amber-400 text-[10px]">${this.esc(br.appNameEn || 'DamanSite')}</span>`;
-      }
-      if (subEl) {
-        subEl.textContent = this.lang === 'ar' ? (br.taglineAr || 'الضمان المالي والمقاولات B2B') : (br.taglineEn || 'Escrow & B2B Contracting');
-      }
-      document.title = `${br.appNameAr || 'ضمان سايت'} | ${br.appNameEn || 'DamanSite'}`;
+    detachListeners() {
+      if (this.unsubReqs) { try { this.unsubReqs(); } catch (e) {} this.unsubReqs = null; }
+      if (this.unsubTxs) { try { this.unsubTxs(); } catch (e) {} this.unsubTxs = null; }
+      this.clearDepositTimer();
+      this.attachedUid = null;
+      this.requests = [];
+      this.transactions = [];
     },
 
-    renderAnnouncementBar() {
-      const ann = this.appConfig?.announcement || {};
-      let bar = document.getElementById('daman-announcement-bar');
-      if (!ann.enabled || !ann.text || this.dismissedAnnText === ann.text) {
-        if (bar) bar.remove();
-        return;
-      }
-      if (!bar) {
-        bar = document.createElement('div');
-        bar.id = 'daman-announcement-bar';
-        const main = document.getElementById('app-main');
-        if (main && main.parentNode) main.parentNode.insertBefore(bar, main);
-        else document.body.prepend(bar);
-      }
-      const styles = {
-        amber: 'bg-amber-500 text-slate-950',
-        emerald: 'bg-emerald-500 text-slate-950',
-        rose: 'bg-rose-600 text-white',
-        sky: 'bg-sky-500 text-slate-950'
-      };
-      const cls = styles[ann.color] || styles.amber;
-      bar.className = `px-3 py-2 text-[11px] font-black flex items-center justify-between gap-2 ${cls}`;
-      bar.innerHTML = `
-        <div class="flex-1 cursor-pointer leading-snug" onclick="${ann.action && ann.action !== 'none' ? `DamanApp.handleBannerAction('${this.esc(ann.action)}')` : ''}">
-          <i class="fa-solid fa-bullhorn me-1"></i> ${this.esc(ann.text)}
-        </div>
-        <button onclick="DamanApp.dismissedAnnText='${this.esc(ann.text).replace(/'/g, "\\'")}'; document.getElementById('daman-announcement-bar')?.remove()" class="px-1.5 opacity-80 hover:opacity-100"><i class="fa-solid fa-xmark"></i></button>`;
-    },
-
-    parseUrlDeepLinks() {
-      try {
-        const sp = new URLSearchParams(window.location.search);
-        const pUid = sp.get('profile');
-        const vCode = sp.get('verify');
-        const ref = sp.get('ref');
-        if (ref) localStorage.setItem('daman_ref_code', ref.trim().toUpperCase());
-        if (pUid) this.pendingDeepLink = { type: 'profile', value: pUid };
-        else if (vCode) this.pendingDeepLink = { type: 'verify', value: vCode };
-      } catch (e) {}
-    },
-
-    handlePendingDeepLink() {
-      if (!this.pendingDeepLink) return;
-      const dl = this.pendingDeepLink;
-      this.pendingDeepLink = null;
-      if (dl.type === 'profile') this.openPublicProfile(dl.value);
-      else if (dl.type === 'verify') setTimeout(() => this.openVerifyContractModal(dl.value), 350);
-    },
-
-    resetAllModules() {
-      Object.values(this.modules).forEach((m) => {
-        if (m && typeof m.detachListeners === 'function') { try { m.detachListeners(); } catch (e) {} }
-      });
-      this.viewingPublicUid = null;
-      this.publicProfileData = null;
-    },
-
-    isBirthdayToday(prof) {
-      const p = prof || this.profile;
-      if (!p || !p.birthDate || String(p.birthDate).length < 10) return false;
-      return String(p.birthDate).slice(5, 10) === this.todayLocal().slice(5, 10);
-    },
-
-    checkBirthdayAndAlerts() {
-      if (!this.user || !this.profile) return;
-      const today = this.todayLocal();
-      const year = today.slice(0, 4);
-      if (this.isBirthdayToday(this.profile)) {
-        const bKey = `daman_bday_${this.user.uid}_${year}`;
-        if (!localStorage.getItem(bKey)) {
-          localStorage.setItem(bKey, '1');
-          const nm = this.profile.name || 'صديق ضمان سايت';
-          this.sendNotification(this.user.uid, `🎂 كل سنة وأنت طيب يا ${nm}!`, 'أسرة ضمان سايت تتمنى لك عاماً سعيداً مليئاً بالنجاح والتوفيق.');
-        }
-      }
-      const exp = Number(this.profile.subscriptionExpiresAt || 0);
-      if (exp > Date.now() && exp - Date.now() <= 3 * 24 * 60 * 60 * 1000) {
-        const sKey = `daman_sub_warn_${this.user.uid}_${today}`;
-        if (!localStorage.getItem(sKey)) {
-          localStorage.setItem(sKey, '1');
-          const daysLeft = Math.max(1, Math.ceil((exp - Date.now()) / (24 * 60 * 60 * 1000)));
-          this.sendNotification(this.user.uid, 'تنبيه: باقتك على وشك الانتهاء', `يتبقى ${daysLeft} يوم على انتهاء باقتك الحالية.`);
-        }
-      }
-    },
-
-    applyLanguageDOM() {
-      document.documentElement.lang = this.lang;
-      document.documentElement.dir = this.lang === 'ar' ? 'rtl' : 'ltr';
-      const lb = document.getElementById('daman-lang-btn');
-      if (lb) lb.textContent = this.lang === 'ar' ? 'EN' : 'عربي';
-      document.querySelectorAll('[data-i18n]').forEach((el) => {
-        const k = el.getAttribute('data-i18n');
-        if (k) el.textContent = this.t(k);
-      });
-      this.applyBrandingDOM();
-    },
-
-    toggleLang() {
-      this.lang = this.lang === 'ar' ? 'en' : 'ar';
-      localStorage.setItem('daman_lang', this.lang);
-      this.applyLanguageDOM();
-      this.syncHeaderButtons();
-      this.renderCurrentTab();
-    },
-
-    syncHeaderButtons() {
-      const authBtn = document.getElementById('daman-auth-header-btn');
-      const adminBtn = document.getElementById('daman-admin-header-btn');
-      if (adminBtn) {
-        adminBtn.classList.toggle('hidden', !this.hasAdminAccess());
-        adminBtn.innerHTML = this.isAdmin()
-          ? '<i class="fa-solid fa-crown me-1"></i> الإدارة'
-          : '<i class="fa-solid fa-user-shield me-1"></i> الإشراف';
-      }
-      if (authBtn) {
-        if (this.user) {
-          authBtn.className = 'px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-rose-400 text-[10px] font-black';
-          authBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket me-1"></i>' + this.t('logoutBtn');
-        } else {
-          authBtn.className = 'px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[11px] font-black';
-          authBtn.textContent = this.lang === 'ar' ? 'دخول' : 'Login';
-        }
-      }
-    },
-
-    handleHeaderAuthClick() {
-      if (this.user) {
-        if (!window.confirm('هل تريد تسجيل الخروج من حسابك؟')) return;
-        this.resetAllModules();
-        auth.signOut().then(() => {
-          this.toast('تم تسجيل الخروج بنجاح', 'info');
-          this.switchTab('home');
-        });
-      } else {
-        this.openAuthModal('login');
-      }
-    },
-
-    switchTab(tab) {
-      if (tab === 'admin' && !this.hasAdminAccess()) {
-        return this.toast('هذه اللوحة خاصة بالإدارة فقط', 'error');
-      }
-      this.activeTab = tab;
-      if (tab === 'profile') {
-        this.viewingPublicUid = null;
-        if (this.user) this.loadProfileTabExtras(this.user.uid);
-      }
-      document.querySelectorAll('.nav-btn').forEach((b) => {
-        b.classList.toggle('active', b.getAttribute('data-tab') === tab);
-      });
-      try { history.pushState({ tab }, ''); } catch (e) {}
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      this.renderCurrentTab();
-    },
-
-    updateNotifBadge() {
-      const badge = document.getElementById('daman-notif-badge');
-      if (!badge) return;
-      const unread = this.notifications.filter((n) => !n.read).length;
-      if (unread > 0) {
-        badge.textContent = unread > 9 ? '9+' : unread;
-        badge.classList.remove('hidden');
-      } else {
-        badge.classList.add('hidden');
-      }
-    },
-
-    handleBannerAction(act) {
-      if (act === 'inspection') {
-        if (window.DamanProjects) DamanProjects.subTab = 'inspection';
-        return this.switchTab('projects');
-      }
-      if (act === 'viplabor') {
-        if (window.DamanProjects) DamanProjects.subTab = 'viplabor';
-        return this.switchTab('projects');
-      }
-      if (act === 'suppliers') {
-        if (window.DamanProjects) {
-          DamanProjects.subTab = 'market';
-          DamanProjects.marketFilter = 'supplier';
-          DamanProjects.selectedCategory = 'all';
-        }
-        return this.switchTab('projects');
-      }
-      if (act === 'market') {
-        if (window.DamanProjects) {
-          DamanProjects.subTab = 'market';
-          DamanProjects.marketFilter = 'all';
-        }
-        return this.switchTab('projects');
-      }
-      if (act === 'company') return this.switchTab('company');
-      if (act === 'wallet') {
-        if (window.DamanWallet) DamanWallet.subTab = 'packages';
-        return this.switchTab('wallet');
-      }
-      if (act === 'whatsapp') {
-        const wa = this.appConfig?.supportWhatsapp || '201030374787';
-        return window.open(`https://wa.me/${wa}?text=${encodeURIComponent('مرحباً إدارة ضمان سايت، أستفسر عن عروضكم')}`, '_blank');
-      }
-      if (window.DamanChat) DamanChat.openDirectChat('admin', 'إدارة ضمان سايت');
-      else this.switchTab('chat');
-    },
-
-    openCategoryFromHome(catId) {
-      if (window.DamanProjects) {
-        DamanProjects.subTab = 'market';
-        DamanProjects.marketFilter = 'all';
-        DamanProjects.selectedCategory = catId;
-      }
-      this.switchTab('projects');
-    },
-
-    // ==================== MAIN RENDER ROUTER ====================
-    renderCurrentTab() {
+    rerender() {
       const main = document.getElementById('app-main');
-      if (!main) return;
+      if (main && window.DamanApp && window.DamanApp.activeTab === 'wallet') {
+        this.render(main, window.DamanApp);
+      }
+    },
 
-      if (this.appConfig?.maintenanceMode && !this.hasAdminAccess()) {
-        main.innerHTML = `
-          <div class="glass-card rounded-3xl p-7 text-center space-y-3 mt-10 border-amber-500/40">
-            <i class="fa-solid fa-screwdriver-wrench text-4xl text-amber-400"></i>
-            <h2 class="text-base font-black text-white">التطبيق في وضع الصيانة المؤقتة</h2>
-            <p class="text-xs text-slate-300 leading-relaxed">${this.esc(this.appConfig.maintenanceMessage || 'سنعود للعمل خلال دقائق.')}</p>
-          </div>`;
+    setSubTab(t) { this.subTab = t; this.rerender(); },
+    setTxFilter(f) { this.txFilter = f; this.rerender(); },
+
+    channelShort(ch) {
+      return { vodafone_cash: 'محفظة كاش', instapay: 'إنستا باي', bank: 'تحويل بنكي' }[ch] || ch || '—';
+    },
+
+    statusBadge(st) {
+      if (st === 'approved') return '<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black">معتمد ✅</span>';
+      if (st === 'rejected') return '<span class="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-300 text-[10px] font-black">مرفوض ❌</span>';
+      if (st === 'cancelled') return '<span class="px-2 py-0.5 rounded-lg bg-slate-700 text-slate-300 text-[10px] font-black">ملغى ↩️</span>';
+      return '<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 text-[10px] font-black">قيد المراجعة ⏳</span>';
+    },
+
+    getEnabledDepositChannels(cfg) {
+      const c = (cfg && cfg.depositChannels) || {};
+      return {
+        vodafone_cash: c.vodafone_cash !== false,
+        instapay: c.instapay !== false,
+        bank: c.bank !== false
+      };
+    },
+
+    getEnabledWithdrawChannels(cfg) {
+      const c = (cfg && cfg.withdrawChannels) || {};
+      return {
+        vodafone_cash: c.vodafone_cash !== false,
+        instapay: c.instapay !== false,
+        bank: c.bank === true
+      };
+    },
+
+    // ==================== MANDATORY KYC VERIFICATION MODAL ====================
+    openKycModal(isForced = false) {
+      const app = window.DamanApp;
+      if (!app.user || !app.profile) return app.openAuthModal('login');
+      const p = app.profile;
+      const isCompany = p.accountType === 'company' || p.accountType === 'supplier';
+      this.kycPhotos = { idFront: '', idBack: '', selfie: '', crDoc: '', taxDoc: '' };
+
+      let m = document.getElementById('daman-kyc-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-kyc-modal';
+        m.className = 'daman-modal fixed inset-0 z-[92] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400">
+              <i class="fa-solid fa-id-card-clip me-1"></i> توثيق الهوية الإجباري (${isCompany ? 'شركة / مورّد' : 'أفراد / مقاولين'})
+            </h3>
+            ${!isForced ? `<button onclick="document.getElementById('daman-kyc-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>` : ''}
+          </div>
+
+          <div class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 leading-relaxed">
+            <b>مهم للعقود الرسمية:</b> اكتب الاسم الرباعي والرقم القومي والعنوان <b>كما في بطاقة الرقم القومي بالضبط</b>. تُحفظ الصور بسرية تامة ولا يراها إلا الإدارة وتُستخدم البيانات داخل العقود فقط.
+          </div>
+
+          <form onsubmit="DamanWallet.submitKyc(event)" class="space-y-2.5">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">${isCompany ? 'الاسم الرباعي للمسؤول القانوني (من البطاقة) *' : 'الاسم الرباعي كما في البطاقة بالضبط *'}</label>
+              <input id="kyc-legal-name" type="text" required value="${app.esc(p.legalName || '')}" placeholder="مثال: عادل نبيل عبد الله محمد" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">الرقم القومي (14 رقم) *</label>
+              <input id="kyc-nid" type="text" inputmode="numeric" maxlength="14" required value="${app.esc(p.nationalId || '')}" oninput="DamanWallet.previewNidBirthDate(this.value)" placeholder="29801012101234" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black tracking-wider" />
+              <div id="kyc-nid-info" class="text-[10px] mt-1 font-bold text-slate-400">سيتم استخراج تاريخ الميلاد والتحقق من السن (+18) تلقائياً</div>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">العنوان المثبت بضهر البطاقة *</label>
+              <input id="kyc-address" type="text" required value="${app.esc(p.legalAddress || '')}" placeholder="المحافظة — المركز/الحي — الشارع" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+
+            ${isCompany ? `
+              <div class="p-2.5 rounded-xl bg-slate-950/90 border border-sky-500/40 space-y-2">
+                <div class="text-[11px] font-black text-sky-300">بيانات الشركة / المورّد</div>
+                <div><label class="block text-[10px] text-slate-400 mb-1">الاسم الرسمي للشركة *</label><input id="kyc-comp-name" type="text" required value="${app.esc(p.companyName || p.name || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" /></div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div><label class="block text-[10px] text-slate-400 mb-1">رقم السجل التجاري *</label><input id="kyc-cr" type="text" required value="${app.esc(p.commercialReg || '')}" class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" /></div>
+                  <div><label class="block text-[10px] text-slate-400 mb-1">رقم البطاقة الضريبية *</label><input id="kyc-tax" type="text" required value="${app.esc(p.taxCard || '')}" class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" /></div>
+                </div>
+              </div>` : ''}
+
+            <div class="grid grid-cols-2 gap-2">
+              <label class="p-2.5 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer">
+                <div class="text-[10.5px] font-black text-amber-300"><i class="fa-solid fa-id-card me-1"></i>وش البطاقة *</div>
+                <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleKycPhoto(this,'idFront')" />
+                <div id="kyc-prev-idFront" class="text-[9px] text-slate-500 mt-1">اضغط للرفع</div>
+              </label>
+
+              <label class="p-2.5 rounded-xl border border-dashed border-amber-500/50 bg-slate-950 text-center cursor-pointer">
+                <div class="text-[10.5px] font-black text-amber-300"><i class="fa-solid fa-id-card-clip me-1"></i>ضهر البطاقة *</div>
+                <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleKycPhoto(this,'idBack')" />
+                <div id="kyc-prev-idBack" class="text-[9px] text-slate-500 mt-1">اضغط للرفع</div>
+              </label>
+            </div>
+
+            <label class="block p-3 rounded-xl border border-dashed border-emerald-500/60 bg-slate-950 text-center cursor-pointer">
+              <div class="text-[11px] font-black text-emerald-300"><i class="fa-solid fa-camera-retro me-1"></i> صورة سيلفي واضحة لوجهك (يفضل مع البطاقة) *</div>
+              <input type="file" accept="image/*" capture="user" required class="hidden" onchange="DamanWallet.handleKycPhoto(this,'selfie')" />
+              <div id="kyc-prev-selfie" class="text-[9.5px] text-slate-500 mt-1">اضغط لالتقاط سيلفي مباشر</div>
+            </label>
+
+            ${isCompany ? `
+              <div class="grid grid-cols-2 gap-2">
+                <label class="p-2.5 rounded-xl border border-dashed border-sky-500/50 bg-slate-950 text-center cursor-pointer">
+                  <div class="text-[10px] font-black text-sky-300">صورة السجل التجاري *</div>
+                  <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleKycPhoto(this,'crDoc')" />
+                  <div id="kyc-prev-crDoc" class="text-[9px] text-slate-500 mt-1">اضغط للرفع</div>
+                </label>
+                <label class="p-2.5 rounded-xl border border-dashed border-sky-500/50 bg-slate-950 text-center cursor-pointer">
+                  <div class="text-[10px] font-black text-sky-300">صورة البطاقة الضريبية *</div>
+                  <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleKycPhoto(this,'taxDoc')" />
+                  <div id="kyc-prev-taxDoc" class="text-[9px] text-slate-500 mt-1">اضغط للرفع</div>
+                </label>
+              </div>` : ''}
+
+            <button id="kyc-submit-btn" type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black text-xs">
+              <i class="fa-solid fa-paper-plane me-1"></i> إرسال مستندات التوثيق للإدارة
+            </button>
+          </form>
+        </div>`;
+
+      if (p.nationalId) this.previewNidBirthDate(p.nationalId);
+    },
+
+    previewNidBirthDate(val) {
+      const box = document.getElementById('kyc-nid-info');
+      if (!box) return;
+      const clean = String(val || '').replace(/\D/g, '');
+      if (clean.length < 14) {
+        box.className = 'text-[10px] mt-1 font-bold text-slate-400';
+        box.textContent = `متبقي ${14 - clean.length} رقم...`;
         return;
       }
+      const res = window.DamanApp.parseEgyptianNationalId(clean);
+      if (res.valid) {
+        box.className = 'text-[10px] mt-1 font-black text-emerald-400';
+        box.textContent = `✅ رقم قومي صحيح — تاريخ الميلاد: ${res.birthDate} (السن: ${res.age} سنة)`;
+      } else {
+        box.className = 'text-[10px] mt-1 font-black text-rose-400';
+        box.textContent = `❌ ${res.error}`;
+      }
+    },
 
-      if (this.user && this.profile && this.profile.status === 'banned' && !this.isAdmin()) {
-        main.innerHTML = `
-          <div class="glass-card rounded-3xl p-7 text-center space-y-3 mt-10 border-rose-500/60">
-            <i class="fa-solid fa-ban text-4xl text-rose-500"></i>
-            <h2 class="text-base font-black text-rose-400">تم إيقاف هذا الحساب من الإدارة</h2>
-            <p class="text-xs text-slate-300">${this.esc(this.profile.banReason || '')}</p>
-            <button onclick="DamanApp.handleHeaderAuthClick()" class="px-5 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-black">تسجيل الخروج</button>
-          </div>`;
-        return;
+    async handleKycPhoto(input, slot) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const b64 = await window.DamanApp.compressImage(file, 780, 0.56);
+        this.kycPhotos[slot] = b64;
+        const prev = document.getElementById('kyc-prev-' + slot);
+        if (prev) prev.innerHTML = `<img src="${b64}" class="max-h-24 mx-auto rounded-lg mt-1.5 border border-slate-700" />`;
+      } catch (e) {
+        window.DamanApp.toast('تعذر ضغط الصورة، جرّب صورة أخرى', 'error');
+      }
+    },
+
+    async submitKyc(e) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      await app.withLock('submitKyc', async () => {
+        const legalName = document.getElementById('kyc-legal-name').value.trim();
+        const nidRaw = document.getElementById('kyc-nid').value.trim();
+        const legalAddress = document.getElementById('kyc-address').value.trim();
+        const isCompany = app.profile?.accountType === 'company' || app.profile?.accountType === 'supplier';
+        const companyName = isCompany ? document.getElementById('kyc-comp-name').value.trim() : '';
+        const commercialReg = isCompany ? document.getElementById('kyc-cr').value.trim() : '';
+        const taxCard = isCompany ? document.getElementById('kyc-tax').value.trim() : '';
+
+        if (legalName.split(/\s+/).length < 3) {
+          return app.toast('يرجى كتابة الاسم الرباعي بالكامل كما هو مكتوب في البطاقة', 'warning');
+        }
+        const parsed = app.parseEgyptianNationalId(nidRaw);
+        if (!parsed.valid) return app.toast(parsed.error, 'error');
+
+        if (!this.kycPhotos.idFront || !this.kycPhotos.idBack || !this.kycPhotos.selfie) {
+          return app.toast('يجب رفع صور وش وضهر البطاقة وصورة السيلفي أولاً', 'warning');
+        }
+        if (isCompany && (!this.kycPhotos.crDoc || !this.kycPhotos.taxDoc)) {
+          return app.toast('يجب رفع صورة السجل التجاري والبطاقة الضريبية', 'warning');
+        }
+
+        const btn = document.getElementById('kyc-submit-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الفحص والرفع الآمن...'; }
+
+        try {
+          const bl = await app.checkBlacklist({
+            email: app.profile?.email, phone: app.profile?.phone, nationalId: parsed.nid, commercialReg
+          });
+          if (bl) {
+            if (btn) { btn.disabled = false; btn.textContent = 'إرسال مستندات التوثيق للإدارة'; }
+            return app.toast(`تعذر التوثيق: ${bl}`, 'error');
+          }
+
+          const dupNid = await app.db.collection('users').where('nationalId', '==', parsed.nid).limit(2).get();
+          const conflict = dupNid.docs.find((d) => d.id !== app.user.uid);
+          if (conflict) {
+            if (btn) { btn.disabled = false; btn.textContent = 'إرسال مستندات التوثيق للإدارة'; }
+            return app.toast('هذا الرقم القومي موثّق ومسجّل بالفعل على حساب آخر!', 'error');
+          }
+
+          const [idFrontMedia, idBackMedia, selfieMedia, crMedia, taxMedia] = await Promise.all([
+            app.saveMedia(this.kycPhotos.idFront, { kind: 'kyc_id_front' }),
+            app.saveMedia(this.kycPhotos.idBack, { kind: 'kyc_id_back' }),
+            app.saveMedia(this.kycPhotos.selfie, { kind: 'kyc_selfie' }),
+            isCompany ? app.saveMedia(this.kycPhotos.crDoc, { kind: 'kyc_cr' }) : Promise.resolve(''),
+            isCompany ? app.saveMedia(this.kycPhotos.taxDoc, { kind: 'kyc_tax' }) : Promise.resolve('')
+          ]);
+
+          await app.db.collection('kycRequests').doc(app.user.uid).set({
+            userId: app.user.uid,
+            displayName: app.profile?.companyName || app.profile?.name || '',
+            accountType: app.profile?.accountType || 'individual',
+            phone: app.profile?.phone || '',
+            email: app.profile?.email || '',
+            legalName, nationalId: parsed.nid, birthDate: parsed.birthDate, legalAddress,
+            companyName, commercialReg, taxCard,
+            idFrontMedia, idBackMedia, selfieMedia, crMedia, taxMedia,
+            status: 'pending',
+            submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          await app.db.collection('users').doc(app.user.uid).update({
+            kycStatus: 'pending', kycRejectionReason: ''
+          });
+
+          await app.sendNotification('ADMIN', 'طلب توثيق هوية جديد 🪪', `${legalName} (${parsed.nid}) — بانتظار المراجعة.`);
+          document.getElementById('daman-kyc-modal').classList.add('hidden');
+          app.toast('تم إرسال مستندات التوثيق بنجاح! سيتم المراجعة سريعاً ✅', 'success');
+        } catch (err) {
+          if (btn) { btn.disabled = false; btn.textContent = 'إرسال مستندات التوثيق للإدارة'; }
+          app.toast(err.message, 'error');
+        }
+      });
+    },
+
+    // ==================== 3-CHANNEL DEPOSIT MODAL (LIVE ROTATING ACCOUNTS + PRIVACY-SAFE TXREF CHECK) ====================
+    clearDepositTimer() {
+      if (this.depositTimer) { clearInterval(this.depositTimer); this.depositTimer = null; }
+    },
+
+    closeDepositModal() {
+      this.clearDepositTimer();
+      document.getElementById('daman-deposit-modal')?.classList.add('hidden');
+    },
+
+    openDepositWithAmount(neededAmount) {
+      window.DamanApp.switchTab('wallet');
+      setTimeout(() => this.openDepositModal(Math.ceil(Number(neededAmount || 0))), 140);
+    },
+
+    async openDepositModal(prefillAmount = '') {
+      const app = window.DamanApp;
+      if (!app.user || !app.profile) return app.openAuthModal('login');
+      if (!app.isKycVerified()) {
+        app.toast('لا يمكن الإيداع قبل توثيق الحساب بالبطاقة والسيلفي', 'error');
+        return this.openKycModal(true);
       }
 
-      // Mandatory Google Post-Signup Onboarding (Phone + Account Type) -> Mandatory KYC Gate
-      if (this.user && this.profile && !this.isKycVerified() && !this.viewingPublicUid) {
-        this.renderMandatoryKycWall(main);
-        return;
+      if (app.appConfig?.disableDeposits && !app.isAdmin()) {
+        return app.toast('طلبات الإيداع متوقفة مؤقتاً للصيانة من الإدارة — حاول بعد قليل', 'warning');
       }
 
-      if (this.viewingPublicUid) {
-        this.renderFacebookProfile(main, this.viewingPublicUid);
-        return;
+      if (this.requests.some((r) => r.type === 'deposit' && r.status === 'pending')) {
+        return app.toast('لديك طلب إيداع قيد المراجعة بالفعل — انتظر اعتماده قبل إرسال طلب جديد', 'warning');
       }
 
-      if (this.activeTab === 'home') return this.renderHomeTab(main);
-      if (this.activeTab === 'profile') {
-        if (!this.user) {
-          main.innerHTML = `<div class="glass-card rounded-2xl p-7 text-center space-y-3 mt-6"><i class="fa-solid fa-user-lock text-3xl text-amber-400"></i><h3 class="text-sm font-black text-white">سجّل الدخول لعرض صفحتك الشخصية</h3><button onclick="DamanApp.openAuthModal('login')" class="px-6 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تسجيل الدخول / حساب جديد</button></div>`;
+      let liveCfg = Object.assign({}, app.appConfig || {});
+      try {
+        const cfgSnap = await app.db.collection('settings').doc('appConfig').get({ source: 'server' });
+        if (cfgSnap.exists) liveCfg = Object.assign({}, liveCfg, cfgSnap.data());
+      } catch (e) {}
+
+      if (liveCfg.disableDeposits && !app.isAdmin()) {
+        return app.toast('طلبات الإيداع متوقفة مؤقتاً من الإدارة', 'warning');
+      }
+
+      const enabled = this.getEnabledDepositChannels(liveCfg);
+      const activeList = ['vodafone_cash', 'instapay', 'bank'].filter((k) => enabled[k]);
+      if (!activeList.length) {
+        return app.toast('جميع قنوات الإيداع متوقفة مؤقتاً — تواصل مع الإدارة', 'error');
+      }
+
+      this.freshAppConfig = liveCfg;
+      this.selectedDepositChannel = activeList[0];
+      this.tempReceiptBase64 = '';
+      this.depositExpired = false;
+      const minsCfg = Math.max(2, Math.min(30, Number(liveCfg.depositSessionMinutes || 10)));
+      this.depositSecondsLeft = minsCfg * 60;
+
+      let m = document.getElementById('daman-deposit-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-deposit-modal';
+        m.className = 'daman-modal fixed inset-0 z-[88] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      this.renderDepositModalContent(m, prefillAmount, minsCfg);
+      this.startDepositCountdown();
+    },
+
+    selectDepositChannel(ch) {
+      this.selectedDepositChannel = ch;
+      ['vodafone_cash', 'instapay', 'bank'].forEach((k) => {
+        const btn = document.getElementById('dep-tab-' + k);
+        const card = document.getElementById('dep-card-' + k);
+        if (btn) {
+          btn.className = `py-2 px-1.5 rounded-xl text-[10.5px] font-black border transition ${k === ch ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 text-slate-300 border-slate-700'}`;
+        }
+        if (card) card.classList.toggle('hidden', k !== ch);
+      });
+      const sel = document.getElementById('dep-channel-hidden');
+      if (sel) sel.value = ch;
+    },
+
+    renderDepositModalContent(modal, prefillAmount = '', minsCfg = 10) {
+      const app = window.DamanApp;
+      const cfg = this.freshAppConfig || app.appConfig || {};
+      const acc = cfg.paymentAccounts || {};
+      const enabled = this.getEnabledDepositChannels(cfg);
+      const minDep = Number(cfg.minDeposit || 100);
+      const maxDep = Number(cfg.maxDeposit || 250000);
+      const mins = String(Math.floor(this.depositSecondsLeft / 60)).padStart(2, '0');
+      const secs = String(this.depositSecondsLeft % 60).padStart(2, '0');
+
+      const ch = this.selectedDepositChannel;
+      const vfNum = acc.vodafoneCash || 'غير محدد';
+      const vfHolder = acc.vodafoneHolder || '';
+      const ipAddr = acc.instaPay || 'غير محدد';
+      const ipHolder = acc.instaPayHolder || '';
+      const bankInfo = acc.bankInfo || 'غير محدد';
+      const bankIban = acc.bankIban || '';
+
+      modal.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-emerald-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-emerald-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> شحن المحفظة (إيداع عبر 3 وسائل)</h3>
+            <button onclick="DamanWallet.closeDepositModal()" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/60 space-y-1">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-black text-rose-300"><i class="fa-solid fa-stopwatch me-1"></i> صلاحية أرقام الاستقبال الحالية</span>
+              <span id="dep-countdown-lbl" class="px-2.5 py-0.5 rounded-lg bg-rose-600 text-white font-black text-sm tracking-widest">${mins}:${secs}</span>
+            </div>
+            <p class="text-[10.5px] text-rose-100 leading-relaxed">
+              ⚠️ <b>هام جداً:</b> تتغير أرقام الاستقبال دورياً عند اكتمال الحد الأقصى. حوّل وارفع الإيصال خلال <b>${minsCfg} دقائق</b> فقط، ولا تحوّل أبداً على رقم قديم محفوظ لديك.
+            </p>
+          </div>
+
+          <div id="dep-expired-gate" class="hidden p-5 rounded-2xl bg-slate-950 border border-rose-500/60 text-center space-y-3">
+            <i class="fa-solid fa-clock-rotate-left text-3xl text-rose-400"></i>
+            <div class="text-sm font-black text-rose-300">انتهت مهلة البيانات الحالية!</div>
+            <p class="text-[11px] text-slate-300">حمايةً لأموالك، تم إخفاء الأرقام السابقة. اضغط أدناه لجلب الحسابات النشطة لحظياً.</p>
+            <button onclick="DamanWallet.openDepositModal('${app.esc(prefillAmount)}')" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">
+              <i class="fa-solid fa-rotate me-1"></i> تحديث وجلب الحسابات النشطة الآن
+            </button>
+          </div>
+
+          <div id="dep-active-body" class="space-y-3">
+            <div class="grid grid-cols-3 gap-1.5">
+              ${enabled.vodafone_cash ? `<button id="dep-tab-vodafone_cash" type="button" onclick="DamanWallet.selectDepositChannel('vodafone_cash')" class="py-2 px-1.5 rounded-xl text-[10.5px] font-black border ${ch === 'vodafone_cash' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 text-slate-300 border-slate-700'}">📱 محافظ كاش</button>` : ''}
+              ${enabled.instapay ? `<button id="dep-tab-instapay" type="button" onclick="DamanWallet.selectDepositChannel('instapay')" class="py-2 px-1.5 rounded-xl text-[10.5px] font-black border ${ch === 'instapay' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 text-slate-300 border-slate-700'}">⚡ إنستا باي</button>` : ''}
+              ${enabled.bank ? `<button id="dep-tab-bank" type="button" onclick="DamanWallet.selectDepositChannel('bank')" class="py-2 px-1.5 rounded-xl text-[10.5px] font-black border ${ch === 'bank' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 text-slate-300 border-slate-700'}">🏦 تحويل بنكي</button>` : ''}
+            </div>
+
+            <div id="dep-card-vodafone_cash" class="${ch === 'vodafone_cash' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-1.5">
+              <div class="text-[10px] text-amber-300 font-black">رقم المحفظة النشط (فودافون / اتصالات / أورنج / WE كاش):</div>
+              <div class="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900">
+                <div>
+                  <div class="text-sm font-black text-white tracking-wider select-all">${app.esc(vfNum)}</div>
+                  ${vfHolder ? `<div class="text-[10px] text-slate-400">باسم: ${app.esc(vfHolder)}</div>` : ''}
+                </div>
+                <button type="button" onclick="navigator.clipboard.writeText('${app.esc(vfNum)}'); DamanApp.toast('تم نسخ رقم المحفظة ✅','success')" class="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10.5px]">نسخ</button>
+              </div>
+            </div>
+
+            <div id="dep-card-instapay" class="${ch === 'instapay' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-1.5">
+              <div class="text-[10px] text-purple-300 font-black">عنوان إنستا باي (InstaPay IPA) النشط:</div>
+              <div class="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900">
+                <div class="min-w-0">
+                  <div class="text-sm font-black text-emerald-300 truncate select-all">${app.esc(ipAddr)}</div>
+                  ${ipHolder ? `<div class="text-[10px] text-slate-400">المستفيد: ${app.esc(ipHolder)}</div>` : ''}
+                </div>
+                <button type="button" onclick="navigator.clipboard.writeText('${app.esc(ipAddr)}'); DamanApp.toast('تم نسخ عنوان إنستا باي ✅','success')" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10.5px] shrink-0">نسخ</button>
+              </div>
+            </div>
+
+            <div id="dep-card-bank" class="${ch === 'bank' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-sky-500/40 space-y-1.5">
+              <div class="text-[10px] text-sky-300 font-black">بيانات الحساب البنكي النشط:</div>
+              <div class="p-2.5 rounded-xl bg-slate-900 space-y-1.5">
+                <div class="text-xs text-white font-bold whitespace-pre-line select-all">${app.esc(bankInfo)}</div>
+                ${bankIban ? `
+                  <div class="flex items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <span class="text-[10px] text-sky-300 font-black break-all select-all">IBAN: ${app.esc(bankIban)}</span>
+                    <button type="button" onclick="navigator.clipboard.writeText('${app.esc(bankIban)}'); DamanApp.toast('تم نسخ الـ IBAN ✅','success')" class="px-2.5 py-1 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px] shrink-0">نسخ IBAN</button>
+                  </div>` : ''}
+              </div>
+            </div>
+
+            <form onsubmit="DamanWallet.submitDeposit(event)" class="space-y-2.5">
+              <input id="dep-channel-hidden" type="hidden" value="${ch}" />
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[10.5px] font-bold text-slate-300 mb-1">المبلغ (${app.fmtMoney(minDep)} – ${app.fmtMoney(maxDep)} ج.م) *</label>
+                  <input id="dep-amount" type="number" min="${minDep}" max="${maxDep}" step="any" required value="${app.esc(prefillAmount)}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
+                </div>
+                <div>
+                  <label class="block text-[10.5px] font-bold text-slate-300 mb-1">رقم/حساب المحوّل منه *</label>
+                  <input id="dep-sender" type="text" required value="${app.esc(app.profile?.phone || '')}" placeholder="01xxxxxxxxx أو اسم الحساب" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[10.5px] font-bold text-amber-300 mb-1">الرقم المرجعي للعملية (Transaction Reference) *</label>
+                <input id="dep-txref" type="text" required placeholder="رقم العملية من رسالة التأكيد أو إيصال التحويل" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
+              </div>
+
+              <label class="block p-3 rounded-xl border border-dashed border-emerald-500/60 bg-slate-950 text-center cursor-pointer">
+                <span class="font-black text-emerald-300"><i class="fa-solid fa-receipt me-1"></i> إرفاق صورة إيصال التحويل *</span>
+                <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleReceiptPhoto(this)" />
+                <div id="dep-receipt-prev" class="text-[9.5px] text-slate-500 mt-1">اضغط لرفع صورة واضحة للإيصال</div>
+              </label>
+
+              <button id="dep-submit-btn" type="submit" class="w-full py-3 rounded-2xl bg-emerald-500 text-slate-950 font-black text-xs">
+                <i class="fa-solid fa-check-double me-1"></i> تأكيد وإرسال طلب الشحن
+              </button>
+            </form>
+          </div>
+        </div>`;
+    },
+
+    startDepositCountdown() {
+      this.clearDepositTimer();
+      this.depositTimer = setInterval(() => {
+        this.depositSecondsLeft--;
+        const lbl = document.getElementById('dep-countdown-lbl');
+        if (this.depositSecondsLeft <= 0) {
+          this.clearDepositTimer();
+          this.depositExpired = true;
+          if (lbl) lbl.textContent = '00:00';
+          document.getElementById('dep-active-body')?.classList.add('hidden');
+          document.getElementById('dep-expired-gate')?.classList.remove('hidden');
           return;
         }
-        return this.renderFacebookProfile(main, this.user.uid);
-      }
-
-      const mod = this.modules[this.activeTab];
-      if (mod && typeof mod.render === 'function') {
-        mod.render(main, this);
-      } else {
-        const expectedFile = (MODULE_FILES[this.activeTab] || '').split('?')[0];
-        if (!this.failedMods[this.activeTab]) {
-          this.loadMissingModule(this.activeTab);
-          main.innerHTML = `<div class="glass-card rounded-2xl p-6 text-center text-xs text-amber-300 font-bold">جارٍ تحميل القسم (${this.esc(expectedFile)})...</div>`;
-        } else {
-          main.innerHTML = `
-            <div class="glass-card rounded-2xl p-5 text-center space-y-3 border-rose-500/50 text-xs">
-              <i class="fa-solid fa-triangle-exclamation text-2xl text-rose-400"></i>
-              <div class="font-black text-rose-300">تعذر تحميل ملف القسم: ${this.esc(expectedFile)}</div>
-              <p class="text-[11px] text-slate-300">تأكد من رفع ملف <b>${this.esc(expectedFile)}</b> بنفس الاسم (بحروف صغيرة) على GitHub.</p>
-              <button onclick="DamanApp.failedMods['${this.activeTab}']=false; DamanApp.loadMissingModule('${this.activeTab}')" class="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-black">إعادة المحاولة</button>
-            </div>`;
+        if (lbl) {
+          const m = String(Math.floor(this.depositSecondsLeft / 60)).padStart(2, '0');
+          const s = String(this.depositSecondsLeft % 60).padStart(2, '0');
+          lbl.textContent = `${m}:${s}`;
         }
-      }
+      }, 1000);
     },
 
-    // ==================== MANDATORY ONBOARDING (GOOGLE PHONE/TYPE) + KYC WALL ====================
-    async submitGoogleOnboarding(e) {
-      e.preventDefault();
-      await this.withLock('gOnboard', async () => {
-        const name = document.getElementById('go-name').value.trim();
-        const accountType = document.getElementById('go-type').value;
-        const phone = this.normalizePhone(document.getElementById('go-phone').value);
-        const refCode = (document.getElementById('go-ref')?.value || '').trim().toUpperCase();
-
-        if (!/^01[0125]\d{8}$/.test(phone)) return this.toast('أدخل رقم موبايل مصري صحيح (11 رقم)', 'error');
-        const bl = await this.checkBlacklist({ email: this.user.email, phone });
-        if (bl) return this.toast(`تعذر الاستكمال: ${bl}`, 'error');
-
-        const dup = await db.collection('users').where('phone', '==', phone).limit(2).get();
-        if (dup.docs.some((d) => d.id !== this.user.uid)) {
-          return this.toast('رقم الموبايل مسجّل بالفعل بحساب آخر', 'error');
-        }
-
-        try {
-          await db.collection('users').doc(this.user.uid).update({
-            name,
-            companyName: accountType !== 'individual' ? name : '',
-            accountType,
-            phone,
-            referredBy: refCode,
-            needsOnboarding: false,
-            termsAcceptedAt: Date.now()
-          });
-          this.toast('تم حفظ بياناتك بنجاح! استكمل الآن خطوة التوثيق بالبطاقة 🪪', 'success');
-        } catch (err) { this.toast(err.message, 'error'); }
-      });
-    },
-
-    renderMandatoryKycWall(container) {
-      const p = this.profile || {};
-      const st = p.kycStatus || 'none';
-      const wa = this.appConfig?.supportWhatsapp || '201030374787';
-
-      // Step 1 for Google Sign-In Users: Capture Egyptian Phone + Account Type + Terms before KYC
-      if (!p.phone || p.needsOnboarding) {
-        const savedRef = localStorage.getItem('daman_ref_code') || '';
-        container.innerHTML = `
-          <div class="glass-card rounded-3xl p-5 space-y-3.5 mt-4 border-amber-500/50 text-xs">
-            <div class="text-center space-y-1">
-              <div class="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl"><i class="fa-brands fa-google"></i></div>
-              <h2 class="text-sm font-black text-white">خطوة 1 من 2: استكمال بيانات حسابك</h2>
-              <p class="text-[11px] text-slate-300">تم الدخول بحساب جوجل (${this.esc(p.email || '')}) — أدخل رقم موبايلك ونوع الحساب للانتقال للتوثيق بالبطاقة.</p>
-            </div>
-            <form onsubmit="DamanApp.submitGoogleOnboarding(event)" class="space-y-2.5">
-              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">اسم العرض / الشهرة أو اسم الشركة *</label><input id="go-name" type="text" required value="${this.esc(p.name || '')}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
-              <div>
-                <label class="block text-[10.5px] font-bold text-slate-300 mb-1">نوع الحساب *</label>
-                <select id="go-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
-                  <option value="individual">فرد / مقاول / فني / عميل</option>
-                  <option value="company">شركة مقاولات / مكتب هندسي</option>
-                  <option value="supplier">مورّد خامات ومواد بناء (B2B)</option>
-                </select>
-              </div>
-              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">رقم الموبايل المصري (11 رقم) *</label><input id="go-phone" type="tel" required placeholder="01xxxxxxxxx" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" /></div>
-              <div><label class="block text-[10.5px] font-bold text-slate-400 mb-1">كود دعوة صديق (اختياري)</label><input id="go-ref" type="text" value="${this.esc(savedRef)}" placeholder="DMN-XXXXXX" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white uppercase" /></div>
-              <label class="flex items-start gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer"><input type="checkbox" required class="mt-0.5 accent-amber-500" /><span class="text-[10.5px] text-slate-300">أوافق على <button type="button" onclick="DamanApp.openPrivacyModal()" class="text-amber-400 underline font-bold">الشروط وسياسة الخصوصية</button> وتسجيل المكالمات لمدة 30 يوماً.</span></label>
-              <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">حفظ والمتابعة للتوثيق بالبطاقة</button>
-            </form>
-            <div class="text-center"><button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button></div>
-          </div>`;
-        return;
-      }
-
-      const isCompany = p.accountType === 'company' || p.accountType === 'supplier';
-      if (st === 'pending') {
-        container.innerHTML = `
-          <div class="glass-card rounded-3xl p-6 text-center space-y-4 mt-4 border-amber-500/50">
-            <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-3xl"><i class="fa-solid fa-hourglass-half animate-pulse"></i></div>
-            <h2 class="text-base font-black text-amber-400">حسابك قيد مراجعة التوثيق الإجباري</h2>
-            <p class="text-xs text-slate-300 leading-relaxed">تم استلام مستندات التوثيق بنجاح وتقوم إدارة <b>${this.esc(this.t('appName'))}</b> حالياً بمطابقة البطاقة والسيلفي لفتح المحفظة والسوق والعقود.</p>
-            <div class="grid grid-cols-2 gap-2 pt-1">
-              <button onclick="window.location.reload()" class="py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تحديث الحالة</button>
-              <a href="https://wa.me/${wa}?text=${encodeURIComponent('مرحباً إدارة ضمان سايت، قمت برفع مستندات التوثيق لحسابي: ' + (p.phone || p.email || ''))}" target="_blank" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center"><i class="fa-brands fa-whatsapp me-1"></i> واتساب</a>
-            </div>
-            <button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button>
-          </div>`;
-        return;
-      }
-
-      container.innerHTML = `
-        <div class="glass-card rounded-3xl p-6 text-center space-y-4 mt-4 border-rose-500/50">
-          <div class="w-16 h-16 mx-auto rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-3xl"><i class="fa-solid fa-id-card-clip"></i></div>
-          <h2 class="text-base font-black text-white">خطوة 2 من 2: توثيق الهوية الإجباري</h2>
-          ${st === 'rejected' ? `<div class="p-3 rounded-xl bg-rose-500/15 border border-rose-500/50 text-xs text-rose-200 font-bold">❌ سبب الرفض: ${this.esc(p.kycRejectionReason || 'الصور غير واضحة')}</div>` : ''}
-          <p class="text-xs text-slate-300 leading-relaxed">${isCompany ? 'مطلوب للشركات والموردين: صورة السجل التجاري + البطاقة الضريبية + بطاقة المسؤول (وش وضهر) + سيلفي.' : 'مطلوب للأفراد والمقاولين: بطاقة الرقم القومي (وش وضهر) + صورة سيلفي واضحة. تُستخدم البيانات تلقائياً في العقود الرسمية فقط.'}</p>
-          <button onclick="if(window.DamanWallet){ DamanWallet.openKycModal(true); } else { DamanApp.loadMissingModule('wallet'); DamanApp.toast('جارٍ تحميل شاشة التوثيق...','info'); }" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm">ابدأ رفع البطاقة والسيلفي الآن</button>
-          <button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button>
-        </div>`;
-    },
-
-    // ==================== HOME TAB ====================
-    renderHomeTab(container) {
-      const p = this.profile;
-      const br = this.appConfig?.branding || {};
-      const isBday = p && this.isBirthdayToday(p);
-      const avail = Number(p?.balanceAvailable || 0);
-      const esc = Number(p?.balanceEscrow || 0);
-      const exp = Number(p?.subscriptionExpiresAt || 0);
-      const expSoon = exp > Date.now() && exp - Date.now() <= 3 * 24 * 60 * 60 * 1000;
-
-      const customBanners = Array.isArray(this.appConfig?.customHomeBanners) ? this.appConfig.customHomeBanners : [];
-      const officialList = this.appConfig?.hideOfficialBanners ? [] : OFFICIAL_HOME_BANNERS;
-      const allBanners = [...customBanners, ...officialList];
-
-      const themeStyles = {
-        emerald: { box: 'from-emerald-950/90 via-slate-900 to-slate-950 border-emerald-500/50', badge: 'bg-emerald-500/20 text-emerald-300', btn: 'bg-emerald-500 text-slate-950' },
-        amber: { box: 'from-amber-950/80 via-slate-900 to-slate-950 border-amber-500/50', badge: 'bg-amber-500/20 text-amber-300', btn: 'bg-amber-500 text-slate-950' },
-        purple: { box: 'from-purple-950/80 via-slate-900 to-slate-950 border-purple-500/50', badge: 'bg-purple-500/20 text-purple-300', btn: 'bg-purple-500 text-white' },
-        sky: { box: 'from-sky-950/80 via-slate-900 to-slate-950 border-sky-500/50', badge: 'bg-sky-500/20 text-sky-300', btn: 'bg-sky-500 text-slate-950' }
-      };
-
-      const featuredPosts = window.DamanProjects && typeof DamanProjects.getFeaturedPosts === 'function'
-        ? DamanProjects.getFeaturedPosts(5)
-        : [];
-
-      container.innerHTML = `
-        <div class="space-y-4">
-          ${this.hasAdminAccess() ? `
-            <button onclick="DamanApp.switchTab('admin')" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 border border-purple-400/60 text-white flex items-center justify-between text-xs font-black shadow-xl">
-              <span><i class="fa-solid fa-crown text-amber-300 me-1.5"></i> لوحة سيطرة الإدارة الشاملة (خزنة، ميزان، إعلانات، شركات، طوارئ)</span>
-              <i class="fa-solid fa-chevron-left"></i>
-            </button>` : ''}
-
-          ${isBday ? `
-            <div class="p-4 rounded-2xl bg-gradient-to-r from-amber-500/25 via-rose-500/20 to-purple-500/25 border border-amber-400/60 text-center space-y-1">
-              <div class="text-2xl">🎂🎉</div>
-              <div class="text-sm font-black text-amber-300">كل سنة وأنت طيب يا ${this.esc(p.name)}!</div>
-              <div class="text-[11px] text-slate-200">أسرة ${this.esc(br.appNameAr || 'ضمان سايت')} تتمنى لك عاماً سعيداً ومليئاً بالنجاح.</div>
-            </div>` : ''}
-
-          ${expSoon ? `
-            <div class="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/50 flex items-center justify-between gap-2 text-xs">
-              <span class="font-bold text-amber-200"><i class="fa-solid fa-clock me-1"></i> باقتك ستنتهي خلال أقل من 3 أيام!</span>
-              <button onclick="DamanApp.switchTab('wallet')" class="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]">تجديد</button>
-            </div>` : ''}
-
-          <!-- Hero / Balance Card -->
-          <div class="glass-card rounded-3xl p-4 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-amber-500/30 space-y-3">
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <div class="text-[11px] text-amber-400 font-extrabold">${this.esc(br.heroWelcome || 'أهلاً بك في ضمان سايت 🏗️')}</div>
-                <h1 class="text-base font-black text-white">${p ? this.esc(p.companyName || p.name) : this.esc(br.heroGuestTitle || 'أقوى منصة مقاولات وضمان مالي في مصر')}</h1>
-              </div>
-              ${p ? `<span class="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black">موثّق ✅</span>` : ''}
-            </div>
-
-            ${p ? `
-              <div class="grid grid-cols-2 gap-2">
-                <div onclick="DamanApp.switchTab('wallet')" class="p-3 rounded-2xl bg-slate-950/80 border border-emerald-500/30 cursor-pointer">
-                  <div class="text-[10px] text-slate-400 font-bold">الرصيد الكاش المتاح</div>
-                  <div class="text-base font-black text-emerald-400 mt-0.5">${this.fmtMoney(avail)} <span class="text-[10px]">ج.م</span></div>
-                </div>
-                <div onclick="DamanApp.switchTab('wallet')" class="p-3 rounded-2xl bg-slate-950/80 border border-amber-500/30 cursor-pointer">
-                  <div class="text-[10px] text-slate-400 font-bold">محجوز بالضمان</div>
-                  <div class="text-base font-black text-amber-400 mt-0.5">${this.fmtMoney(esc)} <span class="text-[10px]">ج.م</span></div>
-                </div>
-              </div>` : `
-              <p class="text-xs text-slate-300 leading-relaxed">${this.esc(br.heroGuestDesc || '')}</p>
-              <div class="space-y-2">
-                <button onclick="DamanApp.signInWithGoogle()" class="w-full py-2.5 rounded-xl bg-white text-slate-900 font-black text-xs flex items-center justify-center gap-2 shadow">
-                  <i class="fa-brands fa-google text-rose-500"></i> الدخول السريع بحساب Google
-                </button>
-                <div class="grid grid-cols-2 gap-2">
-                  <button onclick="DamanApp.openAuthModal('register')" class="py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">إنشاء حساب جديد</button>
-                  <button onclick="DamanApp.openAuthModal('login')" class="py-2.5 rounded-xl bg-slate-800 text-white font-black text-xs">دخول بالهاتف/الإيميل</button>
-                </div>
-              </div>`}
-          </div>
-
-          <!-- Official + Custom Home Promo Banners -->
-          ${allBanners.length ? `
-            <div class="space-y-2">
-              <div class="flex items-center justify-between px-1">
-                <h2 class="text-xs font-black text-amber-400"><i class="fa-solid fa-fire me-1"></i> عروض وخدمات ${this.esc(br.appNameAr || 'ضمان سايت')} (${allBanners.length})</h2>
-                ${this.isAdmin() ? `<button onclick="if(window.DamanAdmin) DamanAdmin.subTab='ads'; DamanApp.switchTab('admin')" class="text-[10px] font-black text-purple-300 underline">+ تحكم بالإعلانات</button>` : ''}
-              </div>
-              <div class="flex gap-2.5 overflow-x-auto pb-2 snap-x snap-mandatory">
-                ${allBanners.map((b) => {
-                  const st = themeStyles[b.theme] || themeStyles.amber;
-                  return `
-                    <div class="snap-start shrink-0 w-[86%] sm:w-[72%] rounded-3xl p-4 bg-gradient-to-br ${st.box} border flex flex-col justify-between gap-3 shadow-lg">
-                      <div class="space-y-1.5">
-                        <span class="inline-block px-2.5 py-0.5 rounded-lg ${st.badge} text-[9.5px] font-black">${this.esc(b.badge)}</span>
-                        <h3 class="text-sm font-black text-white leading-snug">${this.esc(b.title)}</h3>
-                        <p class="text-[11px] text-slate-300 leading-relaxed">${this.esc(b.subtitle)}</p>
-                      </div>
-                      <button onclick="DamanApp.handleBannerAction('${this.esc(b.action || 'admin_chat')}')" class="w-full py-2 rounded-xl ${st.btn} font-black text-xs">
-                        ${this.esc(b.ctaText || 'اطلب الآن')} <i class="fa-solid fa-arrow-left ms-1 text-[10px]"></i>
-                      </button>
-                    </div>`;
-                }).join('')}
-              </div>
-            </div>` : ''}
-
-          <!-- Core Services Grid -->
-          <div class="grid grid-cols-2 gap-2.5">
-            <button onclick="DamanApp.switchTab('projects')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-amber-500/50">
-              <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center"><i class="fa-solid fa-helmet-safety"></i></div>
-              <div class="text-xs font-black text-white">السوق والموردين B2B</div>
-              <div class="text-[10px] text-slate-400">مشاريع، صنايعية، وموردي خامات</div>
-            </button>
-
-            <button onclick="DamanApp.handleBannerAction('inspection')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-emerald-500/50">
-              <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-shield-halved"></i></div>
-              <div class="text-xs font-black text-white">استلام هندسي بضمان 3x</div>
-              <div class="text-[10px] text-slate-400">استلام شدات وأسقف بضمان 3 أضعاف</div>
-            </button>
-
-            <button onclick="DamanApp.handleBannerAction('viplabor')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-purple-500/50">
-              <div class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center"><i class="fa-solid fa-users-gear"></i></div>
-              <div class="text-xs font-black text-white">توريد عمالة VIP</div>
-              <div class="text-[10px] text-slate-400">فرق فنية مختبرة بضمان المنصة</div>
-            </button>
-
-            <button onclick="DamanApp.switchTab('company')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-sky-500/50">
-              <div class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center"><i class="fa-solid fa-building-user"></i></div>
-              <div class="text-xs font-black text-white">إدارة الشركات والمواقع</div>
-              <div class="text-[10px] text-slate-400">GPS، مستخلصات، إضافي، جرد ورواتب</div>
-            </button>
-          </div>
-
-          <!-- Featured Ads ★ -->
-          ${featuredPosts.length ? `
-            <div class="space-y-2">
-              <div class="flex items-center justify-between px-1">
-                <h2 class="text-xs font-black text-amber-400"><i class="fa-solid fa-star me-1"></i> الإعلانات المميزة في السوق (${featuredPosts.length})</h2>
-                <button onclick="DamanApp.handleBannerAction('market')" class="text-[10.5px] font-black text-emerald-400 underline">عرض الكل ←</button>
-              </div>
-              <div class="space-y-2">
-                ${featuredPosts.map((fp) => `
-                  <div onclick="if(window.DamanProjects){ DamanProjects.openPostDetails('${fp.id}'); }" class="glass-card rounded-2xl p-3 border-amber-400/50 bg-amber-500/5 space-y-1.5 cursor-pointer hover:border-amber-400">
-                    <div class="flex items-center justify-between gap-2">
-                      <span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">★ إعلان مميز</span>
-                      <span class="text-[10px] font-black text-emerald-400">${fp.budget ? this.fmtMoney(fp.budget) + ' ج.م' : 'بالاتفاق'}</span>
-                    </div>
-                    <div class="text-xs font-black text-white">${this.esc(fp.title)}</div>
-                    <div class="flex items-center justify-between text-[10px] text-slate-400">
-                      <span class="truncate"><i class="fa-solid fa-user-check text-emerald-400 me-1"></i>${this.esc(fp.ownerName || '')}</span>
-                      <span class="shrink-0"><i class="fa-solid fa-location-dot me-0.5"></i>${this.esc(fp.city || '')}</span>
-                    </div>
-                  </div>`).join('')}
-              </div>
-            </div>` : ''}
-
-          <!-- 17 Categories Quick Strip -->
-          <div class="space-y-2">
-            <div class="px-1 text-xs font-black text-slate-200"><i class="fa-solid fa-layer-group text-amber-400 me-1"></i> تصفح السوق حسب التخصص (17 قسم)</div>
-            <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5">
-              ${this.CATEGORIES.map((c) => `
-                <button onclick="DamanApp.openCategoryFromHome('${c.id}')" class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-[10.5px] font-bold text-slate-200">${this.esc(c.ar)}</button>`).join('')}
-            </div>
-          </div>
-
-          <!-- Verify Contract + Share My Page -->
-          <div class="grid grid-cols-2 gap-2.5">
-            <button onclick="DamanApp.openVerifyContractModal()" class="p-3 rounded-2xl bg-slate-900 border border-slate-700 flex items-center gap-2.5 text-start">
-              <i class="fa-solid fa-qrcode text-xl text-amber-400"></i>
-              <div>
-                <div class="text-[11px] font-black text-white">فحص عقد رسمي</div>
-                <div class="text-[9.5px] text-slate-400">تحقق بكود العقد أو QR</div>
-              </div>
-            </button>
-            <button onclick="${p ? `DamanApp.openShareProfileModal('${p.uid}')` : `DamanApp.openAuthModal('login')`}" class="p-3 rounded-2xl bg-slate-900 border border-slate-700 flex items-center gap-2.5 text-start">
-              <i class="fa-solid fa-share-nodes text-xl text-emerald-400"></i>
-              <div>
-                <div class="text-[11px] font-black text-white">شارك صفحتك</div>
-                <div class="text-[9.5px] text-slate-400">رابط مباشر + QR Code</div>
-              </div>
-            </button>
-          </div>
-
-          <!-- Direct Admin Chat & WhatsApp -->
-          <div class="grid grid-cols-3 gap-2">
-            <button onclick="DamanApp.handleBannerAction('admin_chat')" class="col-span-2 p-3 rounded-2xl bg-gradient-to-r from-amber-500/15 to-emerald-500/15 border border-amber-500/40 flex items-center justify-between text-xs font-black text-amber-300">
-              <span><i class="fa-solid fa-headset me-1.5"></i> تواصل مع إدارة المنصة</span>
-              <i class="fa-solid fa-chevron-left"></i>
-            </button>
-            <button onclick="DamanApp.handleBannerAction('whatsapp')" class="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black text-xs flex items-center justify-center gap-1">
-              <i class="fa-brands fa-whatsapp text-base"></i> واتساب
-            </button>
-          </div>
-        </div>`;
-    },
-
-    // ==================== GOOGLE SIGN-IN + FULL AUTH SUITE ====================
-    async signInWithGoogle() {
-      await this.withLock('googleAuth', async () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        try {
-          const res = await auth.signInWithPopup(provider);
-          if (res && res.user) await this.finalizeGoogleUser(res.user);
-        } catch (err) {
-          if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment')) {
-            this.toast('جارٍ التحويل لصفحة تسجيل دخول Google...', 'info');
-            auth.signInWithRedirect(provider).catch((e) => this.toast(e.message, 'error'));
-          } else if (err && err.code === 'auth/unauthorized-domain') {
-            this.toast('أضف نطاق الموقع في Firebase Authentication → Authorized domains', 'error');
-          } else if (err && err.code === 'auth/operation-not-allowed') {
-            this.toast('يرجى تفعيل خيار Google في Firebase Authentication → Sign-in method', 'error');
-          } else if (err && err.code !== 'auth/popup-closed-by-user') {
-            this.toast(err.message || 'تعذر تسجيل الدخول بجوجل', 'error');
-          }
-        }
-      });
-    },
-
-    async finalizeGoogleUser(u) {
-      const email = (u.email || '').toLowerCase();
-      const isAdm = email === ADMIN_EMAIL;
-
-      const bl = await this.checkBlacklist({ email });
-      if (bl && !isAdm) {
-        await auth.signOut();
-        return this.toast(`حسابك محظور من المنصة: ${bl}`, 'error');
-      }
-
-      const uRef = db.collection('users').doc(u.uid);
-      const snap = await uRef.get();
-      if (!snap.exists) {
-        if (this.appConfig?.disableRegistrations && !isAdm) {
-          try { await u.delete(); } catch (e) { await auth.signOut(); }
-          return this.toast('التسجيل الجديد متوقف مؤقتاً من الإدارة', 'warning');
-        }
-        await uRef.set({
-          name: u.displayName || (isAdm ? 'إدارة ضمان سايت' : 'مستخدم ضمان سايت'),
-          email,
-          phone: '',
-          avatarPhoto: u.photoURL || '',
-          accountType: 'individual',
-          authProvider: 'google',
-          needsOnboarding: !isAdm,
-          referralCode: 'DMN-' + u.uid.slice(0, 6).toUpperCase(),
-          kycStatus: isAdm ? 'verified' : 'none',
-          status: 'active',
-          balanceAvailable: 0,
-          balanceEscrow: 0,
-          balancePendingWithdraw: 0,
-          balanceBonus: 0,
-          balanceFrozen: 0,
-          ratingAvg: 5,
-          ratingCount: 0,
-          followers: [],
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-      document.getElementById('daman-auth-modal')?.classList.add('hidden');
-      this.toast('تم تسجيل الدخول بحساب Google بنجاح ✅', 'success');
-    },
-
-    togglePassVisibility(inputId, btnEl) {
-      const inp = document.getElementById(inputId);
-      if (!inp) return;
-      const isPass = inp.type === 'password';
-      inp.type = isPass ? 'text' : 'password';
-      if (btnEl) btnEl.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
-    },
-
-    openAuthModal(mode = 'login') {
-      let m = document.getElementById('daman-auth-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-auth-modal';
-        m.className = 'daman-modal fixed inset-0 z-[90] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      m.classList.remove('hidden');
-      const isReg = mode === 'register';
-      const savedRef = localStorage.getItem('daman_ref_code') || '';
-
-      m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-3xl p-5 space-y-3.5 max-h-[92vh] overflow-y-auto text-xs">
-          <div class="flex items-center justify-between">
-            <h3 class="text-base font-black text-amber-400">${isReg ? 'إنشاء حساب جديد' : 'تسجيل الدخول'}</h3>
-            <button onclick="document.getElementById('daman-auth-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-
-          <!-- 1-Click Google Sign-In -->
-          <button type="button" onclick="DamanApp.signInWithGoogle()" class="w-full py-2.5 rounded-xl bg-white text-slate-900 font-black text-xs flex items-center justify-center gap-2 shadow-lg">
-            <i class="fa-brands fa-google text-rose-500 text-sm"></i>
-            ${isReg ? 'التسجيل السريع بحساب Google' : 'الدخول بحساب Google'}
-          </button>
-
-          <div class="flex items-center gap-2 text-[10px] text-slate-500">
-            <div class="flex-1 h-px bg-slate-800"></div><span>أو بالبريد / رقم الموبايل</span><div class="flex-1 h-px bg-slate-800"></div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl">
-            <button onclick="DamanApp.openAuthModal('login')" class="py-2 rounded-lg font-black ${!isReg ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">دخول</button>
-            <button onclick="DamanApp.openAuthModal('register')" class="py-2 rounded-lg font-black ${isReg ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">حساب جديد</button>
-          </div>
-
-          ${isReg ? `
-            <form onsubmit="DamanApp.submitRegister(event)" class="space-y-2.5">
-              <input id="rg-name" type="text" required placeholder="اسم العرض / الشهرة أو اسم الشركة *" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <select id="rg-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
-                <option value="individual">فرد / مقاول / فني / عميل</option>
-                <option value="company">شركة مقاولات / مكتب هندسي</option>
-                <option value="supplier">مورّد خامات ومواد بناء (B2B)</option>
-              </select>
-              <input id="rg-phone" type="tel" required placeholder="رقم الموبايل المصري (01xxxxxxxxx) *" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <input id="rg-email" type="email" placeholder="البريد الإلكتروني (مُفضل لاستعادة كلمة المرور)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <div class="relative">
-                <input id="rg-pass" type="password" minlength="6" required placeholder="كلمة المرور (6 أحرف على الأقل) *" class="w-full px-3 py-2.5 pe-10 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                <button type="button" onclick="DamanApp.togglePassVisibility('rg-pass',this)" class="absolute top-2.5 end-3 text-slate-400"><i class="fa-solid fa-eye"></i></button>
-              </div>
-              <input id="rg-ref" type="text" value="${this.esc(savedRef)}" placeholder="كود دعوة صديق (اختياري)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white uppercase" />
-              <label class="flex items-start gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
-                <input id="rg-terms" type="checkbox" required class="mt-0.5 accent-amber-500" />
-                <span class="text-[10.5px] text-slate-300">أوافق على <button type="button" onclick="DamanApp.openPrivacyModal()" class="text-amber-400 underline font-bold">الشروط وسياسة الخصوصية</button> والتوثيق الإلزامي بالبطاقة.</span>
-              </label>
-              <button type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إنشاء الحساب والمتابعة للتوثيق</button>
-            </form>` : `
-            <form onsubmit="DamanApp.submitLogin(event)" class="space-y-2.5">
-              <input id="lg-id" type="text" required placeholder="البريد الإلكتروني أو رقم الموبايل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <div class="relative">
-                <input id="lg-pass" type="password" required placeholder="كلمة المرور" class="w-full px-3 py-2.5 pe-10 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                <button type="button" onclick="DamanApp.togglePassVisibility('lg-pass',this)" class="absolute top-2.5 end-3 text-slate-400"><i class="fa-solid fa-eye"></i></button>
-              </div>
-              <button type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">دخول</button>
-              <button type="button" onclick="DamanApp.handleForgotPassword()" class="w-full text-center text-[11px] text-sky-400 font-bold underline">نسيت كلمة المرور؟ استعادتها الآن</button>
-            </form>`}
-        </div>`;
-    },
-
-    async submitRegister(e) {
-      e.preventDefault();
-      if (this.appConfig?.disableRegistrations) {
-        return this.toast('التسجيل الجديد متوقف مؤقتاً من الإدارة', 'warning');
-      }
-      await this.withLock('register', async () => {
-        const name = document.getElementById('rg-name').value.trim();
-        const accountType = document.getElementById('rg-type').value;
-        const phone = this.normalizePhone(document.getElementById('rg-phone').value);
-        const rawEmail = document.getElementById('rg-email').value.trim().toLowerCase();
-        const pass = document.getElementById('rg-pass').value;
-        const refCode = (document.getElementById('rg-ref')?.value || '').trim().toUpperCase();
-
-        if (!/^01[0125]\d{8}$/.test(phone)) return this.toast('أدخل رقم موبايل مصري صحيح (11 رقم)', 'error');
-        const authEmail = rawEmail || `${phone}@phone.damansite.app`;
-        const bl = await this.checkBlacklist({ email: authEmail, phone });
-        if (bl) return this.toast(`تعذر التسجيل: ${bl}`, 'error');
-
-        const dupPhone = await db.collection('users').where('phone', '==', phone).limit(1).get();
-        if (!dupPhone.empty) return this.toast('رقم الموبايل مسجّل بالفعل بحساب آخر', 'error');
-
-        try {
-          const cred = await auth.createUserWithEmailAndPassword(authEmail, pass);
-          await db.collection('users').doc(cred.user.uid).set({
-            name,
-            companyName: accountType !== 'individual' ? name : '',
-            accountType,
-            phone,
-            email: authEmail,
-            isPhoneAccount: !rawEmail,
-            authProvider: 'password',
-            needsOnboarding: false,
-            referralCode: 'DMN-' + cred.user.uid.slice(0, 6).toUpperCase(),
-            referredBy: refCode,
-            kycStatus: 'none',
-            status: 'active',
-            balanceAvailable: 0,
-            balanceEscrow: 0,
-            balancePendingWithdraw: 0,
-            balanceBonus: 0,
-            balanceFrozen: 0,
-            ratingAvg: 5,
-            ratingCount: 0,
-            followers: [],
-            termsAcceptedAt: Date.now(),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          document.getElementById('daman-auth-modal').classList.add('hidden');
-          this.toast('تم إنشاء الحساب! استكمل التوثيق بالبطاقة والسيلفي الآن 🪪', 'success');
-        } catch (err) { this.toast(err.message, 'error'); }
-      });
-    },
-
-    async submitLogin(e) {
-      e.preventDefault();
-      await this.withLock('login', async () => {
-        let id = document.getElementById('lg-id').value.trim();
-        const pass = document.getElementById('lg-pass').value;
-        if (!id.includes('@')) id = `${this.normalizePhone(id)}@phone.damansite.app`;
-        try {
-          await auth.signInWithEmailAndPassword(id.toLowerCase(), pass);
-          document.getElementById('daman-auth-modal').classList.add('hidden');
-          this.toast('مرحباً بعودتك ✅', 'success');
-        } catch (err) { this.toast('بيانات الدخول غير صحيحة — تأكد من البريد/الرقم وكلمة المرور أو جرّب الدخول بحساب Google', 'error'); }
-      });
-    },
-
-    async handleForgotPassword() {
-      const id = (document.getElementById('lg-id')?.value || '').trim();
-      const input = id || window.prompt('أدخل بريدك الإلكتروني (أو رقم الموبايل المسجّل به):');
-      if (!input) return;
-      if (!input.includes('@') || input.endsWith('@phone.damansite.app')) {
-        const wa = this.appConfig?.supportWhatsapp || '201030374787';
-        if (window.confirm('حسابات رقم الموبايل بدون بريد إلكتروني تتطلب التحقق السريع عبر واتساب الإدارة لإعادة تعيين كلمة المرور.\nفتح واتساب الإدارة الآن؟')) {
-          window.open(`https://wa.me/${wa}?text=${encodeURIComponent('مرحباً إدارة ضمان سايت، نسيت كلمة المرور لحساب الموبايل: ' + input)}`, '_blank');
-        }
-        return;
-      }
-      try {
-        await auth.sendPasswordResetEmail(input.toLowerCase());
-        this.toast('تم إرسال رابط استعادة كلمة المرور إلى بريدك الإلكتروني (راجع البريد والـ Spam) ✅', 'success');
-      } catch (e) { this.toast('تأكد من صحة البريد الإلكتروني المسجّل', 'error'); }
-    },
-
-    openChangePasswordModal() {
-      if (this.profile?.authProvider === 'google') {
-        return this.toast('حسابك مسجّل عبر Google — كلمة المرور تُدار من إعدادات حساب Google الخاص بك', 'info');
-      }
-      const np = window.prompt('أدخل كلمة المرور الجديدة (6 أحرف على الأقل):');
-      if (!np || np.length < 6 || !this.user) return;
-      this.user.updatePassword(np)
-        .then(() => this.toast('تم تغيير كلمة المرور بنجاح ✅', 'success'))
-        .catch(() => this.toast('لأمانك: سجّل خروج وادخل مرة أخرى ثم غيّر كلمة المرور', 'warning'));
-    },
-
-    async requestDeleteAccount() {
-      if (!this.user || !this.profile) return;
-      if (Number(this.profile.balanceAvailable || 0) > 0 || Number(this.profile.balanceEscrow || 0) > 0 || Number(this.profile.balancePendingWithdraw || 0) > 0) {
-        return this.toast('لا يمكن حذف الحساب لوجود رصيد متاح أو ضمان أو سحب معلّق', 'error');
-      }
-      if (!window.confirm('تأكيد إرسال طلب حذف الحساب نهائياً؟')) return;
-      await db.collection('supportTickets').add({
-        userId: this.user.uid, userName: this.profile.name || '', userEmail: this.profile.email || '',
-        subject: 'طلب حذف حساب نهائياً', message: 'يرجى حذف حسابي نهائياً.', status: 'open',
-        date: this.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      await this.sendNotification('ADMIN', 'طلب حذف حساب', this.profile.name || this.user.uid);
-      this.toast('تم استلام طلب حذف الحساب', 'info');
-    },
-
-    // ==================== FACEBOOK-STYLE PUBLIC & OWN PROFILE ====================
-    async openPublicProfile(uid) {
-      if (!uid) return;
-      this.viewingPublicUid = uid;
-      this.profileSubTab = 'posts';
-      this.publicProfileData = null;
-      try { history.pushState({ publicProfile: uid }, ''); } catch (e) {}
-      this.renderCurrentTab();
-      try {
-        const snap = await db.collection('users').doc(uid).get();
-        if (!snap.exists) {
-          this.toast('هذه الصفحة غير موجودة', 'error');
-          this.viewingPublicUid = null;
-          return this.renderCurrentTab();
-        }
-        this.publicProfileData = Object.assign({ uid: snap.id }, snap.data());
-        await this.loadProfileTabExtras(uid);
-        this.renderCurrentTab();
-      } catch (e) { this.toast('تعذر تحميل الصفحة', 'error'); }
-    },
-
-    async loadProfileTabExtras(uid) {
-      try {
-        const [postsSnap, portSnap, revSnap] = await Promise.all([
-          db.collection('projects').where('ownerId', '==', uid).limit(25).get(),
-          db.collection('userPortfolios').where('userId', '==', uid).limit(25).get(),
-          db.collection('reviews').where('targetUserId', '==', uid).limit(30).get()
-        ]);
-        this.profilePosts = postsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        this.profilePortfolio = portSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        this.profileReviews = revSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        this.renderCurrentTab();
-      } catch (e) {}
-    },
-
-    setProfileSubTab(t) { this.profileSubTab = t; this.renderCurrentTab(); },
-
-    async toggleFollowUser(targetUid) {
-      if (!this.user) return this.openAuthModal('login');
-      if (targetUid === this.user.uid) return;
-      const target = this.publicProfileData;
-      const followers = Array.isArray(target?.followers) ? target.followers : [];
-      const following = followers.includes(this.user.uid);
-      try {
-        await db.collection('users').doc(targetUid).update({
-          followers: following ? firebase.firestore.FieldValue.arrayRemove(this.user.uid) : firebase.firestore.FieldValue.arrayUnion(this.user.uid)
-        });
-        if (target) target.followers = following ? followers.filter((x) => x !== this.user.uid) : followers.concat([this.user.uid]);
-        this.toast(following ? 'تم إلغاء المتابعة' : 'تمت المتابعة بنجاح ✅', 'success');
-        this.renderCurrentTab();
-      } catch (e) { this.toast(e.message, 'error'); }
-    },
-
-    async uploadProfileMedia(input, field) {
-      const file = input.files && input.files[0];
-      if (!file || !this.user) return;
-      try {
-        this.toast('جارٍ رفع الصورة...', 'info');
-        const b64 = await this.compressImage(file, field === 'coverPhoto' ? 900 : 400, 0.58);
-        const patch = {};
-        patch[field] = b64;
-        await db.collection('users').doc(this.user.uid).update(patch);
-        this.toast('تم تحديث الصورة بنجاح ✅', 'success');
-      } catch (e) { this.toast('تعذر رفع الصورة', 'error'); }
-      input.value = '';
-    },
-
-    openEditProfileModal() {
-      const p = this.profile;
-      if (!p) return;
-      let m = document.getElementById('daman-edit-prof-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-edit-prof-modal';
-        m.className = 'daman-modal fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      m.classList.remove('hidden');
-      m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 space-y-3 text-xs max-h-[90vh] overflow-y-auto">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">تعديل بيانات صفحتك</h3><button onclick="document.getElementById('daman-edit-prof-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <form onsubmit="DamanApp.saveProfileEdit(event)" class="space-y-2.5">
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">اسم العرض / الشهرة</label><input id="ep-name" type="text" required value="${this.esc(p.companyName || p.name || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">التخصص الرئيسي</label><input id="ep-spec" type="text" value="${this.esc(p.specialty || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المحافظة / نطاق العمل</label><input id="ep-city" type="text" value="${this.esc(p.city || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">رابط صفحتك على فيسبوك (اختياري)</label><input id="ep-fb" type="url" value="${this.esc(p.facebookUrl || '')}" placeholder="https://facebook.com/..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">نبذة عنك</label><textarea id="ep-bio" rows="3" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white">${this.esc(p.bio || '')}</textarea></div>
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">حفظ التعديلات</button>
-          </form>
-        </div>`;
-    },
-
-    async saveProfileEdit(e) {
-      e.preventDefault();
-      if (!this.user) return;
-      const nameVal = document.getElementById('ep-name').value.trim();
-      const patch = {
-        name: nameVal,
-        specialty: document.getElementById('ep-spec').value.trim(),
-        city: document.getElementById('ep-city').value.trim(),
-        facebookUrl: document.getElementById('ep-fb').value.trim(),
-        bio: document.getElementById('ep-bio').value.trim()
-      };
-      if (this.profile?.accountType === 'company' || this.profile?.accountType === 'supplier') patch.companyName = nameVal;
-      try {
-        await db.collection('users').doc(this.user.uid).update(patch);
-        document.getElementById('daman-edit-prof-modal').classList.add('hidden');
-        this.toast('تم تحديث بيانات صفحتك ✅', 'success');
-      } catch (err) { this.toast(err.message, 'error'); }
-    },
-
-    openAddPortfolioModal() {
-      let m = document.getElementById('daman-port-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-port-modal';
-        m.className = 'daman-modal fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      this._tempPortImg = '';
-      m.classList.remove('hidden');
-      m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 space-y-3 text-xs">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-emerald-400">إضافة سابقة أعمال جديدة</h3><button onclick="document.getElementById('daman-port-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <form onsubmit="DamanApp.submitPortfolioItem(event)" class="space-y-2.5">
-            <input id="pt-title" type="text" required placeholder="عنوان العمل" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <textarea id="pt-desc" rows="2" placeholder="وصف مختصر..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
-            <label class="block p-3 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer"><span class="font-bold text-emerald-300"><i class="fa-solid fa-camera me-1"></i> اختر صورة العمل</span><input type="file" accept="image/*" required class="hidden" onchange="DamanApp.handlePortPhoto(this)" /><div id="pt-prev"></div></label>
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">نشر في معرض الأعمال</button>
-          </form>
-        </div>`;
-    },
-
-    async handlePortPhoto(input) {
+    async handleReceiptPhoto(input) {
       const f = input.files && input.files[0];
       if (!f) return;
       try {
-        this._tempPortImg = await this.compressImage(f, 760, 0.58);
-        const p = document.getElementById('pt-prev');
-        if (p) p.innerHTML = `<img src="${this._tempPortImg}" class="max-h-32 mx-auto rounded-lg mt-2" />`;
+        this.tempReceiptBase64 = await window.DamanApp.compressImage(f, 760, 0.56);
+        const p = document.getElementById('dep-receipt-prev');
+        if (p) p.innerHTML = `<img src="${this.tempReceiptBase64}" class="max-h-28 mx-auto rounded-lg mt-1.5" />`;
       } catch (e) {}
     },
 
-    async submitPortfolioItem(e) {
+    async submitDeposit(e) {
       e.preventDefault();
-      if (!this.user || !this._tempPortImg) return this.toast('اختر صورة العمل أولاً', 'warning');
-      try {
-        await db.collection('userPortfolios').add({
-          userId: this.user.uid,
-          title: document.getElementById('pt-title').value.trim(),
-          description: document.getElementById('pt-desc').value.trim(),
-          imageBase64: this._tempPortImg,
-          date: this.todayLocal(),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        document.getElementById('daman-port-modal').classList.add('hidden');
-        this.toast('تم نشر العمل في صفحتك ✅', 'success');
-        await this.loadProfileTabExtras(this.user.uid);
-      } catch (err) { this.toast(err.message, 'error'); }
+      const app = window.DamanApp;
+      if (this.depositExpired || this.depositSecondsLeft <= 0) {
+        return app.toast('انتهت مهلة البيانات الحالية — حدّث الحسابات أولاً', 'error');
+      }
+      await app.withLock('submitDeposit', async () => {
+        const cfg = this.freshAppConfig || app.appConfig || {};
+        const channel = document.getElementById('dep-channel-hidden')?.value || this.selectedDepositChannel;
+        const amount = Math.round((parseFloat(document.getElementById('dep-amount').value) || 0) * 100) / 100;
+        const senderAccount = document.getElementById('dep-sender').value.trim();
+        const txRef = document.getElementById('dep-txref').value.trim().toUpperCase();
+        const minDep = Number(cfg.minDeposit || 100);
+        const maxDep = Number(cfg.maxDeposit || 250000);
+
+        if (amount < minDep) return app.toast(`الحد الأدنى للإيداع ${app.fmtMoney(minDep)} ج.م`, 'warning');
+        if (amount > maxDep) return app.toast(`الحد الأقصى للعملية الواحدة ${app.fmtMoney(maxDep)} ج.م`, 'warning');
+        if (!txRef || txRef.length < 4) return app.toast('أدخل الرقم المرجعي للعملية بشكل صحيح', 'warning');
+        if (!this.tempReceiptBase64) return app.toast('يرجى إرفاق صورة إيصال التحويل', 'warning');
+
+        const btn = document.getElementById('dep-submit-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التحقق والرفع الآمن...'; }
+
+        try {
+          // Privacy-Safe Duplicate txRef Check via txRefIndex (Compatible with strict v25 Rules)
+          const refKey = txRef.replace(/[^A-Z0-9_-]/g, '').slice(0, 80);
+          let isDupRef = false;
+          if (refKey) {
+            try {
+              const idxRef = app.db.collection('txRefIndex').doc(refKey);
+              const idxSnap = await idxRef.get();
+              if (idxSnap.exists) {
+                isDupRef = true;
+                if (idxSnap.data()?.status === 'approved') {
+                  if (btn) { btn.disabled = false; btn.textContent = 'تأكيد وإرسال طلب الشحن'; }
+                  return app.toast('⚠️ هذا الرقم المرجعي تم استخدامه واعتماده مسبقاً! لا يمكن تكرار نفس الإيصال.', 'error');
+                }
+              } else {
+                await idxRef.set({
+                  txRef,
+                  status: 'pending',
+                  date: app.todayLocal(),
+                  createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                }).catch(() => {});
+              }
+            } catch (e) {}
+          }
+
+          const receiptMedia = await app.saveMedia(this.tempReceiptBase64, { kind: 'deposit_receipt' });
+          const acc = cfg.paymentAccounts || {};
+          const targetAccSnapshot = channel === 'vodafone_cash'
+            ? (acc.vodafoneCash || '')
+            : channel === 'instapay'
+            ? (acc.instaPay || '')
+            : `${acc.bankInfo || ''} ${acc.bankIban || ''}`.trim();
+
+          await app.db.collection('walletRequests').add({
+            type: 'deposit',
+            userId: app.user.uid,
+            userName: app.profile?.companyName || app.profile?.name || '',
+            userLegalName: app.profile?.legalName || '',
+            userPhone: app.profile?.phone || '',
+            channel,
+            amount,
+            requestedAmount: amount,
+            senderAccount,
+            txRef,
+            targetAccountUsed: targetAccSnapshot,
+            duplicateRefFlag: isDupRef,
+            receiptMedia,
+            status: 'pending',
+            date: app.todayLocal(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          await app.sendNotification(
+            'ADMIN',
+            isDupRef ? '⚠️ طلب شحن برقم مرجعي مكرر!' : 'طلب شحن محفظة جديد 💰',
+            `${app.profile?.name} — ${app.fmtMoney(amount)} ج.م (${this.channelShort(channel)}) | مرجع: ${txRef}`
+          );
+
+          this.closeDepositModal();
+          app.toast('تم إرسال طلب الشحن بنجاح! سيتم المراجعة وإضافة الرصيد قريباً ✅', 'success');
+        } catch (err) {
+          if (btn) { btn.disabled = false; btn.textContent = 'تأكيد وإرسال طلب الشحن'; }
+          app.toast(err.message, 'error');
+        }
+      });
     },
 
-    async deletePortfolioItem(id) {
-      if (!window.confirm('حذف هذا العمل من معرضك؟')) return;
-      await db.collection('userPortfolios').doc(id).delete();
-      this.profilePortfolio = this.profilePortfolio.filter((x) => x.id !== id);
-      this.renderCurrentTab();
-    },
+    // ==================== 2-CHANNEL WITHDRAW MODAL ====================
+    openWithdrawModal() {
+      const app = window.DamanApp;
+      if (!app.user || !app.profile) return app.openAuthModal('login');
+      if (!app.isKycVerified()) {
+        app.toast('لا يمكن السحب قبل توثيق الحساب بالبطاقة والسيلفي', 'error');
+        return this.openKycModal(true);
+      }
+      if (app.appConfig?.disableWithdrawals && !app.isAdmin()) {
+        return app.toast('طلبات السحب متوقفة مؤقتاً للصيانة من الإدارة — حاول لاحقاً', 'warning');
+      }
+      if (this.requests.some((r) => r.type === 'withdraw' && r.status === 'pending')) {
+        return app.toast('لديك طلب سحب قيد المراجعة بالفعل — انتظر تنفيذه أو ألغِه أولاً', 'warning');
+      }
 
-    getProfileShareUrl(uid) {
-      const ref = this.profile?.referralCode ? `&ref=${encodeURIComponent(this.profile.referralCode)}` : '';
-      return `${window.location.origin}${window.location.pathname}?profile=${encodeURIComponent(uid)}${ref}`;
-    },
+      const enabled = this.getEnabledWithdrawChannels(app.appConfig);
+      const activeList = ['vodafone_cash', 'instapay', 'bank'].filter((k) => enabled[k]);
+      if (!activeList.length) {
+        return app.toast('وسائل السحب متوقفة مؤقتاً — تواصل مع الإدارة', 'error');
+      }
 
-    openShareProfileModal(uid, nameHint) {
-      const url = this.getProfileShareUrl(uid);
-      const displayName = nameHint || this.profile?.companyName || this.profile?.name || 'ضمان سايت';
-      let m = document.getElementById('daman-share-modal');
+      const avail = Number(app.profile.balanceAvailable || 0);
+      const minW = Number(app.appConfig?.minWithdraw || 100);
+      const maxDaily = Number(app.appConfig?.maxWithdrawDaily || 50000);
+      const todayUsed = this.requests
+        .filter((r) => r.type === 'withdraw' && r.date === app.todayLocal() && ['pending', 'approved'].includes(r.status))
+        .reduce((s, r) => s + Number(r.amount || 0), 0);
+      const dailyLeft = Math.max(0, Math.round((maxDaily - todayUsed) * 100) / 100);
+
+      if (avail < minW) {
+        return app.toast(`رصيدك الكاش المتاح (${app.fmtMoney(avail)} ج.م) أقل من الحد الأدنى للسحب (${app.fmtMoney(minW)} ج.م). رصيد الهدايا غير قابل للسحب الكاش.`, 'warning');
+      }
+      if (dailyLeft < minW) {
+        return app.toast(`لقد وصلت للحد الأقصى للسحب اليومي (${app.fmtMoney(maxDaily)} ج.م). حاول غداً.`, 'warning');
+      }
+
+      const maxAllowedNow = Math.min(avail, dailyLeft);
+      const savedVf = localStorage.getItem('daman_last_wd_vf') || app.profile?.phone || '';
+      const savedIp = localStorage.getItem('daman_last_wd_ip') || '';
+
+      let m = document.getElementById('daman-withdraw-modal');
       if (!m) {
         m = document.createElement('div');
-        m.id = 'daman-share-modal';
-        m.className = 'daman-modal fixed inset-0 z-[85] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+        m.id = 'daman-withdraw-modal';
+        m.className = 'daman-modal fixed inset-0 z-[88] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
         document.body.appendChild(m);
       }
       m.classList.remove('hidden');
+
+      const opts = [
+        enabled.vodafone_cash ? '<option value="vodafone_cash">📱 محفظة إلكترونية (فودافون / اتصالات / أورنج / WE كاش)</option>' : '',
+        enabled.instapay ? '<option value="instapay">⚡ إنستا باي (InstaPay)</option>' : '',
+        enabled.bank ? '<option value="bank">🏦 تحويل بنكي</option>' : ''
+      ].join('');
+
       m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-center text-xs">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">مشاركة صفحة: ${this.esc(displayName)}</h3><button onclick="document.getElementById('daman-share-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <div class="p-3 bg-white rounded-2xl inline-block mx-auto"><div id="daman-profile-qr"></div></div>
-          <div class="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10px] text-amber-300 break-all select-all">${this.esc(url)}</div>
-          <div class="grid grid-cols-2 gap-2">
-            <button onclick="navigator.clipboard.writeText('${url}'); DamanApp.toast('تم نسخ الرابط ✅','success')" class="py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">نسخ الرابط</button>
-            <a href="https://wa.me/?text=${encodeURIComponent('تصفح صفحتي الموثقة على ضمان سايت:\n' + url)}" target="_blank" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center">واتساب</a>
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-money-bill-transfer me-1"></i> سحب رصيد كاش من المحفظة</h3>
+            <button onclick="document.getElementById('daman-withdraw-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-950 border border-emerald-500/30 text-[11px]">
+            <div>المتاح للسحب: <b class="text-emerald-400">${app.fmtMoney(avail)} ج.م</b></div>
+            <div>المتبقي من حد اليوم: <b class="text-sky-400">${app.fmtMoney(dailyLeft)} ج.م</b></div>
+          </div>
+
+          <form onsubmit="DamanWallet.submitWithdraw(event)" oninput="DamanWallet.updateWithdrawPreview()" class="space-y-2.5">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">وسيلة الاستلام (وسيلتين معتمدتين) *</label>
+              <select id="wd-channel" onchange="DamanWallet.onWithdrawChannelChange('${app.esc(savedVf)}','${app.esc(savedIp)}')" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold">
+                ${opts}
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ المطلوب سحبه (${app.fmtMoney(minW)} – ${app.fmtMoney(maxAllowedNow)} ج.م) *</label>
+              <input id="wd-amount" type="number" min="${minW}" max="${maxAllowedNow}" step="any" required value="${Math.min(maxAllowedNow, Math.max(minW, 500))}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black" />
+            </div>
+
+            <div>
+              <label id="wd-dest-lbl" class="block text-[11px] font-bold text-slate-300 mb-1">رقم المحفظة المستلمة (يفضل نفس رقمك الموثّق) *</label>
+              <input id="wd-dest" type="text" required value="${app.esc(activeList[0] === 'instapay' ? savedIp : savedVf)}" placeholder="01xxxxxxxxx أو username@instapay" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+            </div>
+
+            <div id="wd-preview" class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 space-y-0.5"></div>
+
+            <button id="wd-submit-btn" type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">
+              تأكيد وحجز مبلغ السحب
+            </button>
+          </form>
+        </div>`;
+
+      this.updateWithdrawPreview();
+    },
+
+    onWithdrawChannelChange(savedVf, savedIp) {
+      const ch = document.getElementById('wd-channel')?.value;
+      const lbl = document.getElementById('wd-dest-lbl');
+      const inp = document.getElementById('wd-dest');
+      if (ch === 'instapay') {
+        if (lbl) lbl.textContent = 'عنوان إنستا باي (username@instapay) أو رقم الموبايل المربوط *';
+        if (inp) { inp.value = savedIp || ''; inp.placeholder = 'username@instapay أو 01xxxxxxxxx'; }
+      } else if (ch === 'bank') {
+        if (lbl) lbl.textContent = 'اسم البنك + رقم الحساب / IBAN + اسم المستفيد *';
+        if (inp) { inp.value = ''; inp.placeholder = 'بنك مصر / CIB — رقم الحساب'; }
+      } else {
+        if (lbl) lbl.textContent = 'رقم المحفظة المستلمة (يفضل نفس رقمك الموثّق) *';
+        if (inp) { inp.value = savedVf || ''; inp.placeholder = '01xxxxxxxxx'; }
+      }
+      this.updateWithdrawPreview();
+    },
+
+    calcWithdrawFee(amount, channel) {
+      const app = window.DamanApp;
+      const cfg = app.appConfig || {};
+      const chFees = (cfg.channelWithdrawFees && cfg.channelWithdrawFees[channel]) || {};
+      const pct = chFees.pct != null && chFees.pct !== '' ? Number(chFees.pct) : Number(cfg.withdrawFeePct || 0);
+      const flat = chFees.flat != null && chFees.flat !== '' ? Number(chFees.flat) : Number(cfg.withdrawFeeFlat || 0);
+      const fee = Math.round(((amount * pct) / 100 + flat) * 100) / 100;
+      const net = Math.max(0, Math.round((amount - fee) * 100) / 100);
+      return { fee, net, pct, flat };
+    },
+
+    updateWithdrawPreview() {
+      const app = window.DamanApp;
+      const ch = document.getElementById('wd-channel')?.value || 'vodafone_cash';
+      const amt = parseFloat(document.getElementById('wd-amount')?.value) || 0;
+      const { fee, net } = this.calcWithdrawFee(amt, ch);
+      const box = document.getElementById('wd-preview');
+      if (!box) return;
+      box.innerHTML = `
+        <div>المبلغ المطلوب سحبه: <b>${app.fmtMoney(amt)} ج.م</b></div>
+        <div>رسوم التحويل (${this.channelShort(ch)}): <b>${app.fmtMoney(fee)} ج.م</b></div>
+        <div class="text-emerald-300 font-black">الصافي الذي سيصلك: ${app.fmtMoney(net)} ج.م</div>
+        <div class="text-[10px] text-slate-300 pt-0.5">يُحجز المبلغ فوراً في خانة «قيد السحب»، ويمكنك إلغاء الطلب قبل اعتماده من الإدارة.</div>`;
+    },
+
+    async submitWithdraw(e) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      await app.withLock('submitWithdraw', async () => {
+        const channel = document.getElementById('wd-channel').value;
+        const amount = Math.round((parseFloat(document.getElementById('wd-amount').value) || 0) * 100) / 100;
+        const destAccount = document.getElementById('wd-dest').value.trim();
+        const minW = Number(app.appConfig?.minWithdraw || 100);
+        const maxDaily = Number(app.appConfig?.maxWithdrawDaily || 50000);
+
+        if (amount < minW) return app.toast(`الحد الأدنى للسحب ${app.fmtMoney(minW)} ج.م`, 'warning');
+        if (!destAccount) return app.toast('أدخل بيانات الحساب المستلم', 'warning');
+
+        if (channel === 'vodafone_cash') {
+          const cleanDest = app.normalizePhone(destAccount);
+          if (!/^01[0125]\d{8}$/.test(cleanDest)) return app.toast('أدخل رقم محفظة مصري صحيح (11 رقم)', 'error');
+          localStorage.setItem('daman_last_wd_vf', cleanDest);
+        } else if (channel === 'instapay') {
+          localStorage.setItem('daman_last_wd_ip', destAccount);
+        }
+
+        const todayUsed = this.requests
+          .filter((r) => r.type === 'withdraw' && r.date === app.todayLocal() && ['pending', 'approved'].includes(r.status))
+          .reduce((s, r) => s + Number(r.amount || 0), 0);
+        if (todayUsed + amount > maxDaily) {
+          return app.toast(`تجاوزت الحد الأقصى للسحب اليومي (${app.fmtMoney(maxDaily)} ج.م)`, 'error');
+        }
+
+        const { fee, net } = this.calcWithdrawFee(amount, channel);
+        if (net <= 0) return app.toast('صافي السحب بعد الرسوم يجب أن يكون أكبر من صفر', 'error');
+
+        const userPhoneNorm = app.normalizePhone(app.profile?.phone || '');
+        const phoneMismatchFlag = channel === 'vodafone_cash' && userPhoneNorm && app.normalizePhone(destAccount) !== userPhoneNorm;
+        const lastDep = this.requests.find((r) => r.type === 'deposit' && r.status === 'approved');
+        const hasRealWorkTx = this.transactions.some((t) => ['escrow_lock', 'daily_payout', 'advance_paid', 'milestone_payout', 'final_settlement', 'salary_in'].includes(t.type));
+        const rapidFlipFlag = !!(lastDep && lastDep.channel !== channel && !hasRealWorkTx);
+
+        const btn = document.getElementById('wd-submit-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'جارٍ حجز المبلغ وإرسال الطلب...'; }
+
+        const userRef = app.db.collection('users').doc(app.user.uid);
+        const reqRef = app.db.collection('walletRequests').doc();
+        const txRefDoc = app.db.collection('transactions').doc();
+
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const uDoc = await tx.get(userRef);
+            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+            const curHold = Number((uDoc.data() || {}).balancePendingWithdraw || 0);
+            if (curAvail < amount) throw new Error('رصيدك المتاح غير كافٍ لإتمام طلب السحب');
+
+            const afterAvail = Math.round((curAvail - amount) * 100) / 100;
+            tx.update(userRef, {
+              balanceAvailable: afterAvail,
+              balancePendingWithdraw: Math.round((curHold + amount) * 100) / 100
+            });
+            tx.set(reqRef, {
+              type: 'withdraw',
+              userId: app.user.uid,
+              userName: app.profile?.companyName || app.profile?.name || '',
+              userLegalName: app.profile?.legalName || '',
+              userPhone: app.profile?.phone || '',
+              channel,
+              amount,
+              withdrawFee: fee,
+              netPayout: net,
+              destAccount,
+              phoneMismatchFlag,
+              rapidFlipFlag,
+              lastDepositChannel: lastDep ? lastDep.channel : '',
+              status: 'pending',
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            tx.set(txRefDoc, {
+              userId: app.user.uid,
+              type: 'withdraw_hold',
+              amount: -amount,
+              balanceBefore: curAvail,
+              balanceAfter: afterAvail,
+              note: `حجز طلب سحب (${this.channelShort(channel)} — ${destAccount})`,
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+
+          const flagTag = phoneMismatchFlag || rapidFlipFlag ? ' ⚠️ (مراجعة أمنية)' : '';
+          await app.sendNotification('ADMIN', `طلب سحب رصيد جديد 💸${flagTag}`, `${app.profile?.name} — صافي التحويل: ${app.fmtMoney(net)} ج.م على ${destAccount}`);
+          document.getElementById('daman-withdraw-modal').classList.add('hidden');
+          app.toast('تم حجز المبلغ وإرسال طلب السحب للإدارة بنجاح ✅', 'success');
+        } catch (err) {
+          if (btn) { btn.disabled = false; btn.textContent = 'تأكيد وحجز مبلغ السحب'; }
+          app.toast(err.message, 'error');
+        }
+      });
+    },
+
+    async cancelPendingWithdraw(reqId) {
+      const app = window.DamanApp;
+      const req = this.requests.find((r) => r.id === reqId);
+      if (!req || req.type !== 'withdraw' || req.status !== 'pending') return;
+      if (!window.confirm(`إلغاء طلب السحب (${app.fmtMoney(req.amount)} ج.م) وإعادة المبلغ فوراً إلى رصيدك المتاح؟`)) return;
+
+      await app.withLock('cancelWd_' + reqId, async () => {
+        const reqRef = app.db.collection('walletRequests').doc(reqId);
+        const userRef = app.db.collection('users').doc(app.user.uid);
+        const txRefDoc = app.db.collection('transactions').doc();
+
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const [rDoc, uDoc] = await Promise.all([tx.get(reqRef), tx.get(userRef)]);
+            if (!rDoc.exists || rDoc.data().status !== 'pending') throw new Error('تمت معالجة الطلب بالفعل من الإدارة');
+            const amt = Number(rDoc.data().amount || 0);
+            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
+            const curHold = Number((uDoc.data() || {}).balancePendingWithdraw || 0);
+            const afterAvail = Math.round((curAvail + amt) * 100) / 100;
+
+            tx.update(reqRef, { status: 'cancelled', adminNote: 'ألغاه المستخدم قبل التنفيذ', cancelledAt: firebase.firestore.FieldValue.serverTimestamp() });
+            tx.update(userRef, {
+              balanceAvailable: afterAvail,
+              balancePendingWithdraw: Math.max(0, Math.round((curHold - amt) * 100) / 100)
+            });
+            tx.set(txRefDoc, {
+              userId: app.user.uid,
+              type: 'withdraw_cancel',
+              amount: amt,
+              balanceBefore: curAvail,
+              balanceAfter: afterAvail,
+              note: 'إلغاء طلب سحب بواسطة المستخدم وردّ المبلغ للمتاح',
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          app.toast('تم إلغاء الطلب وردّ المبلغ فوراً إلى رصيدك المتاح ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== VIP PACKAGES & PROMO CODES ====================
+    async buyPackage(planType) {
+      const app = window.DamanApp;
+      if (!app.user || !app.profile) return app.openAuthModal('login');
+      if (!app.isKycVerified()) return this.openKycModal(true);
+
+      const pkgs = app.appConfig?.packages || {};
+      const price = planType === 'company' ? Number(pkgs.companyMonthly || 450) : Number(pkgs.individualMonthly || 150);
+      const label = planType === 'company' ? 'باقة الشركات والموردين VIP (30 يوم)' : 'باقة الأفراد والمقاولين VIP (30 يوم)';
+
+      const avail = Number(app.profile.balanceAvailable || 0);
+      const bonus = Number(app.profile.balanceBonus || 0);
+      if (avail + bonus < price) {
+        const diff = Math.round((price - (avail + bonus)) * 100) / 100;
+        if (window.confirm(`رصيدك غير كافٍ (السعر ${app.fmtMoney(price)} ج.م).\nهل تريد شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+          this.openDepositModal(diff);
+        }
+        return;
+      }
+
+      const willUseBonus = Math.min(bonus, price);
+      const willUseCash = Math.round((price - willUseBonus) * 100) / 100;
+      const breakdown = willUseBonus > 0
+        ? `\n(سيتم خصم ${app.fmtMoney(willUseBonus)} ج.م من رصيد الهدايا + ${app.fmtMoney(willUseCash)} ج.م من المتاح)`
+        : '';
+
+      if (!window.confirm(`تأكيد الاشتراك في ${label} بمبلغ ${app.fmtMoney(price)} ج.م؟${breakdown}`)) return;
+
+      await app.withLock('buyPkg', async () => {
+        const userRef = app.db.collection('users').doc(app.user.uid);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const uDoc = await tx.get(userRef);
+            const d = uDoc.data() || {};
+            const curAvail = Number(d.balanceAvailable || 0);
+            const curBonus = Number(d.balanceBonus || 0);
+            if (curAvail + curBonus < price) throw new Error('الرصيد غير كافٍ');
+
+            const bonusUsed = Math.round(Math.min(curBonus, price) * 100) / 100;
+            const cashPaid = Math.round((price - bonusUsed) * 100) / 100;
+            const afterAvail = Math.round((curAvail - cashPaid) * 100) / 100;
+            const afterBonus = Math.round((curBonus - bonusUsed) * 100) / 100;
+
+            const baseExp = Math.max(Date.now(), Number(d.subscriptionExpiresAt || 0));
+            const newExp = baseExp + 30 * 24 * 60 * 60 * 1000;
+
+            tx.update(userRef, {
+              balanceAvailable: afterAvail,
+              balanceBonus: afterBonus,
+              subscriptionPlan: planType,
+              subscriptionExpiresAt: newExp
+            });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: app.user.uid,
+              type: 'subscription',
+              amount: -price,
+              cashPaid,
+              bonusUsed,
+              balanceBefore: curAvail,
+              balanceAfter: afterAvail,
+              note: `${label}${bonusUsed > 0 ? ` (كاش ${app.fmtMoney(cashPaid)} + هدايا ${app.fmtMoney(bonusUsed)})` : ''}`,
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            tx.set(app.db.collection('platformFees').doc(), {
+              type: 'subscription',
+              planType,
+              userId: app.user.uid,
+              userName: app.profile?.companyName || app.profile?.name || '',
+              amount: cashPaid,
+              cashPaid,
+              bonusUsed,
+              grossPrice: price,
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          app.toast(`تم تفعيل ${label} بنجاح ★`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    async redeemPromoCode(e) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      if (!app.user || !app.isKycVerified()) return;
+      const code = (document.getElementById('promo-inp')?.value || '').trim().toUpperCase();
+      if (!code) return;
+
+      await app.withLock('promo', async () => {
+        const codeRef = app.db.collection('promoCodes').doc(code);
+        const userRef = app.db.collection('users').doc(app.user.uid);
+        try {
+          let rewardText = '';
+          await app.db.runTransaction(async (tx) => {
+            const [cDoc, uDoc] = await Promise.all([tx.get(codeRef), tx.get(userRef)]);
+            if (!cDoc.exists) throw new Error('كود الهدية غير صحيح');
+            const c = cDoc.data();
+            if (!c.active) throw new Error('هذا الكود متوقف حالياً');
+            if (c.expiresAt && Number(c.expiresAt) < Date.now()) throw new Error('انتهت صلاحية هذا الكود');
+            const usedBy = Array.isArray(c.usedBy) ? c.usedBy : [];
+            if (usedBy.includes(app.user.uid)) throw new Error('لقد استخدمت هذا الكود من قبل');
+            if (Number(c.maxUses || 1) <= usedBy.length) throw new Error('تم استنفاد العدد الأقصى لاستخدام الكود');
+
+            const bonus = Number(c.amount || 0);
+            const curBonus = Number((uDoc.data() || {}).balanceBonus || 0);
+            const afterBonus = Math.round((curBonus + bonus) * 100) / 100;
+
+            tx.update(codeRef, { usedBy: firebase.firestore.FieldValue.arrayUnion(app.user.uid) });
+            tx.update(userRef, { balanceBonus: afterBonus });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: app.user.uid,
+              type: 'promo_bonus',
+              isBonus: true,
+              amount: bonus,
+              balanceBefore: curBonus,
+              balanceAfter: afterBonus,
+              note: `كود هدية (${code}) — يُستخدم للباقات وتمييز الإعلانات`,
+              date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            rewardText = `${app.fmtMoney(bonus)} ج.م`;
+          });
+          document.getElementById('promo-inp').value = '';
+          app.toast(`مبروك! تمت إضافة ${rewardText} إلى رصيد الهدايا بنجاح 🎉`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== EXPORTS: A4 B&W STATEMENT + EXCEL CSV ====================
+    getFilteredTransactions() {
+      const app = window.DamanApp;
+      const q = app.normalizeAr(this.txSearch);
+      return this.transactions.filter((t) => {
+        if (this.txFilter === 'in' && Number(t.amount || 0) <= 0) return false;
+        if (this.txFilter === 'out' && Number(t.amount || 0) >= 0) return false;
+        if (this.txFilter === 'escrow' && !String(t.type || '').includes('escrow') && !['daily_payout', 'advance_paid', 'milestone_payout', 'final_settlement'].includes(t.type)) return false;
+        if (this.txFilter === 'bonus' && !t.isBonus && !String(t.type || '').includes('bonus') && !String(t.type || '').includes('gift')) return false;
+        if (q && !app.normalizeAr(`${t.note} ${t.type} ${t.date}`).includes(q)) return false;
+        return true;
+      });
+    },
+
+    exportTransactionsCsv() {
+      const app = window.DamanApp;
+      const rows = this.getFilteredTransactions();
+      if (!rows.length) return app.toast('لا توجد حركات للتصدير', 'info');
+      const header = ['التاريخ', 'نوع الحركة', 'البيان', 'المبلغ (ج.م)', 'الرصيد قبل', 'الرصيد بعد'];
+      const escCsv = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+      const lines = [header.map(escCsv).join(',')].concat(
+        rows.map((t) => [t.date || '', t.type || '', t.note || '', t.amount || 0, t.balanceBefore ?? '', t.balanceAfter ?? ''].map(escCsv).join(','))
+      );
+      const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `damansite-wallet-${app.todayLocal()}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      app.toast('تم تصدير كشف الحساب بصيغة Excel/CSV ✅', 'success');
+    },
+
+    printWalletStatementA4() {
+      const app = window.DamanApp;
+      const p = app.profile || {};
+      const list = this.getFilteredTransactions();
+      const rows = list.map((t, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${app.esc(t.date || '')}</td>
+          <td>${app.esc(t.note || t.type || '')}</td>
+          <td><b>${Number(t.amount || 0) >= 0 ? '+' : ''}${app.fmtMoney(t.amount)} ج.م</b></td>
+          <td>${t.balanceAfter != null ? app.fmtMoney(t.balanceAfter) + ' ج.م' : '—'}</td>
+        </tr>`).join('');
+
+      const html = `
+        <div style="border:2px solid #000; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+            <div>
+              <h2 style="margin:0; font-size:16px;">كشف حساب المحفظة المالية — ضمان سايت</h2>
+              <div style="font-size:11px;">كشف حركات رسمي معتمد</div>
+            </div>
+            <div style="text-align:left; font-size:11px;">
+              <div><b>التاريخ:</b> ${app.todayLocal()}</div>
+              <div><b>صاحب الحساب:</b> ${app.esc(p.legalName || p.name || '')}</div>
+            </div>
+          </div>
+
+          <table style="margin-bottom:12px;">
+            <tr>
+              <th>الاسم القانوني</th><td>${app.esc(p.legalName || p.name || '—')}</td>
+              <th>الرقم القومي</th><td>${app.esc(p.nationalId || '—')}</td>
+            </tr>
+            <tr>
+              <th>الرصيد الكاش المتاح</th><td><b>${app.fmtMoney(p.balanceAvailable || 0)} ج.م</b></td>
+              <th>المحجوز بالضمان</th><td><b>${app.fmtMoney(p.balanceEscrow || 0)} ج.م</b></td>
+            </tr>
+            <tr>
+              <th>قيد السحب / المجمّد</th><td>${app.fmtMoney(p.balancePendingWithdraw || 0)} / ${app.fmtMoney(p.balanceFrozen || 0)} ج.م</td>
+              <th>رصيد الهدايا (غير نقدي)</th><td>${app.fmtMoney(p.balanceBonus || 0)} ج.م</td>
+            </tr>
+          </table>
+
+          <table>
+            <thead>
+              <tr><th style="width:6%;">#</th><th style="width:16%;">التاريخ</th><th>البيان والحركة المالية</th><th style="width:17%;">المبلغ</th><th style="width:17%;">الرصيد بعد</th></tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="5" style="text-align:center;">لا توجد حركات مسجّلة حتى الآن</td></tr>'}
+            </tbody>
+          </table>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:24px; text-align:center; font-size:11px;">
+            <div>توقيع صاحب الحساب<br/><br/>.....................................</div>
+            <div>اعتماد الحسابات — ضمان سايت<br/><br/>.....................................</div>
           </div>
         </div>`;
-      setTimeout(() => {
-        const qrEl = document.getElementById('daman-profile-qr');
-        if (qrEl && window.QRCode) { qrEl.innerHTML = ''; new QRCode(qrEl, { text: url, width: 156, height: 156, colorDark: '#000', colorLight: '#fff' }); }
-      }, 60);
+
+      window.DamanPrint(html);
     },
 
-    async reportUserOrPost(targetType, targetId, targetTitle) {
-      if (!this.user) return this.openAuthModal('login');
-      const reason = window.prompt(`سبب الإبلاغ عن ${targetTitle}:`, 'محتوى مخالف');
-      if (!reason || !reason.trim()) return;
-      try {
-        await db.collection('reports').add({
-          targetType, targetId, targetTitle: targetTitle || '', reason: reason.trim(),
-          reporterUid: this.user.uid, reporterName: this.profile?.name || '', status: 'open',
-          date: this.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await this.sendNotification('ADMIN', 'بلاغ مستخدم جديد 🚨', `${targetTitle}: ${reason.trim()}`);
-        this.toast('تم إرسال البلاغ للإدارة ✅', 'success');
-      } catch (e) { this.toast(e.message, 'error'); }
-    },
+    // ==================== RENDER WALLET TAB ====================
+    render(container, app) {
+      this.ensureListeners(app);
+      if (!app.user || !app.profile) {
+        container.innerHTML = `<div class="glass-card rounded-2xl p-6 text-center"><button onclick="DamanApp.openAuthModal('login')" class="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">سجّل الدخول لعرض المحفظة</button></div>`;
+        return;
+      }
 
-    renderFacebookProfile(container, targetUid) {
-      const isOwn = !!(this.user && targetUid === this.user.uid);
-      const p = isOwn ? this.profile : this.publicProfileData;
-      if (!p) { container.innerHTML = `<div class="glass-card rounded-2xl p-8 text-center text-xs text-slate-400">جارٍ تحميل الصفحة...</div>`; return; }
-
-      const displayName = p.companyName || p.name || 'مستخدم ضمان سايت';
-      const accLabels = { company: 'شركة مقاولات', supplier: 'مورّد خامات B2B', individual: 'مقاول / فني / عميل' };
-      const followers = Array.isArray(p.followers) ? p.followers : [];
-      const iFollow = !!(this.user && followers.includes(this.user.uid));
-      const isSub = this.isSubscriptionActive(p);
+      const p = app.profile;
+      const avail = Number(p.balanceAvailable || 0);
+      const esc = Number(p.balanceEscrow || 0);
+      const holdW = Number(p.balancePendingWithdraw || 0);
+      const bonus = Number(p.balanceBonus || 0);
+      const frozen = Number(p.balanceFrozen || 0);
+      const pkgs = app.appConfig?.packages || {};
+      const subActive = app.isSubscriptionActive();
+      const subExpDate = p.subscriptionExpiresAt ? new Date(Number(p.subscriptionExpiresAt)).toLocaleDateString('ar-EG') : '';
+      const customComm = p.customCommissionRate != null && p.customCommissionRate !== '' ? Number(p.customCommissionRate) : null;
+      const filteredTxs = this.getFilteredTransactions();
 
       container.innerHTML = `
-        <div class="space-y-3">
-          ${!isOwn ? `<button onclick="DamanApp.viewingPublicUid=null; DamanApp.renderCurrentTab()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-slate-200"><i class="fa-solid fa-arrow-right me-1"></i> رجوع</button>` : ''}
-          <div class="glass-card rounded-3xl overflow-hidden border-slate-700/80">
-            <div class="relative h-32 bg-gradient-to-r from-amber-600/40 via-slate-800 to-emerald-700/40">
-              ${p.coverPhoto ? `<img src="${p.coverPhoto}" onclick="DamanApp.openMediaLightbox('${p.coverPhoto}','صورة الغلاف')" class="w-full h-full object-cover cursor-pointer" />` : ''}
-              ${isOwn ? `<label class="absolute top-2 end-2 px-2.5 py-1 rounded-xl bg-black/70 text-white text-[10px] font-bold cursor-pointer"><i class="fa-solid fa-camera me-1"></i> غلاف<input type="file" accept="image/*" class="hidden" onchange="DamanApp.uploadProfileMedia(this,'coverPhoto')" /></label>` : ''}
+        <div class="space-y-3.5">
+          ${frozen > 0 ? `
+            <div class="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/60 text-xs text-rose-200 font-bold">
+              🔒 يوجد مبلغ <b>${app.fmtMoney(frozen)} ج.م</b> مجمّد مؤقتاً من الإدارة${p.frozenReason ? ` — السبب: ${app.esc(p.frozenReason)}` : ''}.
+            </div>` : ''}
+
+          <div class="glass-card rounded-3xl p-4 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border-emerald-500/30 space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="text-xs font-black text-emerald-400"><i class="fa-solid fa-wallet me-1"></i> محفظة ضمان سايت المؤمّنة</div>
+              <div class="flex items-center gap-1.5">
+                <button onclick="DamanWallet.exportTransactionsCsv()" class="px-2.5 py-1 rounded-xl bg-slate-800 text-emerald-300 text-[10px] font-black">Excel</button>
+                <button onclick="DamanWallet.printWalletStatementA4()" class="px-2.5 py-1 rounded-xl bg-white text-slate-950 text-[10px] font-black">
+                  <i class="fa-solid fa-print me-1"></i> كشف A4
+                </button>
+              </div>
             </div>
-            <div class="px-4 pb-4 -mt-10 relative space-y-2.5">
-              <div class="flex items-end justify-between gap-2">
-                <div class="relative">
-                  <div class="w-20 h-20 rounded-2xl bg-slate-900 border-4 border-slate-950 overflow-hidden flex items-center justify-center text-2xl font-black text-amber-400 shadow-xl">
-                    ${p.avatarPhoto ? `<img src="${p.avatarPhoto}" onclick="DamanApp.openMediaLightbox('${p.avatarPhoto}','${this.esc(displayName)}')" class="w-full h-full object-cover cursor-pointer" />` : this.esc(displayName.charAt(0).toUpperCase())}
-                  </div>
-                  ${isOwn ? `<label class="absolute -bottom-1 -end-1 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center cursor-pointer shadow"><i class="fa-solid fa-camera text-[10px]"></i><input type="file" accept="image/*" class="hidden" onchange="DamanApp.uploadProfileMedia(this,'avatarPhoto')" /></label>` : ''}
-                </div>
-                <div class="flex items-center gap-1.5 pb-1">
-                  <button onclick="DamanApp.openShareProfileModal('${targetUid}','${this.esc(displayName).replace(/'/g, "\\'")}')" class="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[11px] font-black"><i class="fa-solid fa-qrcode me-1"></i> مشاركة / QR</button>
-                  ${isOwn ? `<button onclick="DamanApp.openEditProfileModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-[11px] font-bold"><i class="fa-solid fa-pen"></i></button>` : ''}
-                </div>
+
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="p-2.5 rounded-2xl bg-slate-950/90 border border-emerald-500/40">
+                <div class="text-[9.5px] text-slate-400 font-bold">المتاح كاش (سحب وتعاقد)</div>
+                <div class="text-base font-black text-emerald-400 mt-0.5">${app.fmtMoney(avail)} <span class="text-[10px]">ج.م</span></div>
               </div>
-              <div>
-                <div class="flex items-center flex-wrap gap-1.5">
-                  <h2 class="text-base font-black text-white">${this.esc(displayName)}</h2>
-                  ${p.kycStatus === 'verified' ? `<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[9.5px] font-black">موثّق ✅</span>` : ''}
-                  ${isSub ? `<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 text-[9.5px] font-black">★ VIP</span>` : ''}
-                </div>
-                <div class="text-[11px] text-amber-300 font-bold mt-0.5">${accLabels[p.accountType] || accLabels.individual}${p.specialty ? ' • ' + this.esc(p.specialty) : ''}</div>
-                ${p.city ? `<div class="text-[10px] text-slate-400"><i class="fa-solid fa-location-dot me-1"></i>${this.esc(p.city)}</div>` : ''}
-                ${p.facebookUrl ? `<a href="${this.esc(p.facebookUrl)}" target="_blank" class="inline-flex items-center gap-1 text-[10.5px] text-sky-400 font-bold underline mt-1"><i class="fa-brands fa-facebook"></i> صفحة فيسبوك</a>` : ''}
-                ${p.bio ? `<p class="text-xs text-slate-300 mt-1.5 leading-relaxed">${this.esc(p.bio)}</p>` : ''}
+              <div class="p-2.5 rounded-2xl bg-slate-950/90 border border-amber-500/40">
+                <div class="text-[9.5px] text-slate-400 font-bold">محجوز بالضمان</div>
+                <div class="text-base font-black text-amber-400 mt-0.5">${app.fmtMoney(esc)} <span class="text-[10px]">ج.م</span></div>
               </div>
-              <div class="grid grid-cols-3 gap-2 text-center pt-1">
-                <div class="p-2 rounded-xl bg-slate-950/80 border border-slate-800"><div class="text-xs font-black text-amber-400">⭐ ${Number(p.ratingAvg || 5).toFixed(1)}</div><div class="text-[9.5px] text-slate-400">(${Number(p.ratingCount || 0)} تقييم)</div></div>
-                <div class="p-2 rounded-xl bg-slate-950/80 border border-slate-800"><div class="text-xs font-black text-white">${followers.length}</div><div class="text-[9.5px] text-slate-400">متابع</div></div>
-                <div class="p-2 rounded-xl bg-slate-950/80 border border-slate-800"><div class="text-xs font-black text-emerald-400">${this.profilePortfolio.length}</div><div class="text-[9.5px] text-slate-400">سابقة أعمال</div></div>
+              <div class="p-2.5 rounded-2xl bg-slate-950/80 border border-sky-500/30">
+                <div class="text-[9px] text-slate-400 font-bold">قيد السحب (معلّق)</div>
+                <div class="text-xs font-black text-sky-400 mt-0.5">${app.fmtMoney(holdW)} ج.م</div>
               </div>
-              ${!isOwn ? `
-                <div class="grid grid-cols-3 gap-1.5 pt-1">
-                  <button onclick="DamanApp.toggleFollowUser('${targetUid}')" class="py-2 rounded-xl ${iFollow ? 'bg-slate-800 text-amber-400 border border-amber-500/40' : 'bg-sky-500 text-slate-950'} font-black text-[11px]">${iFollow ? 'متابَع' : 'متابعة'}</button>
-                  <button onclick="if(window.DamanChat) DamanChat.openDirectChat('${targetUid}','${this.esc(displayName).replace(/'/g, "\\'")}','','طلب عرض سعر مباشر')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">عرض سعر</button>
-                  <button onclick="DamanApp.reportUserOrPost('user','${targetUid}','${this.esc(displayName).replace(/'/g, "\\'")}')" class="py-2 rounded-xl bg-rose-500/15 text-rose-300 border border-rose-500/30 font-bold text-[11px]">إبلاغ</button>
-                </div>` : `
-                <div class="grid grid-cols-2 gap-1.5 pt-1">
-                  <button onclick="DamanApp.openAddPortfolioModal()" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">+ أضف سابقة أعمال</button>
-                  <button onclick="if(window.DamanProjects){ DamanProjects.openPostModal(); } else { DamanApp.switchTab('projects'); }" class="py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-[11px]">نشر إعلان / منشور</button>
-                </div>`}
+              <div class="p-2.5 rounded-2xl bg-slate-950/80 border border-purple-500/30">
+                <div class="text-[9px] text-slate-400 font-bold">رصيد هدايا (باقات وتمييز)</div>
+                <div class="text-xs font-black text-purple-300 mt-0.5">${app.fmtMoney(bonus)} ج.م</div>
+              </div>
+            </div>
+
+            ${customComm !== null ? `
+              <div class="p-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-center text-[10.5px] text-amber-300 font-black">
+                ★ عمولة الضمان الخاصة بحسابك المميّز: ${(customComm * 100).toFixed(2)}%
+              </div>` : ''}
+
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="DamanWallet.openDepositModal()" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs">
+                <i class="fa-solid fa-plus-circle me-1"></i> شحن / إيداع (3 وسائل)
+              </button>
+              <button onclick="DamanWallet.openWithdrawModal()" class="py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">
+                <i class="fa-solid fa-arrow-up-from-bracket me-1"></i> سحب كاش (وسيلتين)
+              </button>
             </div>
           </div>
 
           <div class="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px] font-extrabold">
-            <button onclick="DamanApp.setProfileSubTab('posts')" class="py-2 rounded-lg ${this.profileSubTab === 'posts' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">المنشورات (${this.profilePosts.length})</button>
-            <button onclick="DamanApp.setProfileSubTab('portfolio')" class="py-2 rounded-lg ${this.profileSubTab === 'portfolio' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">سابقة الأعمال (${this.profilePortfolio.length})</button>
-            <button onclick="DamanApp.setProfileSubTab('reviews')" class="py-2 rounded-lg ${this.profileSubTab === 'reviews' ? 'bg-sky-500 text-slate-950' : 'text-slate-400'}">التقييمات (${this.profileReviews.length})</button>
+            <button onclick="DamanWallet.setSubTab('overview')" class="py-2 rounded-lg ${this.subTab === 'overview' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">الحركات (${this.transactions.length})</button>
+            <button onclick="DamanWallet.setSubTab('requests')" class="py-2 rounded-lg ${this.subTab === 'requests' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'}">الطلبات (${this.requests.length})</button>
+            <button onclick="DamanWallet.setSubTab('packages')" class="py-2 rounded-lg ${this.subTab === 'packages' ? 'bg-purple-500 text-white' : 'text-slate-400'}">الباقات والهدايا</button>
           </div>
 
-          ${this.profileSubTab === 'posts' ? `<div class="space-y-2">${!this.profilePosts.length ? `<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد منشورات بعد.</div>` : this.profilePosts.map((po) => `<div class="glass-card rounded-2xl p-3.5 space-y-1.5"><div class="flex items-center justify-between gap-2"><div class="text-xs font-black text-white">${this.esc(po.title)}</div><span class="text-[10px] px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 font-bold">${this.esc(po.status || 'approved')}</span></div><p class="text-[11px] text-slate-300">${this.esc(po.description || '')}</p></div>`).join('')}</div>` : ''}
-          ${this.profileSubTab === 'portfolio' ? `<div class="grid grid-cols-2 gap-2.5">${!this.profilePortfolio.length ? `<div class="col-span-2 glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد صور في معرض الأعمال بعد.</div>` : this.profilePortfolio.map((item) => `<div class="glass-card rounded-2xl overflow-hidden space-y-1.5 pb-2"><img src="${item.imageBase64}" onclick="DamanApp.openMediaLightbox('${item.imageBase64}','${this.esc(item.title)}')" class="w-full h-32 object-cover cursor-pointer" /><div class="px-2.5"><div class="text-[11px] font-black text-white truncate">${this.esc(item.title)}</div>${isOwn ? `<button onclick="DamanApp.deletePortfolioItem('${item.id}')" class="text-[10px] text-rose-400 font-bold">حذف</button>` : ''}</div></div>`).join('')}</div>` : ''}
-          ${this.profileSubTab === 'reviews' ? `<div class="space-y-2">${!this.profileReviews.length ? `<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد تقييمات بعد.</div>` : this.profileReviews.map((rv) => `<div class="glass-card rounded-2xl p-3 space-y-1"><div class="flex justify-between text-xs"><span class="font-black text-white">${this.esc(rv.fromName)}</span><span class="text-amber-400">${'★'.repeat(Number(rv.rating || 5))}</span></div><p class="text-[11px] text-slate-300">${this.esc(rv.comment || '')}</p></div>`).join('')}</div>` : ''}
+          ${this.subTab === 'overview' ? `
+            <div class="space-y-2.5">
+              <input type="text" value="${app.esc(this.txSearch)}" oninput="DamanWallet.txSearch=this.value; DamanWallet.rerender()" placeholder="بحث في الحركات بالتاريخ أو البيان..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white" />
+              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[10px] font-extrabold">
+                ${[['all', 'الكل'], ['in', 'وارد (+)'], ['out', 'صادر (-)'], ['escrow', 'ضمان وعقود'], ['bonus', 'هدايا']].map(([k, lbl]) => `
+                  <button onclick="DamanWallet.setTxFilter('${k}')" class="shrink-0 px-2.5 py-1.5 rounded-xl ${this.txFilter === k ? 'bg-emerald-500 text-slate-950' : 'bg-slate-900 border border-slate-800 text-slate-300'}">${lbl}</button>`).join('')}
+              </div>
 
-          ${isOwn ? `
-            <div class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
-              <div class="font-black text-amber-400"><i class="fa-solid fa-shield-halved me-1"></i> البيانات القانونية الموثّقة وإعدادات الأمان</div>
-              <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px]">
-                <div>الاسم بالبطاقة (للعقود): <b class="text-white">${this.esc(p.legalName || 'غير مثبت بعد')}</b></div>
-                <div>الرقم القومي: <b class="text-emerald-400">${this.maskNationalId(p.nationalId)}</b></div>
-                <div>تاريخ الميلاد: <b class="text-amber-300">${this.esc(p.birthDate || '—')}</b></div>
-                <div>العنوان بالبطاقة: <b class="text-slate-300">${this.esc(p.legalAddress || '—')}</b></div>
-                ${p.referralCode ? `<div>كود الدعوة الخاص بك: <b class="text-sky-300 select-all">${this.esc(p.referralCode)}</b></div>` : ''}
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <button onclick="DamanApp.openChangePasswordModal()" class="py-2 rounded-xl bg-slate-800 text-sky-300 font-bold text-[11px]">تغيير كلمة المرور</button>
-                <button onclick="DamanApp.openPrivacyModal()" class="py-2 rounded-xl bg-slate-800 text-slate-200 font-bold text-[11px]">الخصوصية والشروط</button>
-              </div>
-              ${!this.isAdmin() ? `<button onclick="DamanApp.requestDeleteAccount()" class="w-full py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 font-bold text-[11px]">طلب حذف الحساب نهائياً</button>` : ''}
+              ${!filteredTxs.length
+                ? `<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد حركات مالية مطابقة.</div>`
+                : filteredTxs.map((t) => `
+                  <div class="glass-card rounded-2xl p-3 flex items-center justify-between gap-2 text-xs">
+                    <div class="min-w-0">
+                      <div class="font-bold text-white truncate">${app.esc(t.note || t.type)}</div>
+                      <div class="text-[10px] text-slate-400">
+                        ${app.esc(t.date || '')}
+                        ${t.balanceAfter != null ? ` • الرصيد بعد: <b class="text-slate-200">${app.fmtMoney(t.balanceAfter)} ج.م</b>` : ''}
+                      </div>
+                    </div>
+                    <div class="font-black shrink-0 ${t.isBonus ? 'text-purple-300' : Number(t.amount || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">
+                      ${Number(t.amount || 0) >= 0 ? '+' : ''}${app.fmtMoney(t.amount)} ج.م
+                    </div>
+                  </div>`).join('')}
             </div>` : ''}
-        </div>`;
-    },
 
-    // ==================== VERIFY CONTRACT QR, NOTIFS & DYNAMIC PRIVACY ====================
-    async openVerifyContractModal(presetCode = '') {
-      let m = document.getElementById('daman-verify-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-verify-modal';
-        m.className = 'daman-modal fixed inset-0 z-[85] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      m.classList.remove('hidden');
-      m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-xs">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">التحقق من عقد رسمي</h3><button onclick="document.getElementById('daman-verify-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <form onsubmit="DamanApp.runContractVerify(event)" class="flex gap-2">
-            <input id="vc-code" type="text" required value="${this.esc(presetCode)}" placeholder="كود العقد (TKT-123456)" class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold uppercase" />
-            <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-black">فحص</button>
-          </form>
-          <div id="vc-result"></div>
-        </div>`;
-      if (presetCode) this.runContractVerify(null, presetCode);
-    },
+          ${this.subTab === 'requests' ? `
+            <div class="space-y-2">
+              ${!this.requests.length
+                ? `<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد طلبات إيداع أو سحب بعد.</div>`
+                : this.requests.map((r) => `
+                  <div class="glass-card rounded-2xl p-3 space-y-1.5 text-xs">
+                    <div class="flex items-center justify-between">
+                      <span class="font-black ${r.type === 'deposit' ? 'text-emerald-400' : 'text-amber-400'}">
+                        ${r.type === 'deposit' ? '⬇️ إيداع' : '⬆️ سحب'} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م
+                      </span>
+                      ${this.statusBadge(r.status)}
+                    </div>
+                    <div class="text-[10.5px] text-slate-300">الوسيلة: ${this.channelShort(r.channel)} • ${app.esc(r.date || '')}</div>
+                    ${r.txRef ? `<div class="text-[10px] text-amber-300">المرجع: <b>${app.esc(r.txRef)}</b></div>` : ''}
+                    ${r.destAccount ? `<div class="text-[10px] text-sky-300">الحساب المستلم: ${app.esc(r.destAccount)} (الصافي: ${app.fmtMoney(r.netPayout || r.amount)} ج.م)</div>` : ''}
+                    ${r.adminNote ? `<div class="p-2 rounded-lg bg-slate-950 text-[10px] text-rose-300">ملاحظة الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
+                    <div class="flex items-center flex-wrap gap-2 pt-0.5">
+                      ${r.receiptMedia ? `<button onclick="DamanApp.openMediaLightbox('${r.receiptMedia}','إيصال الإيداع')" class="text-[10px] text-emerald-300 underline font-bold"><i class="fa-solid fa-image me-1"></i>إيصال الإيداع</button>` : ''}
+                      ${r.payoutReceiptMedia ? `<button onclick="DamanApp.openMediaLightbox('${r.payoutReceiptMedia}','إيصال تحويل السحب من الإدارة')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-black text-[10px]"><i class="fa-solid fa-file-invoice me-1"></i>إيصال التحويل من الإدارة</button>` : ''}
+                      ${r.type === 'withdraw' && r.status === 'pending' ? `<button onclick="DamanWallet.cancelPendingWithdraw('${r.id}')" class="px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 font-black text-[10px] ms-auto">إلغاء السحب وردّ المبلغ</button>` : ''}
+                    </div>
+                  </div>`).join('')}
+            </div>` : ''}
 
-    async runContractVerify(e, forcedCode) {
-      if (e) e.preventDefault();
-      const code = (forcedCode || document.getElementById('vc-code')?.value || '').trim().toUpperCase();
-      const resBox = document.getElementById('vc-result');
-      if (!code || !resBox) return;
-      resBox.innerHTML = `<div class="text-center text-slate-400 py-3">جارٍ الفحص...</div>`;
-      try {
-        const snap = await db.collection('chatAgreements').where('ticketNumber', '==', code).limit(1).get();
-        if (snap.empty) { resBox.innerHTML = `<div class="p-3 rounded-xl bg-rose-500/15 text-rose-300 font-bold text-center">❌ كود العقد غير موجود في سجلات ضمان سايت!</div>`; return; }
-        const a = snap.docs[0].data();
-        resBox.innerHTML = `
-          <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 space-y-1 text-[11px]">
-            <div class="text-emerald-300 font-black">✅ عقد رسمي موثّق على منصة ضمان سايت</div>
-            <div>الكود: <b>${this.esc(a.ticketNumber)}</b> | الحالة: <b>${this.esc(a.status)}</b></div>
-            <div>البند: <b>${this.esc(a.title)}</b></div>
-            <div>القيمة الإجمالية: <b class="text-amber-300">${this.fmtMoney(a.totalAmount)} ج.م</b></div>
-            <div>تاريخ البداية: <b>${this.esc(a.startDate || a.date || '—')}</b> | تاريخ الانتهاء: <b>${this.esc(a.endDate || '—')}</b></div>
-            <div>الطرفان: ${this.esc(a.payerName)} ⇄ ${this.esc(a.providerName)}</div>
-            <div>اعتماد النسخة الموقّعة: <b class="${a.contractStatus === 'approved' ? 'text-emerald-400' : 'text-amber-300'}">${a.contractStatus === 'approved' ? 'معتمد من الإدارة ✅' : 'قيد الاعتماد'}</b></div>
-          </div>`;
-      } catch (err) { resBox.innerHTML = `<div class="text-rose-400 text-center">تعذر الفحص</div>`; }
-    },
+          ${this.subTab === 'packages' ? `
+            <div class="space-y-3 text-xs">
+              ${subActive ? `
+                <div class="p-3 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 font-bold text-center">
+                  ★ باقتك الحالية مفعّلة حتى تاريخ: <b>${subExpDate}</b>
+                </div>` : ''}
 
-    openNotificationsModal() {
-      let m = document.getElementById('daman-notifs-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-notifs-modal';
-        m.className = 'daman-modal fixed inset-0 z-[85] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      m.classList.remove('hidden');
-      m.innerHTML = `
-        <div class="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-2xl p-4 max-h-[85vh] overflow-y-auto space-y-3 text-xs">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">الإشعارات (${this.notifications.length})</h3><button onclick="document.getElementById('daman-notifs-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          ${!this.notifications.length ? `<div class="text-center text-slate-400 py-8">لا توجد إشعارات</div>` : this.notifications.map((n) => `<div class="p-3 rounded-xl ${n.read ? 'bg-slate-950/60 border-slate-800' : 'bg-amber-500/10 border-amber-500/40'} border space-y-1"><div class="flex justify-between gap-2"><div class="font-black text-white">${this.esc(n.title)}</div><span class="text-[9.5px] text-slate-500 shrink-0">${this.esc(n.date || '')}</span></div><div class="text-[11px] text-slate-300 whitespace-pre-line">${this.esc(n.body)}</div></div>`).join('')}
-        </div>`;
-      this.notifications.filter((n) => !n.read).forEach((n) => db.collection('notifications').doc(n.id).update({ read: true }).catch(() => {}));
-    },
+              <div class="grid grid-cols-1 gap-2.5">
+                <div class="glass-card rounded-2xl p-4 border-amber-500/40 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div class="font-black text-amber-400">★ باقة الأفراد والمقاولين VIP</div>
+                    <div class="text-sm font-black text-white">${app.fmtMoney(pkgs.individualMonthly || 150)} ج.م / شهر</div>
+                  </div>
+                  <p class="text-[11px] text-slate-300">شارة VIP على صفحتك وإعلاناتك، أولوية الظهور في السوق، ويمكن سدادها من رصيد الهدايا أو الكاش.</p>
+                  <button onclick="DamanWallet.buyPackage('individual')" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">اشتراك / تجديد الآن</button>
+                </div>
 
-    openPrivacyModal() {
-      const txt = this.appConfig?.branding?.privacyText || DEFAULT_PRIVACY;
-      let m = document.getElementById('daman-privacy-modal');
-      if (!m) {
-        m = document.createElement('div');
-        m.id = 'daman-privacy-modal';
-        m.className = 'daman-modal fixed inset-0 z-[95] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4';
-        document.body.appendChild(m);
-      }
-      m.classList.remove('hidden');
-      m.innerHTML = `
-        <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 max-h-[85vh] overflow-y-auto space-y-3 text-xs leading-relaxed text-slate-300">
-          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">سياسة الخصوصية والشروط — ${this.esc(this.t('appName'))}</h3><button onclick="document.getElementById('daman-privacy-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-          <div class="whitespace-pre-line text-[11.5px] text-slate-200">${this.esc(txt)}</div>
-          <button onclick="document.getElementById('daman-privacy-modal').classList.add('hidden')" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">موافق</button>
+                <div class="glass-card rounded-2xl p-4 border-purple-500/40 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div class="font-black text-purple-300">👑 باقة الشركات والموردين B2B</div>
+                    <div class="text-sm font-black text-white">${app.fmtMoney(pkgs.companyMonthly || 450)} ج.م / شهر</div>
+                  </div>
+                  <p class="text-[11px] text-slate-300">منظومة إدارة مواقع المقاولات الكاملة (GPS، إضافي، مستخلصات، خصومات، جرد، صب خرسانة، عهدة، ورواتب A4).</p>
+                  <button onclick="DamanWallet.buyPackage('company')" class="w-full py-2.5 rounded-xl bg-purple-500 text-white font-black">اشتراك / تجديد الآن</button>
+                </div>
+              </div>
+
+              <form onsubmit="DamanWallet.redeemPromoCode(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
+                <div class="font-black text-sky-300"><i class="fa-solid fa-gift me-1"></i> هل لديك كود هدية / برومو كود؟</div>
+                <div class="flex gap-2">
+                  <input id="promo-inp" type="text" required placeholder="أدخل الكود هنا..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white uppercase font-bold" />
+                  <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 text-slate-950 font-black">تفعيل</button>
+                </div>
+              </form>
+            </div>` : ''}
         </div>`;
     }
   };
 
-  window.DamanApp = DamanApp;
-  window.addEventListener('DOMContentLoaded', () => DamanApp.init());
+  window.DamanWallet = WalletMod;
+  if (window.DamanApp) window.DamanApp.registerModule('wallet', WalletMod);
 })();
