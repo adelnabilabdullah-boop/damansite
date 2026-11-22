@@ -185,6 +185,24 @@
     viewedSession: new Set(),
     tempPostPhoto: '',
 
+    statusBadgeAr(st) {
+      const map = {
+        pending: '<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 text-[10px] font-black">بانتظار التسعير ⏳</span>',
+        quoted: '<span class="px-2 py-0.5 rounded-lg bg-sky-500/20 text-sky-300 text-[10px] font-black">تم التسعير — بانتظار موافقتك 💰</span>',
+        paid: '<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black">مدفوع — جارٍ التنفيذ ✅</span>',
+        funded: '<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black">محجوز ومؤكّد 100% ✅</span>',
+        settled: '<span class="px-2 py-0.5 rounded-lg bg-sky-500/20 text-sky-300 text-[10px] font-black">مكتمل ومُصفّى 🏁</span>',
+        completed: '<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black">مكتمل ومُعتمد 🏁</span>',
+        refunded: '<span class="px-2 py-0.5 rounded-lg bg-slate-700 text-slate-300 text-[10px] font-black">تم رد الضمان ↩️</span>',
+        cancelled: '<span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[10px] font-black">ملغى ❌</span>',
+        approved: '<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[9.5px] font-black">منشور ✅</span>',
+        pending_review: '<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 text-[9.5px] font-black">قيد المراجعة ⏳</span>',
+        rejected: '<span class="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-300 text-[9.5px] font-black">مرفوض ❌</span>',
+        closed: '<span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[9.5px] font-black">مغلق 🔒</span>'
+      };
+      return map[st] || `<span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold">${window.DamanApp.esc(st || '')}</span>`;
+    },
+
     getAllMarketPosts(app) {
       const a = app || window.DamanApp;
       const hideDemo = !!(a && a.appConfig && a.appConfig.hideDemoPosts);
@@ -286,7 +304,7 @@
       return '🏗️ مطلوب تنفيذ / مشروع';
     },
 
-    // ==================== CREATE / EDIT / CLOSE / BOOST (BONUS FIRST) / FAVORITE ====================
+    // ==================== CREATE / EDIT / CLOSE / BOOST / FAVORITE ====================
     openPostModal() {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
@@ -327,21 +345,39 @@
           </div>
           <form onsubmit="DamanProjects.savePost(event,'${existing ? existing.id : ''}')" class="space-y-2.5">
             <div class="grid grid-cols-2 gap-2">
-              <select id="pm-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
-                <option value="project" ${defType === 'project' ? 'selected' : ''}>مطلوب تنفيذ / عمالة</option>
-                <option value="worker" ${defType === 'worker' ? 'selected' : ''}>مقاول / فني متاح</option>
-                <option value="supplier" ${defType === 'supplier' ? 'selected' : ''}>توريد خامات ومعدات B2B</option>
-              </select>
-              <select id="pm-cat" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${catsOpt}</select>
+              <div>
+                <label class="block text-[10px] font-bold text-amber-300 mb-1">نوع الإعلان *</label>
+                <select id="pm-type" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold">
+                  <option value="project" ${defType === 'project' ? 'selected' : ''}>مطلوب تنفيذ / عمالة</option>
+                  <option value="worker" ${defType === 'worker' ? 'selected' : ''}>مقاول / فني متاح</option>
+                  <option value="supplier" ${defType === 'supplier' ? 'selected' : ''}>توريد خامات ومعدات B2B</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-300 mb-1">التخصص *</label>
+                <select id="pm-cat" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">${catsOpt}</select>
+              </div>
             </div>
-            <input id="pm-title" type="text" required value="${app.esc(existing?.title || '')}" placeholder="عنوان الإعلان" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            <div>
+              <label class="block text-[10px] font-bold text-slate-300 mb-1">عنوان الإعلان *</label>
+              <input id="pm-title" type="text" required value="${app.esc(existing?.title || '')}" placeholder="مثال: مطلوب فرقة نجارة مسلحة لفيلا بالتجمع" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="pm-budget" type="number" min="0" step="any" value="${existing?.budget || ''}" placeholder="الميزانية / السعر (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
-              <input id="pm-city" type="text" required value="${app.esc(existing?.city || app.profile?.city || '')}" placeholder="المدينة / الموقع" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <div>
+                <label class="block text-[10px] font-bold text-emerald-300 mb-1">الميزانية أو السعر (ج.م)</label>
+                <input id="pm-budget" type="number" min="0" step="any" value="${existing?.budget || ''}" placeholder="اتركه فارغاً للاتفاق" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-300 mb-1">المدينة / الموقع *</label>
+                <input id="pm-city" type="text" required value="${app.esc(existing?.city || app.profile?.city || '')}" placeholder="القاهرة الجديدة / أكتوبر" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              </div>
             </div>
-            <textarea id="pm-desc" rows="3" required placeholder="تفاصيل العمل والكميات والمواصفات..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc(existing?.description || '')}</textarea>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-300 mb-1">تفاصيل العمل والكميات والمواصفات *</label>
+              <textarea id="pm-desc" rows="3" required placeholder="اكتب المواصفات والمواعيد والشروط بوضوح..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white">${app.esc(existing?.description || '')}</textarea>
+            </div>
             <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
-              <span class="font-bold text-emerald-300"><i class="fa-solid fa-image me-1"></i> صورة (اختياري)</span>
+              <span class="font-bold text-emerald-300"><i class="fa-solid fa-image me-1"></i> صورة للإعلان (اختياري)</span>
               <input type="file" accept="image/*" class="hidden" onchange="DamanProjects.handlePostPhoto(this)" />
               <div id="pm-photo-prev">${this.tempPostPhoto ? `<img src="${this.tempPostPhoto}" class="max-h-24 mx-auto rounded mt-1.5" />` : ''}</div>
             </label>
@@ -428,7 +464,6 @@
       app.toast(exists ? 'تمت الإزالة من المفضلة' : 'تم الحفظ في المفضلة ❤️', 'info');
     },
 
-    // Uses Bonus Balance FIRST, then Cash Available — Clean Cash/Bonus Trial Balance Accounting
     async boostPost(pid) {
       const app = window.DamanApp;
       const p = this.projects.find((x) => x.id === pid);
@@ -616,8 +651,14 @@
         });
         await app.sendNotification('ADMIN', 'طلب استلام هندسي 3x 🛡️', `${app.profile?.name} — ${element} (${location})`);
         e.target.reset();
-        app.toast('تم إرسال طلب الاستلام الهندسي 3x ✅', 'success');
+        app.toast('تم إرسال طلب الاستلام الهندسي 3x بنجاح ✅', 'success');
       });
+    },
+
+    async cancelUserRequest(colName, reqId) {
+      if (!window.confirm('هل تريد إلغاء هذا الطلب؟')) return;
+      await window.DamanApp.db.collection(colName).doc(reqId).update({ status: 'cancelled' });
+      window.DamanApp.toast('تم إلغاء الطلب', 'info');
     },
 
     async payInspectionRequest(reqId) {
@@ -663,6 +704,16 @@
       });
     },
 
+    updateVipLaborLiveSummary() {
+      const cnt = Math.max(1, parseInt(document.getElementById('vl-count')?.value, 10) || 1);
+      const days = Math.max(1, parseInt(document.getElementById('vl-days')?.value, 10) || 1);
+      const start = document.getElementById('vl-start')?.value || window.DamanApp.todayLocal();
+      const box = document.getElementById('vl-live-summary');
+      if (!box) return;
+      const vipPct = (window.DamanApp.getVipCommissionRate() * 100).toFixed(0);
+      box.innerHTML = `📋 <b>ملخص طلبك:</b> <span class="text-white">${cnt} عامل/فني</span> لمدة <span class="text-white">${days} أيام</span> (إجمالي <b class="text-amber-300">${cnt * days} يومية عمل</b>) — بداية النزول: <b>${window.DamanApp.esc(start)}</b>. سيتم تسعير الطلب من الإدارة + عمولة ضمان VIP (${vipPct}%).`;
+    },
+
     async submitVipLaborRequest(e) {
       e.preventDefault();
       const app = window.DamanApp;
@@ -671,16 +722,19 @@
         const trade = document.getElementById('vl-trade').value.trim();
         const workersCount = parseInt(document.getElementById('vl-count').value, 10) || 1;
         const days = parseInt(document.getElementById('vl-days').value, 10) || 1;
+        const startDate = document.getElementById('vl-start').value || app.todayLocal();
+        const shiftType = document.getElementById('vl-shift').value;
         const location = document.getElementById('vl-loc').value.trim();
         const notes = document.getElementById('vl-notes').value.trim();
         await app.db.collection('vipLaborRequests').add({
           userId: app.user.uid, userName: app.profile?.companyName || app.profile?.name || '', userPhone: app.profile?.phone || '',
-          trade, workersCount, days, location, notes, baseCost: 0, vipFee: 0, totalQuoted: 0, status: 'pending',
+          trade, workersCount, days, startDate, shiftType, location, notes,
+          baseCost: 0, vipFee: 0, totalQuoted: 0, status: 'pending',
           date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        await app.sendNotification('ADMIN', 'طلب عمالة VIP جديد 👷', `${app.profile?.name}: ${workersCount} ${trade}`);
+        await app.sendNotification('ADMIN', 'طلب عمالة VIP جديد 👷', `${app.profile?.name}: ${workersCount} ${trade} لمدة ${days} يوم (${location})`);
         e.target.reset();
-        app.toast('تم إرسال طلب عمالة VIP ✅', 'success');
+        app.toast('تم إرسال طلب توريد عمالة VIP بنجاح ✅', 'success');
       });
     },
 
@@ -698,7 +752,7 @@
         }
         return;
       }
-      if (!window.confirm(`تأكيد حجز عمالة VIP بمبلغ ${app.fmtMoney(total)} ج.م؟`)) return;
+      if (!window.confirm(`تأكيد حجز عمالة VIP بمبلغ ${app.fmtMoney(total)} ج.م؟\n• تكلفة العمالة (محجوزة بالضمان): ${app.fmtMoney(baseCost)} ج.م\n• عمولة المنصة VIP: ${app.fmtMoney(vipFee)} ج.م`)) return;
       await app.withLock('fundVip_' + reqId, async () => {
         const uRef = app.db.collection('users').doc(app.user.uid);
         const rRef = app.db.collection('vipLaborRequests').doc(reqId);
@@ -716,7 +770,7 @@
             tx.set(app.db.collection('transactions').doc(), {
               userId: app.user.uid, type: 'vip_labor_lock', amount: -total,
               balanceBefore: curAvail, balanceAfter: afterAvail,
-              note: `حجز عمالة VIP (${req.trade})`, date: app.todayLocal(),
+              note: `حجز عمالة VIP (${req.workersCount} ${req.trade} × ${req.days} يوم)`, date: app.todayLocal(),
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             if (vipFee > 0) {
@@ -769,7 +823,7 @@
                 ${boosted ? `<span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">★ إعلان مميز</span>` : ''}
                 <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 text-[9.5px] font-bold">${this.postTypeLabel(p.postType)}</span>
                 <span class="px-2 py-0.5 rounded-lg bg-slate-950 text-slate-300 text-[9.5px]">${app.esc(this.catLabel(p.category))}</span>
-                ${p.status !== 'approved' ? `<span class="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-300 text-[9px] font-black">${app.esc(p.status)}</span>` : ''}
+                ${p.status !== 'approved' ? this.statusBadgeAr(p.status) : ''}
               </div>
               <button onclick="DamanProjects.toggleFavorite('${p.id}')" class="text-sm ${isFav ? 'text-rose-500' : 'text-slate-500'}">
                 <i class="fa-${isFav ? 'solid' : 'regular'} fa-heart"></i>
@@ -828,19 +882,19 @@
       return `
         <div class="space-y-3 text-xs">
           <div class="flex items-center justify-between"><h3 class="font-black text-amber-400">دفتر عمال ويوميات وعهدة الموقع</h3><button onclick="DamanProjects.printLedgerA4()" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10.5px]">تصفية A4</button></div>
-          <form onsubmit="DamanProjects.submitLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
+          <form onsubmit="DamanProjects.submitLedgerEntry(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
             <div class="grid grid-cols-2 gap-2">
-              <input id="ld-worker" type="text" required placeholder="اسم العامل / المقاول" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              <select id="ld-type" class="px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold"><option value="wage">يومية (+)</option><option value="overtime">إضافي/سهر (+)</option><option value="advance">سلفة (-)</option><option value="deduction">خصم (-)</option><option value="custody">عهدة مشتريات</option></select>
+              <div><label class="block text-[10px] font-bold text-slate-300 mb-1">اسم العامل أو المقاول *</label><input id="ld-worker" type="text" required placeholder="مثال: عيد شعبان" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="block text-[10px] font-bold text-amber-300 mb-1">نوع القيد المالي *</label><select id="ld-type" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold"><option value="wage">يومية (+)</option><option value="overtime">إضافي / سهر (+)</option><option value="advance">سلفة (-)</option><option value="deduction">خصم (-)</option><option value="custody">عهدة مشتريات</option></select></div>
             </div>
             <div class="grid grid-cols-2 gap-2">
-              <input id="ld-amt" type="number" min="1" step="any" required placeholder="المبلغ (ج.م)" class="px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
-              <input id="ld-site" type="text" placeholder="اسم الموقع" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              <div><label class="block text-[10px] font-bold text-emerald-300 mb-1">المبلغ (ج.م) *</label><input id="ld-amt" type="number" min="1" step="any" required placeholder="0" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-300 mb-1">اسم الموقع / المشروع</label><input id="ld-site" type="text" placeholder="مثال: مشروع سعادة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
-            <input id="ld-note" type="text" placeholder="ملاحظات..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">إضافة للدفتر</button>
+            <div><label class="block text-[10px] font-bold text-slate-300 mb-1">البيان / ملاحظات</label><input id="ld-note" type="text" placeholder="تفاصيل اليومية أو السلفة..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">إضافة القيد للدفتر</button>
           </form>
-          <div class="space-y-2">${this.ledgerEntries.map((x) => `<div class="glass-card rounded-2xl p-3 flex justify-between gap-2"><div><div class="font-black text-white">${app.esc(x.workerName)} • <span class="text-amber-300">${this.ledgerTypeLabel(x.entryType)}</span></div><div class="text-[10px] text-slate-400">${app.esc(x.date || '')} ${app.esc(x.siteName || '')} ${app.esc(x.note || '')}</div></div><div class="flex items-center gap-2 shrink-0"><b class="${['advance', 'deduction'].includes(x.entryType) ? 'text-rose-400' : 'text-emerald-400'}">${app.fmtMoney(x.amount)} ج.م</b><button onclick="DamanProjects.deleteLedgerEntry('${x.id}')" class="text-rose-400"><i class="fa-solid fa-trash-can"></i></button></div></div>`).join('') || '<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد قيود بعد</div>'}</div>
+          <div class="space-y-2">${this.ledgerEntries.map((x) => `<div class="glass-card rounded-2xl p-3 flex justify-between gap-2"><div><div class="font-black text-white">${app.esc(x.workerName)} • <span class="text-amber-300">${this.ledgerTypeLabel(x.entryType)}</span></div><div class="text-[10px] text-slate-400">${app.esc(x.date || '')} ${app.esc(x.siteName || '')} ${app.esc(x.note || '')}</div></div><div class="flex items-center gap-2 shrink-0"><b class="${['advance', 'deduction'].includes(x.entryType) ? 'text-rose-400' : 'text-emerald-400'}">${app.fmtMoney(x.amount)} ج.م</b><button onclick="DamanProjects.deleteLedgerEntry('${x.id}')" class="text-rose-400"><i class="fa-solid fa-trash-can"></i></button></div></div>`).join('') || '<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد قيود مسجّلة بعد.</div>'}</div>
         </div>`;
     },
 
@@ -853,25 +907,36 @@
             <p class="text-[11px] text-slate-200 leading-relaxed">فحص واستلام الشدات الخشبية والمعدنية والحدادة والصب والمحارة والتشطيبات بتقرير هندسي معتمد وضمان مادي 3 أضعاف.</p>
           </div>
           <form onsubmit="DamanProjects.submitInspectionRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
-            <select id="ins-elem" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-emerald-300 font-bold">
-              <option value="باقة 3 زيارات استلام سقف (خامات + شدة وحدادة + صب)">باقة 3 زيارات استلام سقف (خامات + شدة وحدادة + صب)</option>
-              <option value="استلام شدة خشبية ومعدنية وحدادة قبل الصب">استلام شدة خشبية ومعدنية وحدادة قبل الصب</option>
-              <option value="استلام مباني ومحارة وبؤج وأوتار">استلام مباني ومحارة وبؤج وأوتار</option>
-              <option value="استلام تأسيس سباكة وكهرباء وعزل">استلام تأسيس سباكة وكهرباء وعزل</option>
-              <option value="استلام تشطيب كامل (فيلا / شقة)">استلام تشطيب كامل (فيلا / شقة)</option>
-            </select>
-            <div class="grid grid-cols-2 gap-2"><input id="ins-loc" type="text" required placeholder="عنوان الموقع" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /><input id="ins-area" type="text" required placeholder="المساحة م²" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
-            <input id="ins-date" type="date" required value="${app.todayLocal()}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <textarea id="ins-notes" rows="2" placeholder="ملاحظات أو موعد الصب..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">طلب تسعير واستلام هندسي 3x</button>
+            <div>
+              <label class="block text-[10.5px] font-bold text-emerald-300 mb-1">نوع الاستلام الهندسي المطلوب *</label>
+              <select id="ins-elem" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-emerald-300 font-bold">
+                <option value="باقة 3 زيارات استلام سقف (خامات + شدة وحدادة + صب)">باقة 3 زيارات استلام سقف (خامات + شدة وحدادة + صب)</option>
+                <option value="استلام شدة خشبية ومعدنية وحدادة قبل الصب">استلام شدة خشبية ومعدنية وحدادة قبل الصب</option>
+                <option value="استلام مباني ومحارة وبؤج وأوتار">استلام مباني ومحارة وبؤج وأوتار</option>
+                <option value="استلام تأسيس سباكة وكهرباء وعزل">استلام تأسيس سباكة وكهرباء وعزل</option>
+                <option value="استلام تشطيب كامل (فيلا / شقة)">استلام تشطيب كامل (فيلا / شقة)</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">عنوان الموقع بالتفصيل *</label><input id="ins-loc" type="text" required placeholder="مثال: التجمع الخامس - فيلا 14" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">المساحة التقريبية (م²) *</label><input id="ins-area" type="text" required placeholder="مثال: 250 م²" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            </div>
+            <div><label class="block text-[10.5px] font-bold text-amber-300 mb-1">التاريخ المفضّل للزيارة *</label><input id="ins-date" type="date" required value="${app.todayLocal()}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">ملاحظات فنية أو موعد الصب (اختياري)</label><textarea id="ins-notes" rows="2" placeholder="اكتب أي تفاصيل إضافية للمهندس..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea></div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال طلب التسعير والاستلام 3x</button>
           </form>
+
           ${this.inspectionReqs.map((r) => `
             <div class="glass-card rounded-2xl p-3 space-y-1.5">
-              <div class="flex justify-between"><b class="text-white">${app.esc(r.element)}</b><span class="text-amber-300 font-bold">${app.esc(r.status)}</span></div>
-              <div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • ${app.esc(r.preferredDate || '')}</div>
-              ${r.adminNote ? `<div class="text-[10.5px] text-emerald-300">ملاحظة الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
-              ${r.status === 'quoted' && Number(r.quotedPrice || 0) > 0 ? `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500 flex justify-between items-center"><b class="text-emerald-300">${app.fmtMoney(r.quotedPrice)} ج.م</b><button onclick="DamanProjects.payInspectionRequest('${r.id}')" class="px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة ودفع</button></div>` : ''}
+              <div class="flex justify-between items-start gap-2"><b class="text-white">${app.esc(r.element)}</b>${this.statusBadgeAr(r.status)}</div>
+              <div class="text-[10.5px] text-slate-400">📍 ${app.esc(r.location)} • المساحة: ${app.esc(r.area || '—')} • موعد الزيارة: ${app.esc(r.preferredDate || '')}</div>
+              ${r.adminNote ? `<div class="p-2 rounded-lg bg-slate-950 text-[10.5px] text-emerald-300"><b>رد الإدارة:</b> ${app.esc(r.adminNote)}</div>` : ''}
+              ${r.status === 'quoted' && Number(r.quotedPrice || 0) > 0 ? `<div class="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500 flex justify-between items-center"><b class="text-emerald-300">التسعيرة: ${app.fmtMoney(r.quotedPrice)} ج.م</b><button onclick="DamanProjects.payInspectionRequest('${r.id}')" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة ودفع</button></div>` : ''}
               ${r.reportMedia ? `<button onclick="DamanApp.openMediaLightbox('${r.reportMedia}','التقرير الهندسي المعتمد 3x')" class="w-full py-2 rounded-xl bg-sky-500/20 border border-sky-500/50 text-sky-300 font-black text-[11px]"><i class="fa-solid fa-file-contract me-1"></i> عرض وتحميل التقرير الهندسي المعتمد</button>` : ''}
+              <div class="flex gap-1.5 pt-1">
+                <button onclick="if(window.DamanChat) DamanChat.openDirectChat('admin','إدارة ضمان سايت','','متابعة طلب استلام 3x: ${app.esc(r.element).replace(/'/g, "\\'")}')" class="flex-1 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10px]"><i class="fa-solid fa-comments me-1"></i> متابعة مع الإدارة</button>
+                ${['pending', 'quoted'].includes(r.status) ? `<button onclick="DamanProjects.cancelUserRequest('vipRequests','${r.id}')" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">إلغاء الطلب</button>` : ''}
+              </div>
             </div>`).join('')}
         </div>`;
     },
@@ -883,16 +948,76 @@
         <div class="space-y-3 text-xs">
           <div class="p-3.5 rounded-2xl bg-purple-500/15 border border-purple-500/40 space-y-1">
             <div class="font-black text-purple-300">👷 توريد عمالة VIP مختبرة بضمان المنصة (عمولة ${vipPct}%)</div>
-            <p class="text-[11px] text-slate-200">فرق نجارين، حدادين، بنائين، محارة، وتشطيبات جاهزة للنزول الفوري بضمان الالتزام والجودة.</p>
+            <p class="text-[11px] text-slate-200 leading-relaxed">حدّد التخصص، عدد العمال، وعدد أيام العمل المطلوبة — وتقوم الإدارة بتوفير فرقة فنية مختبرة وموثّقة بضمان كامل للالتزام والجودة.</p>
           </div>
-          <form onsubmit="DamanProjects.submitVipLaborRequest(event)" class="glass-card rounded-2xl p-3.5 space-y-2.5">
-            <input id="vl-trade" type="text" required placeholder="التخصص المطلوب (مثال: نجارين مسلح / حدادين)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white" />
-            <div class="grid grid-cols-2 gap-2"><input id="vl-count" type="number" min="1" value="6" required class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /><input id="vl-days" type="number" min="1" value="5" required class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
-            <input id="vl-loc" type="text" required placeholder="موقع المشروع" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-            <textarea id="vl-notes" rows="2" placeholder="تفاصيل العمل وموعد النزول..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
-            <button type="submit" class="w-full py-2.5 rounded-xl bg-purple-500 text-white font-black">إرسال طلب عمالة VIP</button>
+
+          <form onsubmit="DamanProjects.submitVipLaborRequest(event)" oninput="DamanProjects.updateVipLaborLiveSummary()" class="glass-card rounded-2xl p-3.5 space-y-2.5 border-purple-500/30">
+            <div>
+              <label class="block text-[10.5px] font-bold text-purple-300 mb-1">التخصص / المهنة المطلوبة *</label>
+              <input id="vl-trade" type="text" required placeholder="مثال: نجارين مسلح / حدادين / بنائين / محارة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-white font-bold" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10.5px] font-bold text-amber-300 mb-1">عدد العمال / الصنايعية المطلوب *</label>
+                <input id="vl-count" type="number" min="1" max="500" value="6" required placeholder="مثال: 6" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black text-center" />
+              </div>
+              <div>
+                <label class="block text-[10.5px] font-bold text-emerald-300 mb-1">مدة العمل المطلوبة (بالأيام) *</label>
+                <input id="vl-days" type="number" min="1" max="365" value="5" required placeholder="مثال: 5" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black text-center" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10.5px] font-bold text-slate-300 mb-1">تاريخ بدء النزول للموقع *</label>
+                <input id="vl-start" type="date" required value="${app.todayLocal()}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+              </div>
+              <div>
+                <label class="block text-[10.5px] font-bold text-slate-300 mb-1">نظام العمل / الوردية *</label>
+                <select id="vl-shift" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">
+                  <option value="يومية عادية (8 ساعات)">يومية عادية (8 ساعات)</option>
+                  <option value="وردية ممتدة / سهر (12 ساعة)">وردية ممتدة (12 ساعة)</option>
+                  <option value="مقطوعية / إنتاجية">مقطوعية / إنتاجية</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[10.5px] font-bold text-slate-300 mb-1">موقع المشروع بالتفصيل *</label>
+              <input id="vl-loc" type="text" required placeholder="المدينة / الكمبوند / عنوان الموقع" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
+            </div>
+
+            <div>
+              <label class="block text-[10.5px] font-bold text-slate-300 mb-1">تفاصيل العمل والعدة أو السكن (اختياري)</label>
+              <textarea id="vl-notes" rows="2" placeholder="هل يوجد سكن للعمال؟ هل العدة متوفرة بالموقع؟ أي شروط خاصة..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+            </div>
+
+            <div id="vl-live-summary" class="p-2.5 rounded-xl bg-slate-950 border border-purple-500/40 text-[10.5px] text-slate-300 leading-relaxed">
+              📋 <b>ملخص طلبك:</b> <span class="text-white">6 عامل/فني</span> لمدة <span class="text-white">5 أيام</span> (إجمالي <b class="text-amber-300">30 يومية عمل</b>) — بداية النزول: <b>${app.todayLocal()}</b>. سيتم تسعير الطلب من الإدارة + عمولة ضمان VIP (${vipPct}%).
+            </div>
+
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-purple-500 text-white font-black">إرسال طلب توريد عمالة VIP</button>
           </form>
-          ${this.vipLaborReqs.map((r) => `<div class="glass-card rounded-2xl p-3 space-y-1.5"><div class="flex justify-between"><b class="text-white">${app.esc(r.trade)} (${r.workersCount} × ${r.days} يوم)</b><span class="text-purple-300 font-bold">${app.esc(r.status)}</span></div>${r.status === 'quoted' && Number(r.baseCost || 0) > 0 ? `<div class="p-2 rounded-xl bg-purple-500/15 border border-purple-500 space-y-1"><div class="text-[11px] text-purple-200">التكلفة ${app.fmtMoney(r.baseCost)} + عمولة ${app.fmtMoney(r.vipFee)} = <b>${app.fmtMoney(r.totalQuoted)} ج.م</b></div><button onclick="DamanProjects.fundVipLaborRequest('${r.id}')" class="w-full py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة وحجز 100%</button></div>` : ''}</div>`).join('')}
+
+          ${this.vipLaborReqs.map((r) => `
+            <div class="glass-card rounded-2xl p-3 space-y-1.5">
+              <div class="flex justify-between items-start gap-2">
+                <b class="text-white">${app.esc(r.trade)} — ${r.workersCount} عامل × ${r.days} أيام</b>
+                ${this.statusBadgeAr(r.status)}
+              </div>
+              <div class="text-[10.5px] text-slate-400">📍 ${app.esc(r.location)} • بداية النزول: ${app.esc(r.startDate || r.date || '')}${r.shiftType ? ' • ' + app.esc(r.shiftType) : ''}</div>
+              ${r.adminNote ? `<div class="p-2 rounded-lg bg-slate-950 text-[10.5px] text-purple-200"><b>رد الإدارة:</b> ${app.esc(r.adminNote)}</div>` : ''}
+              ${r.status === 'quoted' && Number(r.baseCost || 0) > 0 ? `
+                <div class="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500 space-y-1.5">
+                  <div class="text-[11px] text-purple-100">تكلفة العمالة: <b>${app.fmtMoney(r.baseCost)} ج.م</b> + عمولة VIP: <b>${app.fmtMoney(r.vipFee)} ج.م</b> = الإجمالي <b class="text-amber-300">${app.fmtMoney(r.totalQuoted)} ج.م</b></div>
+                  <button onclick="DamanProjects.fundVipLaborRequest('${r.id}')" class="w-full py-2 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة وحجز الضمان 100%</button>
+                </div>` : ''}
+              <div class="flex gap-1.5 pt-1">
+                <button onclick="if(window.DamanChat) DamanChat.openDirectChat('admin','إدارة ضمان سايت','','متابعة طلب عمالة VIP: ${app.esc(r.trade).replace(/'/g, "\\'")} (${r.workersCount} عامل)')" class="flex-1 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10px]"><i class="fa-solid fa-comments me-1"></i> متابعة مع الإدارة</button>
+                ${['pending', 'quoted'].includes(r.status) ? `<button onclick="DamanProjects.cancelUserRequest('vipLaborRequests','${r.id}')" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-[10px]">إلغاء الطلب</button>` : ''}
+              </div>
+            </div>`).join('')}
         </div>`;
     },
 
