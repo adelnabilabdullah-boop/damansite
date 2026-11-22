@@ -1,14 +1,14 @@
-const CACHE_NAME = 'damansite-v20';
+const CACHE_NAME = 'damansite-v21';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './manifest.json',
-  './app-core.js?v=20',
-  './wallet-kyc.js?v=20',
-  './chat-support.js?v=20',
-  './projects-escrow.js?v=20',
-  './company-panel.js?v=20',
-  './admin.js?v=20'
+  './manifest.json?v=21',
+  './app-core.js?v=21',
+  './wallet-kyc.js?v=21',
+  './chat-support.js?v=21',
+  './projects-escrow.js?v=21',
+  './company-panel.js?v=21',
+  './admin.js?v=21'
 ];
 
 self.addEventListener('install', (event) => {
@@ -28,12 +28,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-// Network-First Strategy: Always pull newest updates from GitHub when online; fallback to cache offline
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = event.request.url;
