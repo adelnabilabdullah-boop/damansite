@@ -18,12 +18,70 @@
 
   const ADMIN_EMAIL = 'adelnabilabdullah@gmail.com';
   const MODULE_FILES = {
-    wallet: 'wallet-kyc.js?v=21',
-    chat: 'chat-support.js?v=21',
-    projects: 'projects-escrow.js?v=21',
-    company: 'company-panel.js?v=21',
-    admin: 'admin.js?v=21'
+    wallet: 'wallet-kyc.js?v=22',
+    chat: 'chat-support.js?v=22',
+    projects: 'projects-escrow.js?v=22',
+    company: 'company-panel.js?v=22',
+    admin: 'admin.js?v=22'
   };
+
+  // 6 Official Built-in DamanSite Home Promo Ads (Always visible + Admin can add more from "إعلانات الرئيسية")
+  const OFFICIAL_HOME_BANNERS = [
+    {
+      id: 'off_1',
+      badge: '🛡️ الأكثر طلباً — ضمان مالي 3 أضعاف (3x)',
+      title: 'باقة استلام السقف الكاملة (3 زيارات هندسية بـ 9,000 ج.م)',
+      subtitle: 'استلام الخامات + الشدة والحدادة قبل الصب + الإشراف أثناء الصب بتقرير هندسي معتمد وضمان مادي 3 أضعاف.',
+      ctaText: 'احجز استلام 3x الآن',
+      action: 'inspection',
+      theme: 'emerald'
+    },
+    {
+      id: 'off_2',
+      badge: '🔒 حماية أموالك 100% — نظام الضمان المالي',
+      title: 'تعاقد بعقد رسمي A4 بالرقم القومي بدون قلق أو نصب',
+      subtitle: 'احجز 100% من قيمة الشغل بالمحفظة، وقّع باللمس، واطبع عقدك بكود QR — ولا يُصرف جنيه قبل الاستلام الفعلي.',
+      ctaText: 'تصفح السوق وتعاقد',
+      action: 'market',
+      theme: 'amber'
+    },
+    {
+      id: 'off_3',
+      badge: '👷 توريد فوري للمواقع — عمالة VIP',
+      title: 'فرق نجارين وحدادين ومحارة وتشطيبات مختبرة بضمان المنصة',
+      subtitle: 'اطلب عدد العمال والتخصص والموقع، ونجهزلك فرقة محترفة جاهزة للنزول الفوري بضمان الالتزام والجودة.',
+      ctaText: 'اطلب فرقة VIP',
+      action: 'viplabor',
+      theme: 'purple'
+    },
+    {
+      id: 'off_4',
+      badge: '🚚 توريدات B2B بأسعار المصنع',
+      title: 'حديد وأسمنت وخرسانة جاهزة وشدات معدنية بدفع آمن عند الاستلام',
+      subtitle: 'تواصل مباشرة مع موردين موثّقين بالضمان المالي واستلم خامات موقعك بالوزن والمواصفة المعتمدة.',
+      ctaText: 'دليل الموردين B2B',
+      action: 'suppliers',
+      theme: 'sky'
+    },
+    {
+      id: 'off_5',
+      badge: '🏢 منظومة شركات المقاولات والـ HR',
+      title: 'أدِر مواقعك وموظفيك بالـ GPS والرواتب والعهدة والتقارير اليومية',
+      subtitle: 'كشف تلقائي للحضور خارج الموقع، تصفية العهدة بالفواتير، وشيت رواتب وتقرير يومي A4 جاهز للطباعة.',
+      ctaText: 'افتح لوحة الشركات',
+      action: 'company',
+      theme: 'sky'
+    },
+    {
+      id: 'off_6',
+      badge: '★ ضاعف شغلك ومبيعاتك',
+      title: 'ميّز إعلانك بأعلى السوق أو اشترك في باقة VIP الآن',
+      subtitle: 'اظهر في الصفحة الرئيسية وأول نتائج البحث أمام آلاف المقاولين وشركات التطوير والموردين في مصر.',
+      ctaText: 'عرض الباقات والتمييز',
+      action: 'wallet',
+      theme: 'amber'
+    }
+  ];
 
   const CATEGORIES = [
     { id: 'concrete', ar: 'خرسانات وشدات خشبية ومعدنية', en: 'Concrete & Formwork' },
@@ -83,6 +141,8 @@
       requireKycForActions: true,
       maintenanceMode: false,
       disableCalls: false,
+      hideDemoPosts: false,
+      customHomeBanners: [],
       moderators: [],
       supportWhatsapp: '201030374787',
       paymentAccounts: {
@@ -355,7 +415,7 @@
           await Promise.all(keys.map((k) => caches.delete(k)));
         }
       } catch (e) {}
-      window.location.replace(window.location.pathname + '?v=21&t=' + Date.now());
+      window.location.replace(window.location.pathname + '?v=22&t=' + Date.now());
     },
 
     loadMissingModule(tab) {
@@ -383,14 +443,15 @@
       this.modules[name] = mod;
       this.loadingMods[name] = false;
       this.failedMods[name] = false;
-      if (this.activeTab === name) this.renderCurrentTab();
+      if (this.activeTab === name || (name === 'projects' && this.activeTab === 'home')) {
+        this.renderCurrentTab();
+      }
     },
 
     init() {
-      // Auto-heal if Chrome served an old cached index.html
       if (!document.getElementById('daman-admin-header-btn')) {
-        if (!sessionStorage.getItem('daman_healed_v21')) {
-          sessionStorage.setItem('daman_healed_v21', '1');
+        if (!sessionStorage.getItem('daman_healed_v22')) {
+          sessionStorage.setItem('daman_healed_v22', '1');
           this.forceClearCacheAndReload();
           return;
         }
@@ -600,6 +661,53 @@
       }
     },
 
+    // Home Banner & Category Shortcuts
+    handleBannerAction(act) {
+      if (act === 'inspection') {
+        if (window.DamanProjects) DamanProjects.subTab = 'inspection';
+        return this.switchTab('projects');
+      }
+      if (act === 'viplabor') {
+        if (window.DamanProjects) DamanProjects.subTab = 'viplabor';
+        return this.switchTab('projects');
+      }
+      if (act === 'suppliers') {
+        if (window.DamanProjects) {
+          DamanProjects.subTab = 'market';
+          DamanProjects.marketFilter = 'supplier';
+          DamanProjects.selectedCategory = 'all';
+        }
+        return this.switchTab('projects');
+      }
+      if (act === 'market') {
+        if (window.DamanProjects) {
+          DamanProjects.subTab = 'market';
+          DamanProjects.marketFilter = 'all';
+        }
+        return this.switchTab('projects');
+      }
+      if (act === 'company') return this.switchTab('company');
+      if (act === 'wallet') {
+        if (window.DamanWallet) DamanWallet.subTab = 'packages';
+        return this.switchTab('wallet');
+      }
+      if (act === 'whatsapp') {
+        const wa = this.appConfig?.supportWhatsapp || '201030374787';
+        return window.open(`https://wa.me/${wa}?text=${encodeURIComponent('مرحباً إدارة ضمان سايت، أستفسر عن عروضكم')}`, '_blank');
+      }
+      if (window.DamanChat) DamanChat.openDirectChat('admin', 'إدارة ضمان سايت');
+      else this.switchTab('chat');
+    },
+
+    openCategoryFromHome(catId) {
+      if (window.DamanProjects) {
+        DamanProjects.subTab = 'market';
+        DamanProjects.marketFilter = 'all';
+        DamanProjects.selectedCategory = catId;
+      }
+      this.switchTab('projects');
+    },
+
     // ==================== MAIN RENDER ROUTER ====================
     renderCurrentTab() {
       const main = document.getElementById('app-main');
@@ -680,12 +788,12 @@
           <h2 class="text-base font-black text-white">توثيق الهوية إجباري قبل استخدام التطبيق</h2>
           ${st === 'rejected' ? `<div class="p-3 rounded-xl bg-rose-500/15 border border-rose-500/50 text-xs text-rose-200 font-bold">❌ سبب الرفض: ${this.esc(this.profile?.kycRejectionReason || 'الصور غير واضحة')}</div>` : ''}
           <p class="text-xs text-slate-300 leading-relaxed">${isCompany ? 'مطلوب للشركات والموردين: السجل التجاري + البطاقة الضريبية + بطاقة المسؤول + سيلفي.' : 'مطلوب للأفراد والمقاولين: بطاقة الرقم القومي (وش وضهر) + صورة سيلفي واضحة.'}</p>
-          <button onclick="if(window.DamanWallet){ DamanWallet.openKycModal(true); } else { DamanApp.loadMissingModule('wallet'); DamanApp.toast('جارٍ تحميل شاشة التوثيق، اضغط مرة أخرى بعد ثانية','info'); }" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm">ابدأ توثيق الحساب الآن</button>
+          <button onclick="if(window.DamanWallet){ DamanWallet.openKycModal(true); } else { DamanApp.loadMissingModule('wallet'); DamanApp.toast('جارٍ تحميل شاشة التوثيق...','info'); }" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm">ابدأ توثيق الحساب الآن</button>
           <button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button>
         </div>`;
     },
 
-    // ==================== HOME TAB ====================
+    // ==================== HOME TAB (WITH OFFICIAL PROMO ADS + FEATURED ADS ★ + 17 CATEGORIES) ====================
     renderHomeTab(container) {
       const p = this.profile;
       const isBday = p && this.isBirthdayToday(p);
@@ -695,17 +803,33 @@
       const expSoon = exp > Date.now() && exp - Date.now() <= 3 * 24 * 60 * 60 * 1000;
       const oldShellDetected = !document.getElementById('daman-admin-header-btn');
 
+      // Merge Admin Custom Home Banners (top priority) + 6 Official DamanSite Banners
+      const customBanners = Array.isArray(this.appConfig?.customHomeBanners) ? this.appConfig.customHomeBanners : [];
+      const allBanners = [...customBanners, ...OFFICIAL_HOME_BANNERS];
+
+      const themeStyles = {
+        emerald: { box: 'from-emerald-950/90 via-slate-900 to-slate-950 border-emerald-500/50', badge: 'bg-emerald-500/20 text-emerald-300', btn: 'bg-emerald-500 text-slate-950' },
+        amber: { box: 'from-amber-950/80 via-slate-900 to-slate-950 border-amber-500/50', badge: 'bg-amber-500/20 text-amber-300', btn: 'bg-amber-500 text-slate-950' },
+        purple: { box: 'from-purple-950/80 via-slate-900 to-slate-950 border-purple-500/50', badge: 'bg-purple-500/20 text-purple-300', btn: 'bg-purple-500 text-white' },
+        sky: { box: 'from-sky-950/80 via-slate-900 to-slate-950 border-sky-500/50', badge: 'bg-sky-500/20 text-sky-300', btn: 'bg-sky-500 text-slate-950' }
+      };
+
+      // Pull Featured Ads ★ from Market module
+      const featuredPosts = window.DamanProjects && typeof DamanProjects.getFeaturedPosts === 'function'
+        ? DamanProjects.getFeaturedPosts(5)
+        : [];
+
       container.innerHTML = `
-        <div class="space-y-3.5">
+        <div class="space-y-4">
           ${oldShellDetected ? `
             <div class="p-3 rounded-2xl bg-rose-600/20 border-2 border-rose-500 text-xs space-y-2 text-center">
-              <div class="font-black text-rose-300">⚠️ المتصفح أو GitHub لسه فاتح نسخة index.html القديمة</div>
+              <div class="font-black text-rose-300">⚠️ المتصفح لسه فاتح نسخة قديمة من الكاش</div>
               <button onclick="DamanApp.forceClearCacheAndReload()" class="px-4 py-1.5 rounded-xl bg-rose-500 text-white font-black text-[11px]">مسح الكاش وإعادة التحميل الآن</button>
             </div>` : ''}
 
           ${this.hasAdminAccess() ? `
             <button onclick="DamanApp.switchTab('admin')" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 border border-purple-400/60 text-white flex items-center justify-between text-xs font-black shadow-xl">
-              <span><i class="fa-solid fa-crown text-amber-300 me-1.5"></i> فتح لوحة سيطرة الإدارة (الخزنة، التوثيق، الشحن، الشركات)</span>
+              <span><i class="fa-solid fa-crown text-amber-300 me-1.5"></i> لوحة سيطرة الإدارة (الخزنة، الإعلانات، التوثيق، الشحن)</span>
               <i class="fa-solid fa-chevron-left"></i>
             </button>` : ''}
 
@@ -722,6 +846,7 @@
               <button onclick="DamanApp.switchTab('wallet')" class="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]">تجديد</button>
             </div>` : ''}
 
+          <!-- Hero / Balance Card -->
           <div class="glass-card rounded-3xl p-4 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-amber-500/30 space-y-3">
             <div class="flex items-center justify-between gap-2">
               <div>
@@ -749,6 +874,31 @@
               </div>`}
           </div>
 
+          <!-- ==================== OFFICIAL DAMANSITE PROMO BANNERS (SLIDER) ==================== -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <h2 class="text-xs font-black text-amber-400"><i class="fa-solid fa-fire text-amber-400 me-1"></i> عروض وخدمات ضمان سايت الحصرية (${allBanners.length})</h2>
+              ${this.isAdmin() ? `<button onclick="if(window.DamanAdmin) DamanAdmin.subTab='ads'; DamanApp.switchTab('admin')" class="text-[10px] font-black text-purple-300 underline">+ أضف إعلان</button>` : ''}
+            </div>
+            <div class="flex gap-2.5 overflow-x-auto pb-2 snap-x snap-mandatory">
+              ${allBanners.map((b) => {
+                const st = themeStyles[b.theme] || themeStyles.amber;
+                return `
+                  <div class="snap-start shrink-0 w-[86%] sm:w-[72%] rounded-3xl p-4 bg-gradient-to-br ${st.box} border flex flex-col justify-between gap-3 shadow-lg">
+                    <div class="space-y-1.5">
+                      <span class="inline-block px-2.5 py-0.5 rounded-lg ${st.badge} text-[9.5px] font-black">${this.esc(b.badge)}</span>
+                      <h3 class="text-sm font-black text-white leading-snug">${this.esc(b.title)}</h3>
+                      <p class="text-[11px] text-slate-300 leading-relaxed">${this.esc(b.subtitle)}</p>
+                    </div>
+                    <button onclick="DamanApp.handleBannerAction('${this.esc(b.action || 'admin_chat')}')" class="w-full py-2 rounded-xl ${st.btn} font-black text-xs">
+                      ${this.esc(b.ctaText || 'اطلب الآن')} <i class="fa-solid fa-arrow-left ms-1 text-[10px]"></i>
+                    </button>
+                  </div>`;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- ==================== CORE SERVICES GRID ==================== -->
           <div class="grid grid-cols-2 gap-2.5">
             <button onclick="DamanApp.switchTab('projects')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-amber-500/50">
               <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center"><i class="fa-solid fa-helmet-safety"></i></div>
@@ -756,13 +906,13 @@
               <div class="text-[10px] text-slate-400">مشاريع، صنايعية، وموردي خامات</div>
             </button>
 
-            <button onclick="if(window.DamanProjects) DamanProjects.setSubTab('inspection'); DamanApp.switchTab('projects')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-emerald-500/50">
+            <button onclick="DamanApp.handleBannerAction('inspection')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-emerald-500/50">
               <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-shield-halved"></i></div>
               <div class="text-xs font-black text-white">استلام هندسي بضمان 3x</div>
               <div class="text-[10px] text-slate-400">استلام شدات وأسقف بضمان 3 أضعاف</div>
             </button>
 
-            <button onclick="if(window.DamanProjects) DamanProjects.setSubTab('viplabor'); DamanApp.switchTab('projects')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-purple-500/50">
+            <button onclick="DamanApp.handleBannerAction('viplabor')" class="glass-card rounded-2xl p-3.5 text-start space-y-1.5 hover:border-purple-500/50">
               <div class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center"><i class="fa-solid fa-users-gear"></i></div>
               <div class="text-xs font-black text-white">توريد عمالة VIP</div>
               <div class="text-[10px] text-slate-400">فرق فنية مختبرة بضمان المنصة</div>
@@ -775,6 +925,41 @@
             </button>
           </div>
 
+          <!-- ==================== FEATURED ADS ★ SHOWCASE ==================== -->
+          ${featuredPosts.length ? `
+            <div class="space-y-2">
+              <div class="flex items-center justify-between px-1">
+                <h2 class="text-xs font-black text-amber-400"><i class="fa-solid fa-star me-1"></i> الإعلانات المميزة في السوق (${featuredPosts.length})</h2>
+                <button onclick="DamanApp.handleBannerAction('market')" class="text-[10.5px] font-black text-emerald-400 underline">عرض الكل ←</button>
+              </div>
+              <div class="space-y-2">
+                ${featuredPosts.map((fp) => `
+                  <div onclick="if(window.DamanProjects){ DamanProjects.openPostDetails('${fp.id}'); }" class="glass-card rounded-2xl p-3 border-amber-400/50 bg-amber-500/5 space-y-1.5 cursor-pointer hover:border-amber-400">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">★ إعلان مميز</span>
+                      <span class="text-[10px] font-black text-emerald-400">${fp.budget ? this.fmtMoney(fp.budget) + ' ج.م' : 'بالاتفاق'}</span>
+                    </div>
+                    <div class="text-xs font-black text-white">${this.esc(fp.title)}</div>
+                    <div class="flex items-center justify-between text-[10px] text-slate-400">
+                      <span class="truncate"><i class="fa-solid fa-user-check text-emerald-400 me-1"></i>${this.esc(fp.ownerName || '')}</span>
+                      <span class="shrink-0"><i class="fa-solid fa-location-dot me-0.5"></i>${this.esc(fp.city || '')}</span>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            </div>` : ''}
+
+          <!-- ==================== QUICK 17 CATEGORIES STRIP ==================== -->
+          <div class="space-y-2">
+            <div class="px-1 text-xs font-black text-slate-200"><i class="fa-solid fa-layer-group text-amber-400 me-1"></i> تصفح السوق حسب التخصص (17 قسم)</div>
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5">
+              ${this.CATEGORIES.map((c) => `
+                <button onclick="DamanApp.openCategoryFromHome('${c.id}')" class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-[10.5px] font-bold text-slate-200">
+                  ${this.esc(c.ar)}
+                </button>`).join('')}
+            </div>
+          </div>
+
+          <!-- Verify Contract + Share My Page -->
           <div class="grid grid-cols-2 gap-2.5">
             <button onclick="DamanApp.openVerifyContractModal()" class="p-3 rounded-2xl bg-slate-900 border border-slate-700 flex items-center gap-2.5 text-start">
               <i class="fa-solid fa-qrcode text-xl text-amber-400"></i>
@@ -792,7 +977,7 @@
             </button>
           </div>
 
-          <button onclick="if(window.DamanChat) DamanChat.openDirectChat('admin','إدارة ضمان سايت'); else DamanApp.switchTab('chat');" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 to-emerald-500/15 border border-amber-500/40 flex items-center justify-between text-xs font-black text-amber-300">
+          <button onclick="DamanApp.handleBannerAction('admin_chat')" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 to-emerald-500/15 border border-amber-500/40 flex items-center justify-between text-xs font-black text-amber-300">
             <span><i class="fa-solid fa-headset me-1.5"></i> تواصل مباشرة مع إدارة ضمان سايت</span>
             <i class="fa-solid fa-chevron-left"></i>
           </button>
