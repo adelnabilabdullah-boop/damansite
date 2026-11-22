@@ -1,6 +1,45 @@
 (function () {
   const FUTURE_BOOST = Date.now() + 365 * 24 * 60 * 60 * 1000;
 
+  const DEFAULT_BOOST_PACKAGES = [
+    {
+      id: 'silver',
+      name: 'تمييز فضي (3 أيام)',
+      badge: '⭐ مميز فضي',
+      price: 40,
+      days: 3,
+      color: 'sky',
+      priority: 1,
+      showOnHome: false,
+      features: 'ظهور أعلى الإعلانات العادية في السوق + إطار أزرق مميز',
+      active: true
+    },
+    {
+      id: 'gold',
+      name: 'تمييز ذهبي (7 أيام)',
+      badge: '★ إعلان مميز',
+      price: 75,
+      days: 7,
+      color: 'amber',
+      priority: 2,
+      showOnHome: true,
+      features: 'تثبيت بأعلى السوق + ظهور في الصفحة الرئيسية + إطار ذهبي',
+      active: true
+    },
+    {
+      id: 'diamond',
+      name: 'تمييز ماسي VIP (30 يوم)',
+      badge: '💎 ماسي VIP',
+      price: 250,
+      days: 30,
+      color: 'purple',
+      priority: 3,
+      showOnHome: true,
+      features: 'أعلى أولوية مطلقة في قمة السوق والصفحة الرئيسية + إطار ماسي لمدة شهر كامل',
+      active: true
+    }
+  ];
+
   // 20 Built-in Showcase Ads covering ALL 17 Categories (Projects + Contractors + B2B Suppliers + 5 Featured ★)
   const DEMO_SHOWCASE_POSTS = [
     {
@@ -9,7 +48,8 @@
       description: 'مطلوب مقاول نجارة مسلحة بطاقم كامل (10 نجارين + 4 مساعدين) لشدة أسقف وأعمدة بكمبوند بالتجمع الخامس — التعاقد بالضمان المالي 100% وصرف أسبوعي منتظم.',
       budget: 145000, city: 'القاهرة الجديدة — التجمع الخامس',
       ownerId: 'demo_daman', ownerName: 'شركة الرواد للمقاولات العامة', ownerVerified: true, ownerVip: true,
-      boostedUntil: FUTURE_BOOST, status: 'approved', views: 214, date: '2026-11-20'
+      boostedUntil: FUTURE_BOOST, boostBadge: '💎 ماسي VIP', boostColor: 'purple', boostPriority: 3, showOnHome: true,
+      status: 'approved', views: 214, date: '2026-11-20'
     },
     {
       id: 'demo_02', isDemo: true, postType: 'supplier', category: 'materials',
@@ -17,7 +57,8 @@
       description: 'توريد مباشر يومياً بكميات من 5 طن حتى 200 طن بضمان الوزن والفاتورة الضريبية والدفع المؤمّن عبر ضمان سايت عند الاستلام بالموقع.',
       budget: 39500, city: 'القاهرة والجيزة والعاصمة الإدارية',
       ownerId: 'demo_daman', ownerName: 'مجموعة النيل لتوريدات مواد البناء', ownerVerified: true, ownerVip: true,
-      boostedUntil: FUTURE_BOOST, status: 'approved', views: 342, date: '2026-11-21'
+      boostedUntil: FUTURE_BOOST, boostBadge: '★ إعلان مميز', boostColor: 'amber', boostPriority: 2, showOnHome: true,
+      status: 'approved', views: 342, date: '2026-11-21'
     },
     {
       id: 'demo_03', isDemo: true, postType: 'worker', category: 'plaster',
@@ -25,7 +66,8 @@
       description: 'تنفيذ أعمال المحارة الداخلية والواجهات للعمارات والفيلات بأعلى دقة (طرطشة مسمارية + بؤج وأوتار + زاوية 90) بأطقم جاهزة للنزول الفوري.',
       budget: 65, city: '6 أكتوبر والشيخ زايد والجيزة',
       ownerId: 'demo_daman', ownerName: 'المعلم محمود أبو سيف للمحارة', ownerVerified: true, ownerVip: true,
-      boostedUntil: FUTURE_BOOST, status: 'approved', views: 189, date: '2026-11-21'
+      boostedUntil: FUTURE_BOOST, boostBadge: '★ إعلان مميز', boostColor: 'amber', boostPriority: 2, showOnHome: true,
+      status: 'approved', views: 189, date: '2026-11-21'
     },
     {
       id: 'demo_04', isDemo: true, postType: 'supplier', category: 'equipment',
@@ -33,7 +75,8 @@
       description: 'إيجار يومي وشهري لأحدث الشدات المعدنية الإيطالية والأكرو والأخشاب (لتزانة وموسكي وبليوود فنلندي) مع خدمة التوصيل الفوري لأي موقع.',
       budget: 18000, city: 'القاهرة الكبرى ومدينة بدر والعبور',
       ownerId: 'demo_daman', ownerName: 'المتحدة للشدات والمعدات الهندسية', ownerVerified: true, ownerVip: true,
-      boostedUntil: FUTURE_BOOST, status: 'approved', views: 276, date: '2026-11-20'
+      boostedUntil: FUTURE_BOOST, boostBadge: '★ إعلان مميز', boostColor: 'amber', boostPriority: 2, showOnHome: true,
+      status: 'approved', views: 276, date: '2026-11-20'
     },
     {
       id: 'demo_05', isDemo: true, postType: 'project', category: 'general',
@@ -41,7 +84,8 @@
       description: 'تشطيب كامل بالخامات أو مصنعية وإشراف مع جدول زمني 90 يوم ومستخلصات محجوزة 100% في ضمان سايت واستلام هندسي لكل بند.',
       budget: 850000, city: 'مدينتي — القاهرة الجديدة',
       ownerId: 'demo_daman', ownerName: 'م. كريم الشريف (مالك مشروع)', ownerVerified: true, ownerVip: true,
-      boostedUntil: FUTURE_BOOST, status: 'approved', views: 318, date: '2026-11-22'
+      boostedUntil: FUTURE_BOOST, boostBadge: '💎 ماسي VIP', boostColor: 'purple', boostPriority: 3, showOnHome: true,
+      status: 'approved', views: 318, date: '2026-11-22'
     },
     {
       id: 'demo_06', isDemo: true, postType: 'worker', category: 'steel',
@@ -166,6 +210,7 @@
   ];
 
   const ProjectsMod = {
+    DEFAULT_BOOST_PACKAGES,
     subTab: 'market', // 'market' | 'ledger' | 'inspection' | 'viplabor'
     marketFilter: 'all', // 'all' | 'project' | 'worker' | 'supplier' | 'favorites'
     selectedCategory: 'all',
@@ -184,6 +229,25 @@
 
     viewedSession: new Set(),
     tempPostPhoto: '',
+
+    getBoostPackages(app) {
+      const a = app || window.DamanApp;
+      const custom = a && a.appConfig && Array.isArray(a.appConfig.boostPackages) && a.appConfig.boostPackages.length
+        ? a.appConfig.boostPackages
+        : DEFAULT_BOOST_PACKAGES;
+      return custom;
+    },
+
+    boostStyleByColor(color) {
+      const map = {
+        purple: { card: 'border-purple-400 bg-purple-500/10 shadow-lg shadow-purple-500/10', badge: 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white' },
+        amber: { card: 'border-amber-400 bg-amber-500/5 shadow-lg shadow-amber-500/10', badge: 'bg-amber-500 text-slate-950' },
+        emerald: { card: 'border-emerald-400 bg-emerald-500/10 shadow-lg shadow-emerald-500/10', badge: 'bg-emerald-500 text-slate-950' },
+        rose: { card: 'border-rose-400 bg-rose-500/10 shadow-lg shadow-rose-500/10', badge: 'bg-rose-500 text-white' },
+        sky: { card: 'border-sky-400 bg-sky-500/10 shadow-lg shadow-sky-500/10', badge: 'bg-sky-500 text-slate-950' }
+      };
+      return map[color] || map.amber;
+    },
 
     statusBadgeAr(st) {
       const map = {
@@ -207,10 +271,16 @@
       const a = app || window.DamanApp;
       const hideDemo = !!(a && a.appConfig && a.appConfig.hideDemoPosts);
       const combined = hideDemo ? [...this.projects] : [...this.projects, ...DEMO_SHOWCASE_POSTS];
+      const now = Date.now();
       return combined.sort((x, y) => {
-        const xb = Number(x.boostedUntil || 0) > Date.now() ? 1 : 0;
-        const yb = Number(y.boostedUntil || 0) > Date.now() ? 1 : 0;
+        const xb = Number(x.boostedUntil || 0) > now ? 1 : 0;
+        const yb = Number(y.boostedUntil || 0) > now ? 1 : 0;
         if (yb !== xb) return yb - xb;
+        if (xb && yb) {
+          const xp = Number(x.boostPriority || 1);
+          const yp = Number(y.boostPriority || 1);
+          if (yp !== xp) return yp - xp;
+        }
         const xr = x.isDemo ? 0 : 1;
         const yr = y.isDemo ? 0 : 1;
         if (yr !== xr) return yr - xr;
@@ -218,9 +288,12 @@
       });
     },
 
-    getFeaturedPosts(limit = 5) {
+    getFeaturedPosts(limit = 6) {
+      const now = Date.now();
       const all = this.getAllMarketPosts(window.DamanApp);
-      return all.filter((p) => p.status === 'approved' && Number(p.boostedUntil || 0) > Date.now()).slice(0, limit);
+      return all
+        .filter((p) => p.status === 'approved' && Number(p.boostedUntil || 0) > now && p.showOnHome !== false)
+        .slice(0, limit);
     },
 
     ensureListeners(app) {
@@ -304,7 +377,7 @@
       return '🏗️ مطلوب تنفيذ / مشروع';
     },
 
-    // ==================== CREATE / EDIT / CLOSE / BOOST / FAVORITE ====================
+    // ==================== CREATE / EDIT / CLOSE / DYNAMIC BOOST TIERS / FAVORITE ====================
     openPostModal() {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
@@ -336,6 +409,7 @@
       m.classList.remove('hidden');
       const catsOpt = app.CATEGORIES.map((c) => `<option value="${c.id}" ${existing?.category === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
       const defType = existing?.postType || (app.profile?.accountType === 'supplier' ? 'supplier' : 'project');
+      const boostPkgs = this.getBoostPackages(app).filter((b) => b.active !== false);
 
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
@@ -381,7 +455,14 @@
               <input type="file" accept="image/*" class="hidden" onchange="DamanProjects.handlePostPhoto(this)" />
               <div id="pm-photo-prev">${this.tempPostPhoto ? `<img src="${this.tempPostPhoto}" class="max-h-24 mx-auto rounded mt-1.5" />` : ''}</div>
             </label>
-            ${app.isAdmin() ? `<label class="flex items-center gap-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-300 font-bold"><input id="pm-admin-boost" type="checkbox" checked class="accent-amber-500" /> تثبيت كإعلان مميز ★ مجاناً (صلاحية الإدارة)</label>` : ''}
+            ${app.isAdmin() ? `
+              <div>
+                <label class="block text-[10px] font-bold text-purple-300 mb-1">تمييز الإعلان مجاناً (صلاحية الإدارة)</label>
+                <select id="pm-admin-tier" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-purple-500/40 text-purple-200 font-bold">
+                  <option value="">عادي بدون تمييز</option>
+                  ${boostPkgs.map((bp) => `<option value="${app.esc(bp.id)}" ${existing?.boostTierId === bp.id ? 'selected' : ''}>${app.esc(bp.badge)} — ${app.esc(bp.name)} (${bp.days} يوم)</option>`).join('')}
+                </select>
+              </div>` : ''}
             <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">${existing ? 'حفظ التعديلات' : 'نشر الإعلان الآن'}</button>
           </form>
         </div>`;
@@ -404,7 +485,9 @@
         return app.toast('نشر الإعلانات متوقف مؤقتاً من الإدارة', 'warning');
       }
       await app.withLock('savePost', async () => {
-        const adminBoost = app.isAdmin() && document.getElementById('pm-admin-boost')?.checked;
+        const tierId = app.isAdmin() ? (document.getElementById('pm-admin-tier')?.value || '') : '';
+        const tierObj = tierId ? this.getBoostPackages(app).find((b) => b.id === tierId) : null;
+
         const payload = {
           postType: document.getElementById('pm-type').value,
           category: document.getElementById('pm-cat').value,
@@ -416,7 +499,15 @@
           status: app.hasAdminAccess() ? 'approved' : 'pending_review',
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
-        if (adminBoost) payload.boostedUntil = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+        if (tierObj) {
+          payload.boostedUntil = Date.now() + Number(tierObj.days || 7) * 24 * 60 * 60 * 1000;
+          payload.boostTierId = tierObj.id;
+          payload.boostBadge = tierObj.badge || '★ إعلان مميز';
+          payload.boostColor = tierObj.color || 'amber';
+          payload.boostPriority = Number(tierObj.priority || 2);
+          payload.showOnHome = tierObj.showOnHome !== false;
+        }
 
         try {
           if (existingId) {
@@ -430,7 +521,7 @@
               ownerVerified: app.profile?.kycStatus === 'verified',
               ownerVip: app.isSubscriptionActive(),
               views: 0,
-              boostedUntil: adminBoost ? Date.now() + 30 * 24 * 60 * 60 * 1000 : 0,
+              boostedUntil: payload.boostedUntil || 0,
               date: app.todayLocal(),
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -464,21 +555,94 @@
       app.toast(exists ? 'تمت الإزالة من المفضلة' : 'تم الحفظ في المفضلة ❤️', 'info');
     },
 
-    async boostPost(pid) {
+    // ==================== MULTI-TIER BOOST MODAL (CONFIGURED FROM ADMIN PANEL) ====================
+    boostPost(pid) {
+      this.openBoostModal(pid);
+    },
+
+    openBoostModal(pid) {
       const app = window.DamanApp;
       const p = this.projects.find((x) => x.id === pid);
       if (!p || !app.user) return;
+      const pkgs = this.getBoostPackages(app).filter((b) => b.active !== false);
+      if (!pkgs.length) return app.toast('باقات التمييز متوقفة مؤقتاً من الإدارة', 'warning');
+
+      let m = document.getElementById('daman-boost-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-boost-modal';
+        m.className = 'daman-modal fixed inset-0 z-[90] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+
+      const avail = Number(app.profile?.balanceAvailable || 0);
+      const bonus = Number(app.profile?.balanceBonus || 0);
+
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-black text-amber-400">★ اختر باقة تمييز الإعلان</h3>
+            <button onclick="document.getElementById('daman-boost-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+            <div class="font-bold text-white truncate">${app.esc(p.title)}</div>
+            <div class="text-slate-400 mt-0.5">رصيدك المتاح: <b class="text-emerald-400">${app.fmtMoney(avail)} ج.م</b> | رصيد الهدايا: <b class="text-purple-300">${app.fmtMoney(bonus)} ج.م</b></div>
+          </div>
+
+          <div class="space-y-2.5">
+            ${pkgs.map((bp) => {
+              const st = this.boostStyleByColor(bp.color);
+              return `
+                <div class="p-3.5 rounded-2xl border ${st.card} space-y-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="px-2.5 py-0.5 rounded-lg ${st.badge} text-[10px] font-black">${app.esc(bp.badge)}</span>
+                    <b class="text-sm text-white">${app.isAdmin() ? 'مجاناً (إدارة)' : app.fmtMoney(bp.price) + ' ج.م'}</b>
+                  </div>
+                  <div class="font-black text-white">${app.esc(bp.name)} — <span class="text-amber-300">${bp.days} يوم</span></div>
+                  <p class="text-[11px] text-slate-300 leading-relaxed">${app.esc(bp.features || '')}</p>
+                  <div class="flex items-center gap-2 text-[10px] text-slate-400">
+                    <span>${bp.showOnHome ? '✅ يظهر بالصفحة الرئيسية' : '📌 ظهور في السوق فقط'}</span>
+                    <span>• الأولوية: ${bp.priority || 1}</span>
+                  </div>
+                  <button onclick="DamanProjects.applyBoostPackage('${p.id}','${app.esc(bp.id)}')" class="w-full py-2 rounded-xl ${st.badge} font-black text-xs">
+                    تفعيل باقة ${app.esc(bp.name)} الآن
+                  </button>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    },
+
+    async applyBoostPackage(pid, pkgId) {
+      const app = window.DamanApp;
+      const p = this.projects.find((x) => x.id === pid);
+      const bp = this.getBoostPackages(app).find((b) => b.id === pkgId);
+      if (!p || !bp || !app.user) return;
+
+      const days = Math.max(1, Number(bp.days || 7));
+      const boostPatch = {
+        boostedUntil: Date.now() + days * 24 * 60 * 60 * 1000,
+        boostTierId: bp.id,
+        boostBadge: bp.badge || '★ إعلان مميز',
+        boostColor: bp.color || 'amber',
+        boostPriority: Number(bp.priority || 1),
+        showOnHome: bp.showOnHome !== false
+      };
+
       if (app.isAdmin()) {
-        await app.db.collection('projects').doc(pid).update({ boostedUntil: Date.now() + 30 * 24 * 60 * 60 * 1000 });
-        return app.toast('تم تمييز الإعلان مجاناً بصلاحية الإدارة ★', 'success');
+        await app.db.collection('projects').doc(pid).update(boostPatch);
+        document.getElementById('daman-boost-modal')?.classList.add('hidden');
+        return app.toast(`تم تفعيل ${bp.name} مجاناً بصلاحية الإدارة ★`, 'success');
       }
 
-      const price = Number(app.appConfig?.packages?.boostAdPrice || 75);
+      const price = Math.max(0, Math.round(Number(bp.price || 75) * 100) / 100);
       const avail = Number(app.profile?.balanceAvailable || 0);
       const bonus = Number(app.profile?.balanceBonus || 0);
       if (avail + bonus < price) {
         const diff = Math.round((price - (avail + bonus)) * 100) / 100;
-        if (window.confirm(`تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م — شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+        if (window.confirm(`تكلفة الباقة ${app.fmtMoney(price)} ج.م — شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+          document.getElementById('daman-boost-modal')?.classList.add('hidden');
           if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(diff);
         }
         return;
@@ -487,7 +651,7 @@
       const willBonus = Math.min(bonus, price);
       const willCash = Math.round((price - willBonus) * 100) / 100;
       const noteEx = willBonus > 0 ? `\n(سيتم خصم ${app.fmtMoney(willBonus)} ج.م من رصيد الهدايا + ${app.fmtMoney(willCash)} ج.م من المتاح)` : '';
-      if (!window.confirm(`تأكيد تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م؟${noteEx}`)) return;
+      if (!window.confirm(`تأكيد تفعيل «${bp.name}» لمدة ${days} يوم بمبلغ ${app.fmtMoney(price)} ج.م؟${noteEx}`)) return;
 
       await app.withLock('boost_' + pid, async () => {
         const uRef = app.db.collection('users').doc(app.user.uid);
@@ -506,20 +670,21 @@
             const afterBonus = Math.round((curBonus - bonusUsed) * 100) / 100;
 
             tx.update(uRef, { balanceAvailable: afterAvail, balanceBonus: afterBonus });
-            tx.update(pRef, { boostedUntil: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+            tx.update(pRef, boostPatch);
             tx.set(app.db.collection('transactions').doc(), {
               userId: app.user.uid, type: 'ad_boost', amount: -price, cashPaid, bonusUsed,
               balanceBefore: curAvail, balanceAfter: afterAvail,
-              note: `تمييز إعلان: ${p.title}`, date: app.todayLocal(),
+              note: `تمييز إعلان (${bp.name}): ${p.title}`, date: app.todayLocal(),
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             tx.set(app.db.collection('platformFees').doc(), {
-              type: 'ad_boost', projectId: pid, userId: app.user.uid, userName: app.profile?.name || '',
+              type: 'ad_boost', tierId: bp.id, projectId: pid, userId: app.user.uid, userName: app.profile?.name || '',
               amount: cashPaid, cashPaid, bonusUsed, grossPrice: price,
               date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
-          app.toast('تم تمييز إعلانك وتثبيته بأعلى السوق والصفحة الرئيسية ★', 'success');
+          document.getElementById('daman-boost-modal')?.classList.add('hidden');
+          app.toast(`تم تفعيل ${bp.name} بنجاح! إعلانك الآن في القمة ★`, 'success');
         } catch (e) { app.toast(e.message, 'error'); }
       });
     },
@@ -572,7 +737,7 @@
               </button>
               ${!p.isDemo ? `<button onclick="DamanApp.reportUserOrPost('project','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="px-3.5 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold"><i class="fa-solid fa-flag"></i></button>` : ''}` : `
               <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">تعديل</button>
-              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.boostPost('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-purple-500 text-white font-black">★ تمييز</button>`}
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openBoostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-purple-500 text-white font-black">★ باقات التمييز</button>`}
           </div>
         </div>`;
     },
@@ -621,7 +786,7 @@
       window.DamanPrint(`
         <div style="border:2px solid #000; padding:14px 16px;">
           <div style="display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
-            <div><h2 style="margin:0; font-size:16px;">تصفية حساب العمال واليوميات والعهدة — ضمان سايت</h2></div>
+            <div><h2 style="margin:0; font-size:16px;">تصفية حساب العمال واليوميات والعهدة — ${app.esc(app.t('appName'))}</h2></div>
             <div style="font-size:11px;"><b>التاريخ:</b> ${app.todayLocal()}</div>
           </div>
           <table style="margin-bottom:12px;"><thead><tr><th>#</th><th>الاسم</th><th>يوميات وإضافي</th><th>السلف</th><th>الخصومات</th><th>عهدة</th><th>الصافي</th></tr></thead><tbody>${summaryRows || '<tr><td colspan="7" style="text-align:center;">لا توجد قيود</td></tr>'}</tbody></table>
@@ -816,11 +981,13 @@
         const isOwn = !p.isDemo && myUid && p.ownerId === myUid;
         const isFav = favs.includes(p.id);
         const boosted = Number(p.boostedUntil || 0) > Date.now();
+        const bStyle = boosted ? this.boostStyleByColor(p.boostColor || 'amber') : null;
+
         return `
-          <div class="glass-card rounded-2xl p-3.5 space-y-2 ${boosted ? 'border-amber-400 bg-amber-500/5 shadow-lg shadow-amber-500/5' : ''}">
+          <div class="glass-card rounded-2xl p-3.5 space-y-2 ${bStyle ? bStyle.card : ''}">
             <div class="flex items-start justify-between gap-2">
               <div class="flex items-center flex-wrap gap-1.5">
-                ${boosted ? `<span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">★ إعلان مميز</span>` : ''}
+                ${boosted ? `<span class="px-2 py-0.5 rounded-lg ${bStyle.badge} text-[9.5px] font-black">${app.esc(p.boostBadge || '★ إعلان مميز')}</span>` : ''}
                 <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 text-[9.5px] font-bold">${this.postTypeLabel(p.postType)}</span>
                 <span class="px-2 py-0.5 rounded-lg bg-slate-950 text-slate-300 text-[9.5px]">${app.esc(this.catLabel(p.category))}</span>
                 ${p.status !== 'approved' ? this.statusBadgeAr(p.status) : ''}
@@ -853,7 +1020,7 @@
                 </button>
                 <button onclick="DamanProjects.openPostDetails('${p.id}')" class="px-3 py-2 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">التفاصيل</button>` : `
                 <button onclick="DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-slate-800 text-amber-300 font-bold text-[10.5px]">تعديل</button>
-                <button onclick="DamanProjects.boostPost('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-purple-500/25 text-purple-200 border border-purple-500/40 font-black text-[10.5px]">★ تمييز</button>
+                <button onclick="DamanProjects.openBoostModal('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-purple-500/25 text-purple-200 border border-purple-500/40 font-black text-[10.5px]">★ تمييز</button>
                 <button onclick="DamanProjects.toggleClosePost('${p.id}')" class="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-[10.5px]">${p.status === 'closed' ? 'فتح' : 'إغلاق'}</button>`}
             </div>
           </div>`;
