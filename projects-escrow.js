@@ -185,7 +185,6 @@
     viewedSession: new Set(),
     tempPostPhoto: '',
 
-    // Combined Real Firestore Posts + Built-in Showcase Posts (Respects Admin hideDemoPosts toggle)
     getAllMarketPosts(app) {
       const a = app || window.DamanApp;
       const hideDemo = !!(a && a.appConfig && a.appConfig.hideDemoPosts);
@@ -194,7 +193,6 @@
         const xb = Number(x.boostedUntil || 0) > Date.now() ? 1 : 0;
         const yb = Number(y.boostedUntil || 0) > Date.now() ? 1 : 0;
         if (yb !== xb) return yb - xb;
-        // Real posts slightly prioritized within same boost tier
         const xr = x.isDemo ? 0 : 1;
         const yr = y.isDemo ? 0 : 1;
         if (yr !== xr) return yr - xr;
@@ -202,7 +200,6 @@
       });
     },
 
-    // Exposed for Home Page "Featured Ads ★" showcase section
     getFeaturedPosts(limit = 5) {
       const all = this.getAllMarketPosts(window.DamanApp);
       return all.filter((p) => p.status === 'approved' && Number(p.boostedUntil || 0) > Date.now()).slice(0, limit);
@@ -289,11 +286,14 @@
       return '🏗️ مطلوب تنفيذ / مشروع';
     },
 
-    // ==================== CREATE / EDIT / CLOSE / BOOST / FAVORITE ====================
+    // ==================== CREATE / EDIT / CLOSE / BOOST (BONUS FIRST) / FAVORITE ====================
     openPostModal() {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
       if (!app.isKycVerified()) return app.toast('يجب توثيق الحساب أولاً', 'warning');
+      if (app.appConfig?.disableMarketPosting && !app.isAdmin()) {
+        return app.toast('نشر الإعلانات الجديدة متوقف مؤقتاً للصيانة من الإدارة', 'warning');
+      }
       this.openPostEditorModal(null);
     },
 
@@ -364,6 +364,9 @@
     async savePost(e, existingId) {
       e.preventDefault();
       const app = window.DamanApp;
+      if (!existingId && app.appConfig?.disableMarketPosting && !app.isAdmin()) {
+        return app.toast('نشر الإعلانات متوقف مؤقتاً من الإدارة', 'warning');
+      }
       await app.withLock('savePost', async () => {
         const adminBoost = app.isAdmin() && document.getElementById('pm-admin-boost')?.checked;
         const payload = {
@@ -425,6 +428,7 @@
       app.toast(exists ? 'تمت الإزالة من المفضلة' : 'تم الحفظ في المفضلة ❤️', 'info');
     },
 
+    // Uses Bonus Balance FIRST, then Cash Available — Clean Cash/Bonus Trial Balance Accounting
     async boostPost(pid) {
       const app = window.DamanApp;
       const p = this.projects.find((x) => x.id === pid);
@@ -433,35 +437,54 @@
         await app.db.collection('projects').doc(pid).update({ boostedUntil: Date.now() + 30 * 24 * 60 * 60 * 1000 });
         return app.toast('تم تمييز الإعلان مجاناً بصلاحية الإدارة ★', 'success');
       }
+
       const price = Number(app.appConfig?.packages?.boostAdPrice || 75);
       const avail = Number(app.profile?.balanceAvailable || 0);
-      if (avail < price) {
-        if (window.confirm(`تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م — شحن المحفظة الآن؟`)) {
-          if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(price - avail);
+      const bonus = Number(app.profile?.balanceBonus || 0);
+      if (avail + bonus < price) {
+        const diff = Math.round((price - (avail + bonus)) * 100) / 100;
+        if (window.confirm(`تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م — شحن الفرق (${app.fmtMoney(diff)} ج.م) الآن؟`)) {
+          if (window.DamanWallet) window.DamanWallet.openDepositWithAmount(diff);
         }
         return;
       }
-      if (!window.confirm(`تأكيد تمييز الإعلان بـ ${app.fmtMoney(price)} ج.م؟`)) return;
+
+      const willBonus = Math.min(bonus, price);
+      const willCash = Math.round((price - willBonus) * 100) / 100;
+      const noteEx = willBonus > 0 ? `\n(سيتم خصم ${app.fmtMoney(willBonus)} ج.م من رصيد الهدايا + ${app.fmtMoney(willCash)} ج.م من المتاح)` : '';
+      if (!window.confirm(`تأكيد تمييز الإعلان لمدة 7 أيام بـ ${app.fmtMoney(price)} ج.م؟${noteEx}`)) return;
+
       await app.withLock('boost_' + pid, async () => {
         const uRef = app.db.collection('users').doc(app.user.uid);
         const pRef = app.db.collection('projects').doc(pid);
         try {
           await app.db.runTransaction(async (tx) => {
             const uDoc = await tx.get(uRef);
-            const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
-            if (curAvail < price) throw new Error('الرصيد المتاح غير كافٍ');
-            tx.update(uRef, { balanceAvailable: Math.round((curAvail - price) * 100) / 100 });
+            const d = uDoc.data() || {};
+            const curAvail = Number(d.balanceAvailable || 0);
+            const curBonus = Number(d.balanceBonus || 0);
+            if (curAvail + curBonus < price) throw new Error('الرصيد غير كافٍ');
+
+            const bonusUsed = Math.round(Math.min(curBonus, price) * 100) / 100;
+            const cashPaid = Math.round((price - bonusUsed) * 100) / 100;
+            const afterAvail = Math.round((curAvail - cashPaid) * 100) / 100;
+            const afterBonus = Math.round((curBonus - bonusUsed) * 100) / 100;
+
+            tx.update(uRef, { balanceAvailable: afterAvail, balanceBonus: afterBonus });
             tx.update(pRef, { boostedUntil: Date.now() + 7 * 24 * 60 * 60 * 1000 });
             tx.set(app.db.collection('transactions').doc(), {
-              userId: app.user.uid, type: 'ad_boost', amount: -price,
-              note: `تمييز إعلان: ${p.title}`, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              userId: app.user.uid, type: 'ad_boost', amount: -price, cashPaid, bonusUsed,
+              balanceBefore: curAvail, balanceAfter: afterAvail,
+              note: `تمييز إعلان: ${p.title}`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             tx.set(app.db.collection('platformFees').doc(), {
               type: 'ad_boost', projectId: pid, userId: app.user.uid, userName: app.profile?.name || '',
-              amount: price, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              amount: cashPaid, cashPaid, bonusUsed, grossPrice: price,
+              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
-          app.toast('تم تمييز إعلانك وتثبيته بأعلى السوق ★', 'success');
+          app.toast('تم تمييز إعلانك وتثبيته بأعلى السوق والصفحة الرئيسية ★', 'success');
         } catch (e) { app.toast(e.message, 'error'); }
       });
     },
@@ -568,6 +591,11 @@
           </div>
           <table style="margin-bottom:12px;"><thead><tr><th>#</th><th>الاسم</th><th>يوميات وإضافي</th><th>السلف</th><th>الخصومات</th><th>عهدة</th><th>الصافي</th></tr></thead><tbody>${summaryRows || '<tr><td colspan="7" style="text-align:center;">لا توجد قيود</td></tr>'}</tbody></table>
           <table><thead><tr><th>#</th><th>التاريخ</th><th>الاسم</th><th>النوع</th><th>الموقع</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>${detailRows || '<tr><td colspan="7" style="text-align:center;">لا توجد قيود</td></tr>'}</tbody></table>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:24px; text-align:center; font-size:11px;">
+            <div><b>مشرف التنفيذ</b><br/><br/>..........................</div>
+            <div><b>مهندس التنفيذ</b><br/><br/>..........................</div>
+            <div><b>مدير المشروع</b><br/><br/>..........................</div>
+          </div>
         </div>`);
     },
 
@@ -614,18 +642,23 @@
             if (rDoc.data().status !== 'quoted') throw new Error('حالة الطلب تغيرت');
             const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
             if (curAvail < price) throw new Error('الرصيد غير كافٍ');
-            tx.update(uRef, { balanceAvailable: Math.round((curAvail - price) * 100) / 100 });
+            const afterAvail = Math.round((curAvail - price) * 100) / 100;
+
+            tx.update(uRef, { balanceAvailable: afterAvail });
             tx.update(rRef, { status: 'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() });
             tx.set(app.db.collection('transactions').doc(), {
-              userId: app.user.uid, type: 'inspection_3x', amount: -price, note: `استلام هندسي 3x (${req.element})`,
-              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              userId: app.user.uid, type: 'inspection_3x', amount: -price,
+              balanceBefore: curAvail, balanceAfter: afterAvail,
+              note: `استلام هندسي 3x (${req.element})`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             tx.set(app.db.collection('platformFees').doc(), {
               type: 'inspection_3x', requestId: reqId, userId: app.user.uid, userName: app.profile?.name || '',
-              amount: price, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              amount: price, cashPaid: price, bonusUsed: 0,
+              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
-          app.toast('تم الدفع وتأكيد موعد الاستلام 3x ✅', 'success');
+          app.toast('تم الدفع وتأكيد موعد الاستلام الهندسي 3x ✅', 'success');
         } catch (err) { app.toast(err.message, 'error'); }
       });
     },
@@ -676,16 +709,21 @@
             const curAvail = Number((uDoc.data() || {}).balanceAvailable || 0);
             const curEsc = Number((uDoc.data() || {}).balanceEscrow || 0);
             if (curAvail < total) throw new Error('الرصيد غير كافٍ');
-            tx.update(uRef, { balanceAvailable: Math.round((curAvail - total) * 100) / 100, balanceEscrow: Math.round((curEsc + baseCost) * 100) / 100 });
+            const afterAvail = Math.round((curAvail - total) * 100) / 100;
+
+            tx.update(uRef, { balanceAvailable: afterAvail, balanceEscrow: Math.round((curEsc + baseCost) * 100) / 100 });
             tx.update(rRef, { status: 'funded', lockedBaseCost: baseCost, paidVipFee: vipFee, totalPaid: total, fundedAt: firebase.firestore.FieldValue.serverTimestamp() });
             tx.set(app.db.collection('transactions').doc(), {
-              userId: app.user.uid, type: 'vip_labor_lock', amount: -total, note: `حجز عمالة VIP (${req.trade})`,
-              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              userId: app.user.uid, type: 'vip_labor_lock', amount: -total,
+              balanceBefore: curAvail, balanceAfter: afterAvail,
+              note: `حجز عمالة VIP (${req.trade})`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             if (vipFee > 0) {
               tx.set(app.db.collection('platformFees').doc(), {
                 type: 'vip_labor_fee', requestId: reqId, userId: app.user.uid, userName: app.profile?.name || '',
-                amount: vipFee, date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                amount: vipFee, cashPaid: vipFee, bonusUsed: 0,
+                date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
               });
             }
           });
@@ -827,7 +865,14 @@
             <textarea id="ins-notes" rows="2" placeholder="ملاحظات أو موعد الصب..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
             <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">طلب تسعير واستلام هندسي 3x</button>
           </form>
-          ${this.inspectionReqs.map((r) => `<div class="glass-card rounded-2xl p-3 space-y-1.5"><div class="flex justify-between"><b class="text-white">${app.esc(r.element)}</b><span class="text-amber-300 font-bold">${app.esc(r.status)}</span></div><div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • ${app.esc(r.preferredDate || '')}</div>${r.status === 'quoted' && Number(r.quotedPrice || 0) > 0 ? `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500 flex justify-between items-center"><b class="text-emerald-300">${app.fmtMoney(r.quotedPrice)} ج.م</b><button onclick="DamanProjects.payInspectionRequest('${r.id}')" class="px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة ودفع</button></div>` : ''}</div>`).join('')}
+          ${this.inspectionReqs.map((r) => `
+            <div class="glass-card rounded-2xl p-3 space-y-1.5">
+              <div class="flex justify-between"><b class="text-white">${app.esc(r.element)}</b><span class="text-amber-300 font-bold">${app.esc(r.status)}</span></div>
+              <div class="text-[10.5px] text-slate-400">${app.esc(r.location)} • ${app.esc(r.preferredDate || '')}</div>
+              ${r.adminNote ? `<div class="text-[10.5px] text-emerald-300">ملاحظة الإدارة: ${app.esc(r.adminNote)}</div>` : ''}
+              ${r.status === 'quoted' && Number(r.quotedPrice || 0) > 0 ? `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500 flex justify-between items-center"><b class="text-emerald-300">${app.fmtMoney(r.quotedPrice)} ج.م</b><button onclick="DamanProjects.payInspectionRequest('${r.id}')" class="px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black">موافقة ودفع</button></div>` : ''}
+              ${r.reportMedia ? `<button onclick="DamanApp.openMediaLightbox('${r.reportMedia}','التقرير الهندسي المعتمد 3x')" class="w-full py-2 rounded-xl bg-sky-500/20 border border-sky-500/50 text-sky-300 font-black text-[11px]"><i class="fa-solid fa-file-contract me-1"></i> عرض وتحميل التقرير الهندسي المعتمد</button>` : ''}
+            </div>`).join('')}
         </div>`;
     },
 
