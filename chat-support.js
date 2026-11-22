@@ -16,14 +16,16 @@
     unsubIncomingCall: null,
     cachedAdminUid: null,
 
-    // WebRTC Call & Auto-Recording State
+    tempPayoutPhoto: '',
+    tempDedPhoto: '',
+
     callState: {
       active: false,
       chatId: null,
       callId: null,
       otherUid: null,
       otherName: '',
-      role: null, // 'caller' | 'callee'
+      role: null,
       pc: null,
       localStream: null,
       mediaRecorder: null,
@@ -91,20 +93,15 @@
           () => {}
         );
 
-      // Listen for incoming WebRTC calls globally
       this.unsubIncomingCall = db
         .collection('incomingCalls')
         .doc(uid)
         .onSnapshot(
           (snap) => {
-            if (!snap.exists) {
-              this.hideIncomingCallBanner();
-              return;
-            }
+            if (!snap.exists) { this.hideIncomingCallBanner(); return; }
             const data = snap.data();
             if (data && data.status === 'ringing' && !this.callState.active) {
-              const ageMs = Date.now() - Number(data.sentAtMs || 0);
-              if (ageMs < 65000) this.showIncomingCallBanner(data);
+              if (Date.now() - Number(data.sentAtMs || 0) < 65000) this.showIncomingCallBanner(data);
             } else {
               this.hideIncomingCallBanner();
             }
@@ -135,9 +132,24 @@
       }
     },
 
-    setSubTab(t) {
-      this.subTab = t;
-      this.rerender();
+    setSubTab(t) { this.subTab = t; this.rerender(); },
+
+    paymentModelLabel(m) {
+      return {
+        daily_wages: 'يوميات وسُلف (صرف حسب الأيام بموافقة صاحب العمل)',
+        milestones: 'دفعات ومستخلصات حسب نسب الإنجاز',
+        lump_sum: 'مقطوعية كاملة (صرف 100% عند الاستلام النهائي فقط)',
+        b2b_supply: 'توريد خامات B2B (صرف 100% عند الاستلام بالموقع)'
+      }[m] || 'حسب الاتفاق';
+    },
+
+    payoutScheduleLabel(s) {
+      return {
+        daily: 'صرف يومي نهاية كل يوم عمل',
+        weekly: 'صرف أسبوعي (كل خميس)',
+        on_request: 'عند الطلب وبموافقة صاحب العمل',
+        on_delivery: 'دفعة واحدة عند الاستلام النهائي'
+      }[s] || 'بموافقة صاحب العمل';
     },
 
     updateUnreadBadge(app) {
@@ -207,21 +219,19 @@
           });
           if (contextTitle) {
             await chatRef.collection('messages').add({
-              senderId: app.user.uid,
-              senderName: myName,
+              senderId: app.user.uid, senderName: myName,
               text: `مرحباً، أتواصل معك بخصوص: ${contextTitle}`,
-              type: 'text',
-              date: app.todayLocal(),
+              type: 'text', date: app.todayLocal(),
+              time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           }
         } else if (contextTitle) {
           await chatRef.collection('messages').add({
-            senderId: app.user.uid,
-            senderName: myName,
+            senderId: app.user.uid, senderName: myName,
             text: `استفسار بخصوص: ${contextTitle}`,
-            type: 'text',
-            date: app.todayLocal(),
+            type: 'text', date: app.todayLocal(),
+            time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await chatRef.update({
@@ -233,14 +243,10 @@
 
         app.switchTab('chat');
         this.openChatRoom(chatId, {
-          id: chatId,
-          otherUid: realTargetUid,
-          otherName: realTargetName,
+          id: chatId, otherUid: realTargetUid, otherName: realTargetName,
           frozen: snap.exists ? !!snap.data().frozen : false
         });
-      } catch (err) {
-        app.toast(err.message, 'error');
-      }
+      } catch (err) { app.toast(err.message, 'error'); }
     },
 
     openChatRoom(chatId, meta = {}) {
@@ -258,9 +264,7 @@
 
       this.activeChatId = chatId;
       this.activeChatMeta = {
-        id: chatId,
-        otherUid,
-        otherName: otherName || 'محادثة مضمونة',
+        id: chatId, otherUid, otherName: otherName || 'محادثة مضمونة',
         frozen: existing ? !!existing.frozen : !!meta.frozen
       };
       this.activeMessages = [];
@@ -292,7 +296,7 @@
       this.rerender();
     },
 
-    closeActiveChat(fromPop = false) {
+    closeActiveChat() {
       if (this.unsubMsgs) { try { this.unsubMsgs(); } catch (e) {} this.unsubMsgs = null; }
       this.activeChatId = null;
       this.activeChatMeta = null;
@@ -318,12 +322,8 @@
 
       try {
         await chatRef.collection('messages').add({
-          senderId: app.user.uid,
-          senderName,
-          isAdmin: isAdminIntervention,
-          type: 'text',
-          text,
-          date: app.todayLocal(),
+          senderId: app.user.uid, senderName, isAdmin: isAdminIntervention,
+          type: 'text', text, date: app.todayLocal(),
           time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -347,13 +347,9 @@
         const mediaId = await app.saveMedia(b64, { kind: 'chat_img' });
         const chatRef = app.db.collection('chats').doc(this.activeChatId);
         await chatRef.collection('messages').add({
-          senderId: app.user.uid,
-          senderName: app.profile?.companyName || app.profile?.name || 'مستخدم',
-          type: 'image',
-          mediaId,
-          thumbBase64: await app.compressImage(f, 280, 0.42),
-          text: '📷 صورة مرفقة',
-          date: app.todayLocal(),
+          senderId: app.user.uid, senderName: app.profile?.companyName || app.profile?.name || 'مستخدم',
+          type: 'image', mediaId, thumbBase64: await app.compressImage(f, 280, 0.42),
+          text: '📷 صورة مرفقة', date: app.todayLocal(),
           time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -365,7 +361,7 @@
       } catch (e) { app.toast('تعذر إرسال الصورة', 'error'); }
     },
 
-    // ==================== OFFICIAL AUTO-FILLED ESCROW CONTRACTS (WITH DATES, NATIONAL IDS, TOUCH SIGNATURE & A4 QR) ====================
+    // ==================== CREATE OFFICIAL CONTRACT WITH CLEAR DISBURSEMENT SCHEDULE ====================
     async openCreateContractModal() {
       const app = window.DamanApp;
       if (!this.activeChatId || !this.activeChatMeta?.otherUid) return app.toast('افتح محادثة مع الطرف الآخر أولاً', 'warning');
@@ -406,7 +402,6 @@
             <button onclick="document.getElementById('daman-contract-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
-          <!-- Auto-Filled Legal Identities Banner -->
           <div class="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-[10.5px] space-y-1 text-emerald-100">
             <div class="font-black text-emerald-300">✅ سحب تلقائي لبيانات البطاقة الموثّقة للطرفين:</div>
             <div>• أنت: <b>${app.esc(app.profile.legalName || app.profile.name)}</b> (قومي: ${app.maskNationalId(app.profile.nationalId)})</div>
@@ -424,26 +419,47 @@
 
             <div>
               <label class="block text-[10.5px] font-bold text-slate-300 mb-1">عنوان البند / المشروع *</label>
-              <input id="ct-title" type="text" required placeholder="مثال: شدة خشبية وحدادة سقف فيلا 14 — كمبوند سعادة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+              <input id="ct-title" type="text" required placeholder="مثال: شدة خشبية وحدادة سقف فيلا 14" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
             </div>
 
             <div class="grid grid-cols-2 gap-2">
               <div>
-                <label class="block text-[10.5px] font-bold text-emerald-300 mb-1">القيمة الإجمالية (ج.م) *</label>
+                <label class="block text-[10.5px] font-bold text-emerald-300 mb-1">إجمالي قيمة العقد (ج.م) *</label>
                 <input id="ct-amount" type="number" min="100" step="any" required placeholder="50000" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
               </div>
               <div>
-                <label class="block text-[10.5px] font-bold text-slate-300 mb-1">نظام التنفيذ والصرف</label>
-                <select id="ct-paytype" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold">
+                <label class="block text-[10.5px] font-bold text-sky-300 mb-1">نظام وميعاد صرف الفلوس *</label>
+                <select id="ct-paytype" onchange="DamanChat.onContractModelChange()" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-sky-300 font-bold">
                   <option value="milestones">دفعات / مستخلصات حسب الإنجاز</option>
-                  <option value="daily_wages">يوميات وسُلف أسبوعية + تصفية</option>
-                  <option value="lump_sum">مقطوعية (دفع كامل عند الاستلام)</option>
-                  <option value="b2b_supply">توريد خامات B2B (دفع عند الاستلام)</option>
+                  <option value="daily_wages">يوميات (يومي / أسبوعي + تأمين)</option>
+                  <option value="lump_sum">مقطوعية (100% عند الاستلام)</option>
+                  <option value="b2b_supply">توريد خامات B2B (عند الاستلام)</option>
                 </select>
               </div>
             </div>
 
-            <!-- Contract Dates (Start + Duration + Auto End Date) -->
+            <!-- Dynamic Payment Schedule Box -->
+            <div id="ct-model-info" class="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-[10.5px] text-sky-100 leading-relaxed">
+              💡 <b>متى تُصرف الفلوس؟</b> يرسل المنفّذ «طلب صرف دفعة/مستخلص» بصورة الإنجاز، ولا يُصرف جنيه إلا بعد ضغط صاحب العمل «اعتماد وصرف».
+            </div>
+
+            <!-- Extra Daily Wages Configuration (Visible ONLY when daily_wages is selected) -->
+            <div id="ct-daily-box" class="hidden p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-2">
+              <div class="font-black text-amber-300 text-[10.5px]">⚙️ إعدادات الصرف باليوميات:</div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <div><label class="block text-[9.5px] text-slate-400 mb-0.5">قيمة اليومية (ج.م)</label><input id="ct-daily-rate" type="number" min="50" step="any" placeholder="500" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                <div><label class="block text-[9.5px] text-slate-400 mb-0.5">نسبة تأمين محتجزة %</label><input id="ct-ret-pct" type="number" min="0" max="50" value="10" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-bold text-center" /></div>
+                <div><label class="block text-[9.5px] text-slate-400 mb-0.5">ميعاد الصرف</label>
+                  <select id="ct-payout-sched" class="w-full px-1.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold text-[10px]">
+                    <option value="daily">يومياً</option>
+                    <option value="weekly" selected>أسبوعياً (كل خميس)</option>
+                    <option value="on_request">عند الطلب</option>
+                  </select>
+                </div>
+              </div>
+              <div class="text-[9.5px] text-slate-400">عند صرف أي يوميات، يُحوَّل الصافي فوراً لمحفظة المنفّذ وتبقى نسبة التأمين محجوزة بالضمان لحين التسليم النهائي.</div>
+            </div>
+
             <div class="grid grid-cols-3 gap-1.5">
               <div>
                 <label class="block text-[10px] font-bold text-amber-300 mb-1">تاريخ البداية *</label>
@@ -465,19 +481,13 @@
             </div>
 
             <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] font-bold text-slate-300 mb-1">غرامة تأخير يومية (ج.م)</label>
-                <input id="ct-penalty" type="number" min="0" value="0" placeholder="اختياري" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              </div>
-              <div>
-                <label class="block text-[10px] font-bold text-slate-300 mb-1">مدة ضمان الأعمال (يوم)</label>
-                <input id="ct-warranty" type="number" min="0" value="90" placeholder="90 يوم" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-              </div>
+              <div><label class="block text-[10px] font-bold text-slate-300 mb-1">غرامة تأخير يومية (ج.م)</label><input id="ct-penalty" type="number" min="0" value="0" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+              <div><label class="block text-[10px] font-bold text-slate-300 mb-1">مدة ضمان الأعمال (يوم)</label><input id="ct-warranty" type="number" min="0" value="90" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             </div>
 
             <div>
               <label class="block text-[10.5px] font-bold text-slate-300 mb-1">المواصفات الفنية، الكميات، وشروط الاستلام *</label>
-              <textarea id="ct-scope" rows="3" required placeholder="اكتب كل البنود والمقاسات والخامات وشروط الاستلام بوضوح لمنع أي خلاف..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+              <textarea id="ct-scope" rows="3" required placeholder="اكتب كل البنود والمقاسات والخامات وشروط الاستلام بوضوح..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
             </div>
 
             <div id="ct-cost-prev" class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200">
@@ -489,6 +499,21 @@
             </button>
           </form>
         </div>`;
+    },
+
+    onContractModelChange() {
+      const m = document.getElementById('ct-paytype')?.value;
+      const box = document.getElementById('ct-daily-box');
+      const info = document.getElementById('ct-model-info');
+      if (box) box.classList.toggle('hidden', m !== 'daily_wages');
+      if (!info) return;
+      if (m === 'daily_wages') {
+        info.innerHTML = '💡 <b>متى تُصرف الفلوس؟</b> يرفع المنفّذ طلب صرف يوميات (يومياً أو أسبوعياً حسب الاتفاق)، وعند موافقة صاحب العمل يُصرف الصافي فوراً وتبقى نسبة التأمين محجوزة حتى التسليم النهائي.';
+      } else if (m === 'lump_sum' || m === 'b2b_supply') {
+        info.innerHTML = '💡 <b>متى تُصرف الفلوس؟</b> يبقى 100% من المبلغ محجوزاً بالضمان بالكامل ولا يُصرف أي جزء منه إلا عند الاستلام النهائي والتصفية من صاحب العمل.';
+      } else {
+        info.innerHTML = '💡 <b>متى تُصرف الفلوس؟</b> يرسل المنفّذ «طلب صرف دفعة/مستخلص» بصورة الإنجاز، ولا يُصرف جنيه إلا بعد ضغط صاحب العمل «اعتماد وصرف».';
+      }
     },
 
     syncContractEndDate() {
@@ -525,6 +550,10 @@
         const title = document.getElementById('ct-title').value.trim();
         const totalAmount = Math.round((parseFloat(document.getElementById('ct-amount').value) || 0) * 100) / 100;
         const paymentModel = document.getElementById('ct-paytype').value;
+        const dailyRate = paymentModel === 'daily_wages' ? (parseFloat(document.getElementById('ct-daily-rate')?.value) || 0) : 0;
+        const retentionPct = paymentModel === 'daily_wages' ? Math.max(0, Math.min(50, parseFloat(document.getElementById('ct-ret-pct')?.value) || 0)) : 0;
+        const payoutSchedule = paymentModel === 'daily_wages' ? (document.getElementById('ct-payout-sched')?.value || 'weekly') : (paymentModel === 'milestones' ? 'on_request' : 'on_delivery');
+
         const startDate = document.getElementById('ct-start').value;
         const durationDays = parseInt(document.getElementById('ct-days').value, 10) || 1;
         const endDate = document.getElementById('ct-end').value;
@@ -552,6 +581,9 @@
           createdByUid: app.user.uid,
           title,
           paymentModel,
+          dailyRate,
+          retentionPct,
+          payoutSchedule,
           location,
           scopeDetails,
           date: app.todayLocal(),
@@ -561,7 +593,6 @@
           delayPenaltyPerDay,
           warrantyDays,
 
-          // Auto-filled Verified Legal Identities (Locked from KYC!)
           payerUid,
           payerName: payerP.companyName || payerP.name || '',
           payerLegalName: payerP.legalName || payerP.name || '',
@@ -584,12 +615,15 @@
           remainingEscrow: totalAmount,
           paidSoFar: 0,
           totalDeductions: 0,
+          payoutLogs: [],
+          pendingPayoutReq: null,
+          pendingDeduction: null,
 
           payerSigBase64: '',
           providerSigBase64: '',
           signedContractMedia: '',
-          contractStatus: 'unsigned', // 'unsigned' | 'pending_admin' | 'approved' | 'rejected'
-          status: 'draft', // 'draft' | 'funded' | 'disputed' | 'completed' | 'cancelled'
+          contractStatus: 'unsigned',
+          status: 'draft',
           ratedByPayer: false,
           ratedByProvider: false,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -598,20 +632,15 @@
         try {
           const agRef = await app.db.collection('chatAgreements').add(docData);
           await agRef.collection('events').add({
-            type: 'created',
-            byName: app.profile.name || '',
-            note: `إنشاء مسودة العقد ${ticketNumber} بقيمة ${app.fmtMoney(totalAmount)} ج.م (من ${startDate} حتى ${endDate})`,
-            date: app.todayLocal(),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            type: 'created', byName: app.profile.name || '',
+            note: `إنشاء مسودة العقد ${ticketNumber} بقيمة ${app.fmtMoney(totalAmount)} ج.م (${this.paymentModelLabel(paymentModel)})`,
+            date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await app.db.collection('chats').doc(this.activeChatId).collection('messages').add({
-            senderId: app.user.uid,
-            senderName: app.profile.companyName || app.profile.name || '',
-            type: 'contract',
-            agreementId: agRef.id,
-            text: `📄 تم إرسال عقد رسمي جديد (${ticketNumber}): ${title} — بقيمة ${app.fmtMoney(totalAmount)} ج.م`,
-            date: app.todayLocal(),
-            time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+            senderId: app.user.uid, senderName: app.profile.companyName || app.profile.name || '',
+            type: 'contract', agreementId: agRef.id,
+            text: `📄 عقد رسمي جديد (${ticketNumber}): ${title} — ${app.fmtMoney(totalAmount)} ج.م | ${this.paymentModelLabel(paymentModel)}`,
+            date: app.todayLocal(), time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await app.sendNotification(otherUid, `📄 عقد رسمي جديد (${ticketNumber})`, `${title} — بقيمة ${app.fmtMoney(totalAmount)} ج.م`);
@@ -657,14 +686,10 @@
             });
             tx.update(aRef, { status: 'funded', fundedAt: firebase.firestore.FieldValue.serverTimestamp() });
             tx.set(app.db.collection('transactions').doc(), {
-              userId: app.user.uid,
-              type: 'escrow_lock',
-              amount: -totalRequired,
-              balanceBefore: curAvail,
-              balanceAfter: afterAvail,
+              userId: app.user.uid, type: 'escrow_lock', amount: -totalRequired,
+              balanceBefore: curAvail, balanceAfter: afterAvail,
               note: `حجز ضمان عقد ${ag.ticketNumber}: ${ag.title} (أصل ${app.fmtMoney(ag.totalAmount)} + عمولة ${app.fmtMoney(ag.lockedFee)})`,
-              date: app.todayLocal(),
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
           await aRef.collection('events').add({
@@ -687,215 +712,272 @@
       app.toast('تم إلغاء المسودة', 'info');
     },
 
-    // ==================== TOUCH SIGNATURE PAD ====================
-    openSignatureModal(agId) {
+    // ==================== PROVIDER PAYOUT REQUEST (DAILY WAGES / MILESTONES / HANDOVER) ====================
+    openRequestPayoutModal(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
-      if (!ag || !app.user) return;
-      const isPayer = ag.payerUid === app.user.uid;
-      const isProv = ag.providerUid === app.user.uid;
-      if (!isPayer && !isProv) return;
+      if (!ag || ag.status !== 'funded' || ag.providerUid !== app.user?.uid) return;
+      if (ag.contractStatus !== 'approved') return app.toast('يجب اعتماد صورة العقد الموقّع من الإدارة أولاً', 'warning');
+      if (ag.pendingPayoutReq) return app.toast('يوجد طلب صرف معلّق بالفعل بانتظار رد صاحب العمل', 'warning');
 
-      let m = document.getElementById('daman-sig-modal');
+      this.tempPayoutPhoto = '';
+      const isDaily = ag.paymentModel === 'daily_wages';
+      const isLump = ag.paymentModel === 'lump_sum' || ag.paymentModel === 'b2b_supply';
+      const rem = Number(ag.remainingEscrow || 0);
+
+      let m = document.getElementById('daman-req-pay-modal');
       if (!m) {
         m = document.createElement('div');
-        m.id = 'daman-sig-modal';
-        m.className = 'daman-modal fixed inset-0 z-[92] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4';
+        m.id = 'daman-req-pay-modal';
+        m.className = 'daman-modal fixed inset-0 z-[90] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
         document.body.appendChild(m);
       }
       m.classList.remove('hidden');
       m.innerHTML = `
-        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-3 text-xs">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-amber-400">✍️ توقيع العقد الرسمي (${app.esc(ag.ticketNumber)})</h3>
-            <button onclick="document.getElementById('daman-sig-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+        <div class="w-full max-w-sm bg-slate-900 border border-emerald-500/50 rounded-3xl p-4 space-y-3 text-xs">
+          <div class="flex justify-between items-center">
+            <h3 class="text-sm font-black text-emerald-400">${isDaily ? '💸 طلب صرف يوميات' : isLump ? '🏁 طلب استلام نهائي وتصفية' : '💸 طلب صرف دفعة / مستخلص'}</h3>
+            <button onclick="document.getElementById('daman-req-pay-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
-          <div class="text-[11px] text-slate-300">وقّع بإصبعك داخل المستطيل الأبيض أدناه (${isPayer ? 'الطرف الأول — صاحب العمل' : 'الطرف الثاني — المنفّذ'}):</div>
-          <canvas id="daman-sig-canvas" width="320" height="160" class="sig-pad w-full bg-white rounded-2xl border-2 border-amber-500"></canvas>
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" onclick="DamanChat.clearSignatureCanvas()" class="py-2 rounded-xl bg-slate-800 text-slate-200 font-bold">مسح التوقيع</button>
-            <button type="button" onclick="DamanChat.saveSignature('${agId}','${isPayer ? 'payer' : 'provider'}')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">اعتماد التوقيع</button>
+          <div class="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+            المتبقي بالضمان: <b class="text-amber-300">${app.fmtMoney(rem)} ج.م</b>
+            ${isDaily && ag.dailyRate ? ` | اليومية: <b>${app.fmtMoney(ag.dailyRate)} ج.م</b> | تأمين محتجز: <b>${ag.retentionPct || 0}%</b>` : ''}
           </div>
-        </div>`;
-
-      setTimeout(() => this.initSigCanvas(), 50);
-    },
-
-    initSigCanvas() {
-      const c = document.getElementById('daman-sig-canvas');
-      if (!c) return;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, c.width, c.height);
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2.6;
-      ctx.lineCap = 'round';
-      let drawing = false;
-      this._sigHasStrokes = false;
-
-      const getPos = (e) => {
-        const r = c.getBoundingClientRect();
-        const pt = e.touches ? e.touches[0] : e;
-        return { x: ((pt.clientX - r.left) * c.width) / r.width, y: ((pt.clientY - r.top) * c.height) / r.height };
-      };
-      const start = (e) => { drawing = true; this._sigHasStrokes = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); };
-      const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); };
-      const end = () => { drawing = false; };
-
-      c.onmousedown = start; c.onmousemove = move; window.onmouseup = end;
-      c.ontouchstart = start; c.ontouchmove = move; c.ontouchend = end;
-    },
-
-    clearSignatureCanvas() {
-      const c = document.getElementById('daman-sig-canvas');
-      if (!c) return;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, c.width, c.height);
-      this._sigHasStrokes = false;
-    },
-
-    async saveSignature(agId, role) {
-      if (!this._sigHasStrokes) return window.DamanApp.toast('وقّع داخل المستطيل الأبيض أولاً', 'warning');
-      const c = document.getElementById('daman-sig-canvas');
-      const dataUrl = c.toDataURL('image/png');
-      const field = role === 'payer' ? 'payerSigBase64' : 'providerSigBase64';
-      try {
-        await window.DamanApp.db.collection('chatAgreements').doc(agId).update({ [field]: dataUrl });
-        document.getElementById('daman-sig-modal').classList.add('hidden');
-        window.DamanApp.toast('تم حفظ توقيعك الرسمي على العقد ✅', 'success');
-      } catch (e) { window.DamanApp.toast(e.message, 'error'); }
-    },
-
-    // ==================== PRINT OFFICIAL A4 B&W CONTRACT WITH AUTO-FILLED IDs, DATES & QR ====================
-    printContractA4(agId) {
-      const app = window.DamanApp;
-      const a = this.agreements.find((x) => x.id === agId);
-      if (!a) return;
-
-      const payModels = {
-        milestones: 'دفعات / مستخلصات حسب نسب الإنجاز',
-        daily_wages: 'يوميات وسُلف أسبوعية وتصفية نهائية',
-        lump_sum: 'مقطوعية كاملة عند الاستلام النهائي',
-        b2b_supply: 'توريد خامات B2B وصرف عند الاستلام بالموقع'
-      };
-      const verifyUrl = `${window.location.origin}${window.location.pathname}?verify=${encodeURIComponent(a.ticketNumber)}`;
-
-      const html = `
-        <div style="border:2px solid #000; padding:14px 18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+          <form onsubmit="DamanChat.submitPayoutRequest(event,'${agId}')" oninput="DamanChat.updatePayoutReqPreview('${agId}')" class="space-y-2.5">
+            ${isDaily ? `
+              <div class="grid grid-cols-2 gap-2">
+                <div><label class="block text-[10px] text-slate-300 mb-1">عدد أيام العمل *</label><input id="rp-days" type="number" min="0.5" step="0.5" value="1" required class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black text-center" /></div>
+                <div><label class="block text-[10px] text-slate-300 mb-1">قيمة اليومية (ج.م) *</label><input id="rp-rate" type="number" min="50" step="any" value="${Number(ag.dailyRate || 500)}" required class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold text-center" /></div>
+              </div>` : `
+              <div>
+                <label class="block text-[10.5px] font-bold text-emerald-300 mb-1">المبلغ المطلوب صرفه الآن (ج.م) *</label>
+                <input id="rp-amt" type="number" min="1" max="${rem}" step="any" value="${isLump ? rem : Math.min(rem, Math.round(rem / 2))}" ${isLump ? 'readonly' : ''} required class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-black" />
+              </div>`}
             <div>
-              <h2 style="margin:0; font-size:17px;">عقد مقاولة / توريد رسمي بضمان مالي — ضمان سايت</h2>
-              <div style="font-size:11px;">وثيقة تعاقد إلكترونية موثّقة بالهوية والرقم القومي</div>
+              <label class="block text-[10.5px] font-bold text-slate-300 mb-1">بيان الأعمال المنفذة *</label>
+              <input id="rp-note" type="text" required placeholder="${isDaily ? 'مثال: يوميات عمل اليوم / الأسبوع الأول' : isLump ? 'تم إتمام الأعمال والتوريد جاهز للاستلام النهائي' : 'مثال: إنجاز المرحلة الأولى — مستخلص 1'}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
             </div>
-            <div style="text-align:left; font-size:11px;">
-              <div><b>كود العقد:</b> ${app.esc(a.ticketNumber)}</div>
-              <div><b>تاريخ التحرير:</b> ${app.esc(a.date || app.todayLocal())}</div>
-            </div>
-          </div>
-
-          <h4 style="margin:6px 0 4px;">أولاً: بيانات طرفي التعاقد (مسحوبة آلياً من بطاقات الرقم القومي الموثّقة)</h4>
-          <table style="margin-bottom:10px;">
-            <tr>
-              <th style="width:20%;">الطرف الأول (صاحب العمل)</th>
-              <td style="width:30%;"><b>${app.esc(a.payerLegalName || a.payerName)}</b>${a.payerCR ? '<br/>س.ت: ' + app.esc(a.payerCR) : ''}</td>
-              <th style="width:20%;">الرقم القومي</th>
-              <td style="width:30%;"><b>${app.esc(a.payerNationalId || '—')}</b></td>
-            </tr>
-            <tr>
-              <th>العنوان بالبطاقة</th><td>${app.esc(a.payerAddress || '—')}</td>
-              <th>رقم الهاتف</th><td>${app.esc(a.payerPhone || '—')}</td>
-            </tr>
-            <tr>
-              <th>الطرف الثاني (المنفّذ / المورّد)</th>
-              <td><b>${app.esc(a.providerLegalName || a.providerName)}</b>${a.providerCR ? '<br/>س.ت: ' + app.esc(a.providerCR) : ''}</td>
-              <th>الرقم القومي</th>
-              <td><b>${app.esc(a.providerNationalId || '—')}</b></td>
-            </tr>
-            <tr>
-              <th>العنوان بالبطاقة</th><td>${app.esc(a.providerAddress || '—')}</td>
-              <th>رقم الهاتف</th><td>${app.esc(a.providerPhone || '—')}</td>
-            </tr>
-          </table>
-
-          <h4 style="margin:6px 0 4px;">ثانياً: نطاق الأعمال، التواريخ، والقيمة المالية المحجوزة</h4>
-          <table style="margin-bottom:10px;">
-            <tr><th style="width:24%;">موضوع العقد / البند</th><td colspan="3"><b>${app.esc(a.title)}</b></td></tr>
-            <tr><th>موقع التنفيذ / التسليم</th><td colspan="3">${app.esc(a.location || '—')}</td></tr>
-            <tr>
-              <th>تاريخ بداية التنفيذ</th><td><b>${app.esc(a.startDate || a.date || '—')}</b></td>
-              <th>تاريخ التسليم النهائي</th><td><b>${app.esc(a.endDate || '—')} (${a.durationDays || '—'} يوم)</b></td>
-            </tr>
-            <tr>
-              <th>القيمة الإجمالية للعقد</th><td><b>${app.fmtMoney(a.totalAmount)} ج.م</b></td>
-              <th>نظام الصرف</th><td>${payModels[a.paymentModel] || 'حسب الاتفاق'}</td>
-            </tr>
-            <tr>
-              <th>غرامة التأخير اليومية</th><td>${a.delayPenaltyPerDay ? app.fmtMoney(a.delayPenaltyPerDay) + ' ج.م / يوم' : 'حسب التقييم الهندسي'}</td>
-              <th>مدة ضمان الأعمال</th><td>${a.warrantyDays ? a.warrantyDays + ' يوم من التسليم' : 'حسب الأصول الفنية'}</td>
-            </tr>
-            <tr>
-              <th>المواصفات والشروط الفنية</th>
-              <td colspan="3" style="white-space:pre-line;">${app.esc(a.scopeDetails || '—')}</td>
-            </tr>
-          </table>
-
-          <h4 style="margin:6px 0 4px;">ثالثاً: شروط الضمان المالي والتحكيم</h4>
-          <div style="border:1px solid #000; padding:7px 9px; font-size:10.5px; margin-bottom:10px;">
-            1. يقر الطرفان بحجز 100% من قيمة هذا العقد في محفظة الضمان المالي لدى منصة «ضمان سايت» ولا يُصرف أي مبلغ إلا بموافقة إلكترونية موثّقة أو بقرار تحكيم إداري.<br/>
-            2. يلتزم الطرف الثاني بتنفيذ البنود وفق الأصول الهندسية والمواعيد المحددة أعلاه، ويلتزم الطرف الأول بتوفير الموقع وصرف المستخلصات المستحقة دون تعطيل.<br/>
-            3. في حالة النزاع، تُعدّ المحادثات والمرفقات وتسجيلات المكالمات داخل التطبيق حجة قاطعة، ويكون قرار التحكيم الإداري ملزماً للطرفين.
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr 110px; gap:12px; align-items:center; margin-top:12px; text-align:center;">
-            <div style="border:1px solid #000; padding:6px;">
-              <div style="font-weight:bold; font-size:11px;">توقيع الطرف الأول (صاحب العمل)</div>
-              <div style="font-size:10px;">${app.esc(a.payerLegalName || a.payerName)}</div>
-              <div style="height:56px; display:flex; align-items:center; justify-content:center;">
-                ${a.payerSigBase64 ? `<img src="${a.payerSigBase64}" style="max-height:52px; max-width:140px;" />` : '<span style="font-size:10px;">...........................</span>'}
-              </div>
-            </div>
-            <div style="border:1px solid #000; padding:6px;">
-              <div style="font-weight:bold; font-size:11px;">توقيع الطرف الثاني (المنفّذ / المورّد)</div>
-              <div style="font-size:10px;">${app.esc(a.providerLegalName || a.providerName)}</div>
-              <div style="height:56px; display:flex; align-items:center; justify-content:center;">
-                ${a.providerSigBase64 ? `<img src="${a.providerSigBase64}" style="max-height:52px; max-width:140px;" />` : '<span style="font-size:10px;">...........................</span>'}
-              </div>
-            </div>
-            <div style="text-align:center;">
-              <div id="print-contract-qr" style="display:inline-block;"></div>
-              <div style="font-size:8.5px; margin-top:2px;">امسح للتحقق</div>
-            </div>
-          </div>
+            <label class="block p-2.5 rounded-xl border border-dashed border-emerald-500/50 bg-slate-950 text-center cursor-pointer">
+              <span class="font-bold text-emerald-300"><i class="fa-solid fa-camera me-1"></i> صورة إثبات من الشغل (اختياري)</span>
+              <input type="file" accept="image/*" class="hidden" onchange="DamanChat.handleTempPayoutPhoto(this)" />
+              <div id="rp-photo-prev"></div>
+            </label>
+            <div id="rp-calc-prev" class="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[10.5px] text-emerald-200"></div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">إرسال طلب الصرف لصاحب العمل</button>
+          </form>
         </div>`;
+      this.updatePayoutReqPreview(agId);
+    },
 
-      window.DamanPrint(html, (area) => {
-        const el = area.querySelector('#print-contract-qr');
-        if (el && window.QRCode) new QRCode(el, { text: verifyUrl, width: 92, height: 92, colorDark: '#000', colorLight: '#fff' });
+    async handleTempPayoutPhoto(input) {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      this.tempPayoutPhoto = await window.DamanApp.compressImage(f, 700, 0.56);
+      const p = document.getElementById('rp-photo-prev');
+      if (p) p.innerHTML = `<img src="${this.tempPayoutPhoto}" class="max-h-20 mx-auto rounded mt-1" />`;
+    },
+
+    updatePayoutReqPreview(agId) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      const box = document.getElementById('rp-calc-prev');
+      if (!ag || !box) return;
+      const rem = Number(ag.remainingEscrow || 0);
+      if (ag.paymentModel === 'daily_wages') {
+        const days = parseFloat(document.getElementById('rp-days')?.value) || 0;
+        const rate = parseFloat(document.getElementById('rp-rate')?.value) || 0;
+        const gross = Math.round(days * rate * 100) / 100;
+        const retPct = Number(ag.retentionPct || 0);
+        const retAmt = Math.round(gross * (retPct / 100) * 100) / 100;
+        const net = Math.min(rem, Math.max(0, Math.round((gross - retAmt) * 100) / 100));
+        box.innerHTML = `إجمالي اليوميات (${days} × ${app.fmtMoney(rate)}): <b>${app.fmtMoney(gross)} ج.م</b><br/>تأمين يبقى بالضمان (${retPct}%): <b>${app.fmtMoney(retAmt)} ج.م</b><br/><b>الصافي المطلوب صرفه الآن: ${app.fmtMoney(net)} ج.م</b>`;
+      } else {
+        const amt = parseFloat(document.getElementById('rp-amt')?.value) || 0;
+        box.innerHTML = `سيُطلب من صاحب العمل اعتماد صرف مبلغ <b>${app.fmtMoney(amt)} ج.م</b> من الضمان مباشرة إلى محفظتك.`;
+      }
+    },
+
+    async submitPayoutRequest(e, agId) {
+      e.preventDefault();
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag) return;
+      const rem = Number(ag.remainingEscrow || 0);
+      const note = document.getElementById('rp-note').value.trim();
+
+      let days = 0, gross = 0, retentionHeld = 0, netAmount = 0;
+      if (ag.paymentModel === 'daily_wages') {
+        days = parseFloat(document.getElementById('rp-days').value) || 0;
+        const rate = parseFloat(document.getElementById('rp-rate').value) || 0;
+        gross = Math.round(days * rate * 100) / 100;
+        retentionHeld = Math.round(gross * (Number(ag.retentionPct || 0) / 100) * 100) / 100;
+        netAmount = Math.round((gross - retentionHeld) * 100) / 100;
+      } else {
+        netAmount = Math.round((parseFloat(document.getElementById('rp-amt').value) || 0) * 100) / 100;
+        gross = netAmount;
+      }
+
+      if (netAmount <= 0 || netAmount > rem) return app.toast('المبلغ المطلوب غير صالح أو أكبر من المتبقي بالضمان', 'error');
+
+      await app.withLock('reqPay_' + agId, async () => {
+        const photoMedia = this.tempPayoutPhoto ? await app.saveMedia(this.tempPayoutPhoto, { kind: 'payout_proof' }) : '';
+        const reqObj = {
+          id: 'pr_' + Date.now(),
+          days, gross, retentionHeld, netAmount, note, photoMedia,
+          isFinalHandover: ag.paymentModel === 'lump_sum' || ag.paymentModel === 'b2b_supply',
+          date: app.todayLocal()
+        };
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingPayoutReq: reqObj });
+        await app.sendNotification(ag.payerUid, `💸 طلب صرف جديد على العقد ${ag.ticketNumber}`, `${ag.providerName} يطلب صرف ${app.fmtMoney(netAmount)} ج.م — ${note}`);
+        this.tempPayoutPhoto = '';
+        document.getElementById('daman-req-pay-modal').classList.add('hidden');
+        app.toast('تم إرسال طلب الصرف لصاحب العمل ✅', 'success');
       });
     },
 
-    async uploadSignedContractPhoto(input, agId) {
-      const f = input.files && input.files[0];
+    async approvePayoutRequest(agId) {
       const app = window.DamanApp;
-      if (!f || !app.user) return;
-      input.value = '';
-      try {
-        app.toast('جارٍ رفع صورة العقد الموقّع...', 'info');
-        const b64 = await app.compressImage(f, 920, 0.62);
-        const mediaId = await app.saveMedia(b64, { kind: 'signed_contract' });
-        const ag = this.agreements.find((x) => x.id === agId);
-        await app.db.collection('chatAgreements').doc(agId).update({
-          signedContractMedia: mediaId,
-          contractStatus: 'pending_admin',
-          signedUploadedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await app.sendNotification('ADMIN', `📄 عقد موقّع بانتظار الاعتماد (${ag?.ticketNumber || ''})`, `${ag?.title || ''} — ${app.fmtMoney(ag?.totalAmount || 0)} ج.م`);
-        app.toast('تم رفع صورة العقد الموقّع وإرسالها للإدارة للاعتماد ✅', 'success');
-      } catch (e) { app.toast(e.message, 'error'); }
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || !ag.pendingPayoutReq || ag.payerUid !== app.user?.uid) return;
+      const pr = ag.pendingPayoutReq;
+      if (pr.isFinalHandover) return this.settleContractFinal(agId);
+
+      const amt = Number(pr.netAmount || 0);
+      if (!window.confirm(`اعتماد وصرف مبلغ ${app.fmtMoney(amt)} ج.م فوراً من الضمان لمحفظة ${ag.providerName}؟\nالبيان: ${pr.note}`)) return;
+
+      await app.withLock('appPayReq_' + agId, async () => {
+        const aRef = app.db.collection('chatAgreements').doc(agId);
+        const payerRef = app.db.collection('users').doc(ag.payerUid);
+        const provRef = app.db.collection('users').doc(ag.providerUid);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const [aDoc, pDoc, wDoc] = await Promise.all([tx.get(aRef), tx.get(payerRef), tx.get(provRef)]);
+            const a = aDoc.data();
+            if (a.status !== 'funded' || !a.pendingPayoutReq) throw new Error('الطلب لم يعد متاحاً');
+            if (Number(a.remainingEscrow || 0) < amt) throw new Error('المتبقي بالضمان لا يكفي');
+            const pEsc = Number((pDoc.data() || {}).balanceEscrow || 0);
+            const wAvail = Number((wDoc.data() || {}).balanceAvailable || 0);
+            const wAfter = Math.round((wAvail + amt) * 100) / 100;
+
+            const logEntry = {
+              date: app.todayLocal(), amount: amt, days: pr.days || 0,
+              retentionHeld: pr.retentionHeld || 0, note: pr.note, photoMedia: pr.photoMedia || '',
+              kind: a.paymentModel === 'daily_wages' ? 'daily_payout' : 'milestone_payout'
+            };
+            const logs = Array.isArray(a.payoutLogs) ? a.payoutLogs.concat([logEntry]) : [logEntry];
+
+            tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((pEsc - amt) * 100) / 100) });
+            tx.update(provRef, { balanceAvailable: wAfter });
+            tx.update(aRef, {
+              remainingEscrow: Math.round((Number(a.remainingEscrow) - amt) * 100) / 100,
+              paidSoFar: Math.round((Number(a.paidSoFar || 0) + amt) * 100) / 100,
+              payoutLogs: logs,
+              pendingPayoutReq: null
+            });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: ag.providerUid, type: logEntry.kind, amount: amt,
+              balanceBefore: wAvail, balanceAfter: wAfter,
+              note: `صرف معتمد (${ag.ticketNumber}): ${pr.note}`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          await app.sendNotification(ag.providerUid, `✅ تم صرف ${app.fmtMoney(amt)} ج.م لمحفظتك`, `العقد ${ag.ticketNumber}: ${pr.note}`);
+          app.toast(`تم اعتماد وصرف ${app.fmtMoney(amt)} ج.م بنجاح ✅`, 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
     },
 
-    // ==================== IN-CONTRACT PAYOUTS, EXTENSIONS, DEDUCTIONS, SETTLEMENT & DISPUTE ====================
+    async rejectPayoutRequest(agId) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || !ag.pendingPayoutReq || ag.payerUid !== app.user?.uid) return;
+      const reason = window.prompt('سبب رفض طلب الصرف (سيظهر للمنفّذ):', 'لم يكتمل البند المطلوب بعد');
+      if (reason === null) return;
+      await app.db.collection('chatAgreements').doc(agId).update({ pendingPayoutReq: null });
+      await app.sendNotification(ag.providerUid, `❌ تم رفض طلب الصرف (${ag.ticketNumber})`, reason || 'تواصل مع صاحب العمل في الشات');
+      app.toast('تم رفض طلب الصرف وإبلاغ المنفّذ', 'info');
+    },
+
+    // ==================== MUTUAL DEDUCTION INSIDE CONTRACT ====================
+    async openProposeDeductionModal(agId) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || ag.status !== 'funded' || ag.payerUid !== app.user?.uid || ag.contractStatus !== 'approved') return;
+      if (ag.pendingDeduction) return app.toast('يوجد إشعار خصم معلّق بالفعل بانتظار رد المنفّذ', 'warning');
+
+      const rem = Number(ag.remainingEscrow || 0);
+      const amt = Math.round((parseFloat(window.prompt(`إشعار خصم رسمي على المنفّذ (${ag.providerName}).\nالمتبقي بالضمان: ${app.fmtMoney(rem)} ج.م\nأدخل قيمة الخصم المقترحة:`)) || 0) * 100) / 100;
+      if (amt <= 0 || amt > rem) return app.toast('قيمة غير صالحة', 'error');
+      const reason = window.prompt('سبب الخصم بالتفصيل (مثال: تلفيات / تأخير / إعادة أعمال):');
+      if (!reason || !reason.trim()) return;
+
+      await app.db.collection('chatAgreements').doc(agId).update({
+        pendingDeduction: { amount: amt, reason: reason.trim(), date: app.todayLocal() }
+      });
+      await app.sendNotification(ag.providerUid, `⚠️ إشعار خصم على العقد ${ag.ticketNumber}`, `مقترح خصم ${app.fmtMoney(amt)} ج.م — السبب: ${reason.trim()}`);
+      app.toast('تم إرسال إشعار الخصم للمنفّذ للموافقة ✅', 'success');
+    },
+
+    async respondDeduction(agId, accept) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || !ag.pendingDeduction || ag.providerUid !== app.user?.uid) return;
+      const ded = ag.pendingDeduction;
+
+      if (!accept) {
+        await app.db.collection('chatAgreements').doc(agId).update({ pendingDeduction: null });
+        await app.sendNotification(ag.payerUid, `❌ رفض المنفّذ إشعار الخصم (${ag.ticketNumber})`, 'يمكنكم التفاهم في الشات أو فتح نزاع تحكيم.');
+        return app.toast('تم رفض إشعار الخصم وإبلاغ صاحب العمل', 'info');
+      }
+
+      if (!window.confirm(`موافقتك ستخصم ${app.fmtMoney(ded.amount)} ج.م من متبقي العقد وتُعيدها لصاحب العمل. متأكد؟`)) return;
+      await app.withLock('accDed_' + agId, async () => {
+        const aRef = app.db.collection('chatAgreements').doc(agId);
+        const payerRef = app.db.collection('users').doc(ag.payerUid);
+        try {
+          await app.db.runTransaction(async (tx) => {
+            const [aDoc, pDoc] = await Promise.all([tx.get(aRef), tx.get(payerRef)]);
+            const a = aDoc.data();
+            const dAmt = Number(a.pendingDeduction?.amount || 0);
+            if (!dAmt || Number(a.remainingEscrow || 0) < dAmt) throw new Error('الخصم غير صالح');
+
+            const rate = Number(a.commissionRate || app.getCommissionRate());
+            const feeRefund = Math.min(Number(a.lockedFee || 0), Math.round(dAmt * rate * 100) / 100);
+            const totalBackToPayer = Math.round((dAmt + feeRefund) * 100) / 100;
+
+            const pAvail = Number((pDoc.data() || {}).balanceAvailable || 0);
+            const pEsc = Number((pDoc.data() || {}).balanceEscrow || 0);
+            const pAfterAvail = Math.round((pAvail + totalBackToPayer) * 100) / 100;
+
+            const logs = (Array.isArray(a.payoutLogs) ? a.payoutLogs : []).concat([{
+              date: app.todayLocal(), amount: -dAmt, note: `خصم معتمد بالتراضي: ${ded.reason}`, kind: 'deduction'
+            }]);
+
+            tx.update(payerRef, {
+              balanceEscrow: Math.max(0, Math.round((pEsc - totalBackToPayer) * 100) / 100),
+              balanceAvailable: pAfterAvail
+            });
+            tx.update(aRef, {
+              remainingEscrow: Math.round((Number(a.remainingEscrow) - dAmt) * 100) / 100,
+              lockedFee: Math.max(0, Math.round((Number(a.lockedFee || 0) - feeRefund) * 100) / 100),
+              totalDeductions: Math.round((Number(a.totalDeductions || 0) + dAmt) * 100) / 100,
+              payoutLogs: logs,
+              pendingDeduction: null
+            });
+            tx.set(app.db.collection('transactions').doc(), {
+              userId: ag.payerUid, type: 'contract_deduction_refund', amount: totalBackToPayer,
+              balanceBefore: pAvail, balanceAfter: pAfterAvail,
+              note: `رد خصم متفق عليه (${ag.ticketNumber}): ${ded.reason}`, date: app.todayLocal(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          await app.sendNotification(ag.payerUid, `✅ وافق المنفّذ على الخصم (${ag.ticketNumber})`, `تم رد ${app.fmtMoney(ded.amount)} ج.م + فرق العمولة إلى رصيدك المتاح.`);
+          app.toast('تم تطبيق الخصم بالتراضي ✅', 'success');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    // ==================== DIRECT PAYOUT BY PAYER, EXTENSION, SETTLEMENT, HISTORY & DISPUTE ====================
     async disburseFromContract(agId) {
       const app = window.DamanApp;
       const ag = this.agreements.find((a) => a.id === agId);
@@ -903,7 +985,7 @@
       if (ag.contractStatus !== 'approved') return app.toast('يجب اعتماد صورة العقد الموقّع من الإدارة أولاً قبل صرف أي دفعة', 'warning');
 
       const rem = Number(ag.remainingEscrow || 0);
-      const amt = Math.round((parseFloat(window.prompt(`صرف دفعة / يوميات / مستخلص للمنفّذ (${ag.providerName}).\nالمتبقي بالضمان: ${app.fmtMoney(rem)} ج.م\nأدخل المبلغ المطلوب صرفه الآن:`, String(Math.min(rem, 1000)))) || 0) * 100) / 100;
+      const amt = Math.round((parseFloat(window.prompt(`صرف دفعة مباشرة للمنفّذ (${ag.providerName}).\nالمتبقي بالضمان: ${app.fmtMoney(rem)} ج.م\nأدخل المبلغ المطلوب صرفه الآن:`, String(Math.min(rem, 1000)))) || 0) * 100) / 100;
       if (amt <= 0 || amt > rem) return app.toast('مبلغ غير صالح أو أكبر من المتبقي بالضمان', 'error');
       const note = window.prompt('بيان الصرف (مثال: يوميات أسبوع 1 / مستخلص رقم 1):', 'دفعة من حساب الأعمال المنفذة') || 'دفعة مستحقة';
 
@@ -920,11 +1002,16 @@
             const wAvail = Number((wDoc.data() || {}).balanceAvailable || 0);
             const wAfter = Math.round((wAvail + amt) * 100) / 100;
 
+            const logs = (Array.isArray(a.payoutLogs) ? a.payoutLogs : []).concat([{
+              date: app.todayLocal(), amount: amt, note, kind: a.paymentModel === 'daily_wages' ? 'daily_payout' : 'milestone_payout'
+            }]);
+
             tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((pEsc - amt) * 100) / 100) });
             tx.update(provRef, { balanceAvailable: wAfter });
             tx.update(aRef, {
               remainingEscrow: Math.round((Number(a.remainingEscrow) - amt) * 100) / 100,
-              paidSoFar: Math.round((Number(a.paidSoFar || 0) + amt) * 100) / 100
+              paidSoFar: Math.round((Number(a.paidSoFar || 0) + amt) * 100) / 100,
+              payoutLogs: logs
             });
             tx.set(app.db.collection('transactions').doc(), {
               userId: ag.providerUid, type: 'milestone_payout', amount: amt,
@@ -933,14 +1020,45 @@
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
-          await aRef.collection('events').add({
-            type: 'payout', byName: app.profile.name || '', note: `صرف مبلغ ${app.fmtMoney(amt)} ج.م — ${note}`,
-            date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
           await app.sendNotification(ag.providerUid, `💸 تم صرف ${app.fmtMoney(amt)} ج.م لحسابك`, `العقد ${ag.ticketNumber}: ${note}`);
           app.toast(`تم صرف ${app.fmtMoney(amt)} ج.م لمحفظة المنفّذ بنجاح ✅`, 'success');
         } catch (err) { app.toast(err.message, 'error'); }
       });
+    },
+
+    openContractHistoryModal(agId) {
+      const app = window.DamanApp;
+      const a = this.agreements.find((x) => x.id === agId);
+      if (!a) return;
+      const logs = Array.isArray(a.payoutLogs) ? a.payoutLogs : [];
+      let m = document.getElementById('daman-ct-hist-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-ct-hist-modal';
+        m.className = 'daman-modal fixed inset-0 z-[90] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[88vh] overflow-y-auto space-y-3 text-xs">
+          <div class="flex justify-between items-center"><h3 class="text-sm font-black text-amber-400">📜 سجل الدفعات واليوميات (${app.esc(a.ticketNumber)})</h3><button onclick="document.getElementById('daman-ct-hist-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="grid grid-cols-3 gap-1.5 text-center p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10.5px]">
+            <div>إجمالي العقد<br/><b class="text-white">${app.fmtMoney(a.totalAmount)}</b></div>
+            <div>المنصرف<br/><b class="text-emerald-400">${app.fmtMoney(a.paidSoFar || 0)}</b></div>
+            <div>المتبقي بالضمان<br/><b class="text-amber-300">${app.fmtMoney(a.remainingEscrow || 0)}</b></div>
+          </div>
+          <div class="space-y-1.5">
+            ${!logs.length ? '<div class="text-center text-slate-400 py-6">لم يتم صرف أي دفعات أو يوميات على هذا العقد بعد.</div>' : logs.map((l, i) => `
+              <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center gap-2">
+                <div class="min-w-0">
+                  <div class="font-bold text-white">${i + 1}. ${app.esc(l.note || 'دفعة')}</div>
+                  <div class="text-[10px] text-slate-400">${app.esc(l.date || '')}${l.days ? ` • ${l.days} يوم` : ''}${l.retentionHeld ? ` • تأمين محتجز: ${app.fmtMoney(l.retentionHeld)} ج.م` : ''}</div>
+                  ${l.photoMedia ? `<button onclick="DamanApp.openMediaLightbox('${l.photoMedia}','صورة إثبات الدفعة')" class="text-[10px] text-sky-300 underline font-bold mt-0.5">عرض صورة الشغل</button>` : ''}
+                </div>
+                <b class="${Number(l.amount || 0) < 0 ? 'text-rose-400' : 'text-emerald-400'} shrink-0">${app.fmtMoney(l.amount)} ج.م</b>
+              </div>`).join('')}
+          </div>
+        </div>`;
     },
 
     async extendContract(agId) {
@@ -992,11 +1110,6 @@
               lockedFee: Math.round((Number(a.lockedFee || 0) + extraFee) * 100) / 100
             });
           });
-          await aRef.collection('events').add({
-            type: 'extension', byName: app.profile.name || '',
-            note: `ملحق تمديد العقد: +${extraDays} يوم (حتى ${newEnd}) وزيادة ${app.fmtMoney(extraAmount)} ج.م`,
-            date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
           await app.sendNotification(ag.providerUid, `📅 تم تحديث/تمديد العقد ${ag.ticketNumber}`, `تاريخ التسليم الجديد: ${newEnd}${extraAmount > 0 ? ' — زيادة محجوزة: ' + app.fmtMoney(extraAmount) + ' ج.م' : ''}`);
           app.toast('تم حفظ ملحق التمديد والزيادة بنجاح ✅', 'success');
         } catch (err) { app.toast(err.message, 'error'); }
@@ -1011,7 +1124,7 @@
 
       const rem = Number(ag.remainingEscrow || 0);
       const fee = Number(ag.lockedFee || 0);
-      if (!window.confirm(`تأكيد الاستلام النهائي وإغلاق العقد ${ag.ticketNumber}؟\n• سيتم تحويل المتبقي (${app.fmtMoney(rem)} ج.م) فوراً إلى محفظة المنفّذ.\n• سيتم تسوية عمولة الضمان (${app.fmtMoney(fee)} ج.م) لصالح المنصة.`)) return;
+      if (!window.confirm(`تأكيد الاستلام النهائي وإغلاق العقد ${ag.ticketNumber}؟\n• سيتم تحويل المتبقي والتأمين المحجوز (${app.fmtMoney(rem)} ج.م) فوراً إلى محفظة المنفّذ.\n• سيتم تسوية عمولة الضمان (${app.fmtMoney(fee)} ج.م) لصالح المنصة.`)) return;
 
       await app.withLock('settle_' + agId, async () => {
         const aRef = app.db.collection('chatAgreements').doc(agId);
@@ -1029,6 +1142,10 @@
             const pEsc = Number((pDoc.data() || {}).balanceEscrow || 0);
             const wAvail = Number((wDoc.data() || {}).balanceAvailable || 0);
             const wAfter = Math.round((wAvail + rEsc) * 100) / 100;
+
+            const logs = (Array.isArray(a.payoutLogs) ? a.payoutLogs : []).concat(
+              rEsc > 0 ? [{ date: app.todayLocal(), amount: rEsc, note: 'التصفية النهائية ورد التأمين عند الاستلام', kind: 'final_settlement' }] : []
+            );
 
             tx.update(payerRef, { balanceEscrow: Math.max(0, Math.round((pEsc - totalRelease) * 100) / 100) });
             if (rEsc > 0) {
@@ -1049,9 +1166,9 @@
               });
             }
             tx.update(aRef, {
-              status: 'completed',
-              remainingEscrow: 0,
-              lockedFee: 0,
+              status: 'completed', remainingEscrow: 0, lockedFee: 0,
+              pendingPayoutReq: null, pendingDeduction: null,
+              payoutLogs: logs,
               paidSoFar: Math.round((Number(a.paidSoFar || 0) + rEsc) * 100) / 100,
               completedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -1072,18 +1189,11 @@
       await app.withLock('disp_' + agId, async () => {
         try {
           await app.db.collection('disputes').add({
-            agreementId: agId,
-            contractNumber: ag.ticketNumber,
-            projectTitle: ag.title,
-            contractAmount: ag.totalAmount,
-            remainingEscrow: ag.remainingEscrow,
-            clientId: ag.payerUid,
-            providerId: ag.providerUid,
-            openedByUid: app.user.uid,
-            openedByName: app.profile?.name || '',
-            reason: reason.trim(),
-            status: 'open',
-            date: app.todayLocal(),
+            agreementId: agId, contractNumber: ag.ticketNumber, projectTitle: ag.title,
+            contractAmount: ag.totalAmount, remainingEscrow: ag.remainingEscrow,
+            clientId: ag.payerUid, providerId: ag.providerUid,
+            openedByUid: app.user.uid, openedByName: app.profile?.name || '',
+            reason: reason.trim(), status: 'open', date: app.todayLocal(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await app.db.collection('chatAgreements').doc(agId).update({ status: 'disputed' });
@@ -1091,6 +1201,163 @@
           app.toast('تم فتح النزاع وتجميد الصرف لحين قرار التحكيم الإداري ⚖️', 'warning');
         } catch (err) { app.toast(err.message, 'error'); }
       });
+    },
+
+    // ==================== SIGNATURE PAD + OFFICIAL A4 PRINT ====================
+    openSignatureModal(agId) {
+      const app = window.DamanApp;
+      const ag = this.agreements.find((a) => a.id === agId);
+      if (!ag || !app.user) return;
+      const isPayer = ag.payerUid === app.user.uid;
+      const isProv = ag.providerUid === app.user.uid;
+      if (!isPayer && !isProv) return;
+
+      let m = document.getElementById('daman-sig-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'daman-sig-modal';
+        m.className = 'daman-modal fixed inset-0 z-[92] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4';
+        document.body.appendChild(m);
+      }
+      m.classList.remove('hidden');
+      m.innerHTML = `
+        <div class="w-full max-w-sm bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-3 text-xs">
+          <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">✍️ توقيع العقد الرسمي (${app.esc(ag.ticketNumber)})</h3><button onclick="document.getElementById('daman-sig-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="text-[11px] text-slate-300">وقّع بإصبعك داخل المستطيل الأبيض (${isPayer ? 'الطرف الأول — صاحب العمل' : 'الطرف الثاني — المنفّذ'}):</div>
+          <canvas id="daman-sig-canvas" width="320" height="160" class="sig-pad w-full bg-white rounded-2xl border-2 border-amber-500"></canvas>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="DamanChat.clearSignatureCanvas()" class="py-2 rounded-xl bg-slate-800 text-slate-200 font-bold">مسح التوقيع</button>
+            <button type="button" onclick="DamanChat.saveSignature('${agId}','${isPayer ? 'payer' : 'provider'}')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black">اعتماد التوقيع</button>
+          </div>
+        </div>`;
+      setTimeout(() => this.initSigCanvas(), 50);
+    },
+
+    initSigCanvas() {
+      const c = document.getElementById('daman-sig-canvas');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.strokeStyle = '#000000'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+      let drawing = false; this._sigHasStrokes = false;
+      const getPos = (e) => {
+        const r = c.getBoundingClientRect();
+        const pt = e.touches ? e.touches[0] : e;
+        return { x: ((pt.clientX - r.left) * c.width) / r.width, y: ((pt.clientY - r.top) * c.height) / r.height };
+      };
+      const start = (e) => { drawing = true; this._sigHasStrokes = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); };
+      const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); };
+      const end = () => { drawing = false; };
+      c.onmousedown = start; c.onmousemove = move; window.onmouseup = end;
+      c.ontouchstart = start; c.ontouchmove = move; c.ontouchend = end;
+    },
+
+    clearSignatureCanvas() {
+      const c = document.getElementById('daman-sig-canvas');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+      this._sigHasStrokes = false;
+    },
+
+    async saveSignature(agId, role) {
+      if (!this._sigHasStrokes) return window.DamanApp.toast('وقّع داخل المستطيل الأبيض أولاً', 'warning');
+      const dataUrl = document.getElementById('daman-sig-canvas').toDataURL('image/png');
+      await window.DamanApp.db.collection('chatAgreements').doc(agId).update({ [role === 'payer' ? 'payerSigBase64' : 'providerSigBase64']: dataUrl });
+      document.getElementById('daman-sig-modal').classList.add('hidden');
+      window.DamanApp.toast('تم حفظ توقيعك الرسمي على العقد ✅', 'success');
+    },
+
+    printContractA4(agId) {
+      const app = window.DamanApp;
+      const a = this.agreements.find((x) => x.id === agId);
+      if (!a) return;
+      const verifyUrl = `${window.location.origin}${window.location.pathname}?verify=${encodeURIComponent(a.ticketNumber)}`;
+      const logs = Array.isArray(a.payoutLogs) ? a.payoutLogs : [];
+      const logRows = logs.map((l, i) => `<tr><td>${i + 1}</td><td>${app.esc(l.date || '')}</td><td>${app.esc(l.note || '')}</td><td><b>${app.fmtMoney(l.amount)} ج.م</b></td></tr>`).join('');
+
+      const html = `
+        <div style="border:2px solid #000; padding:14px 18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px;">
+            <div>
+              <h2 style="margin:0; font-size:17px;">عقد مقاولة / توريد رسمي بضمان مالي — ${app.esc(app.t('appName'))}</h2>
+              <div style="font-size:11px;">وثيقة تعاقد إلكترونية موثّقة بالهوية والرقم القومي</div>
+            </div>
+            <div style="text-align:left; font-size:11px;">
+              <div><b>كود العقد:</b> ${app.esc(a.ticketNumber)}</div>
+              <div><b>تاريخ التحرير:</b> ${app.esc(a.date || app.todayLocal())}</div>
+            </div>
+          </div>
+
+          <h4 style="margin:6px 0 4px;">أولاً: بيانات طرفي التعاقد (مسحوبة آلياً من بطاقات الرقم القومي الموثّقة)</h4>
+          <table style="margin-bottom:10px;">
+            <tr><th style="width:20%;">الطرف الأول (صاحب العمل)</th><td style="width:30%;"><b>${app.esc(a.payerLegalName || a.payerName)}</b>${a.payerCR ? '<br/>س.ت: ' + app.esc(a.payerCR) : ''}</td><th style="width:20%;">الرقم القومي</th><td style="width:30%;"><b>${app.esc(a.payerNationalId || '—')}</b></td></tr>
+            <tr><th>العنوان بالبطاقة</th><td>${app.esc(a.payerAddress || '—')}</td><th>رقم الهاتف</th><td>${app.esc(a.payerPhone || '—')}</td></tr>
+            <tr><th>الطرف الثاني (المنفّذ / المورّد)</th><td><b>${app.esc(a.providerLegalName || a.providerName)}</b>${a.providerCR ? '<br/>س.ت: ' + app.esc(a.providerCR) : ''}</td><th>الرقم القومي</th><td><b>${app.esc(a.providerNationalId || '—')}</b></td></tr>
+            <tr><th>العنوان بالبطاقة</th><td>${app.esc(a.providerAddress || '—')}</td><th>رقم الهاتف</th><td>${app.esc(a.providerPhone || '—')}</td></tr>
+          </table>
+
+          <h4 style="margin:6px 0 4px;">ثانياً: نطاق الأعمال، التواريخ، ونظام ومواعيد الصرف</h4>
+          <table style="margin-bottom:10px;">
+            <tr><th style="width:24%;">موضوع العقد / البند</th><td colspan="3"><b>${app.esc(a.title)}</b></td></tr>
+            <tr><th>موقع التنفيذ / التسليم</th><td colspan="3">${app.esc(a.location || '—')}</td></tr>
+            <tr><th>تاريخ بداية التنفيذ</th><td><b>${app.esc(a.startDate || a.date || '—')}</b></td><th>تاريخ التسليم النهائي</th><td><b>${app.esc(a.endDate || '—')} (${a.durationDays || '—'} يوم)</b></td></tr>
+            <tr><th>القيمة الإجمالية للعقد</th><td><b>${app.fmtMoney(a.totalAmount)} ج.م</b></td><th>نظام الصرف</th><td><b>${this.paymentModelLabel(a.paymentModel)}</b></td></tr>
+            <tr><th>ميعاد ودورية الصرف</th><td>${this.payoutScheduleLabel(a.payoutSchedule)}${a.dailyRate ? ` — اليومية: ${app.fmtMoney(a.dailyRate)} ج.م` : ''}</td><th>نسبة التأمين المحتجزة</th><td>${a.retentionPct ? a.retentionPct + '% حتى التسليم النهائي' : 'لا يوجد استقطاع إضافي'}</td></tr>
+            <tr><th>غرامة التأخير اليومية</th><td>${a.delayPenaltyPerDay ? app.fmtMoney(a.delayPenaltyPerDay) + ' ج.م / يوم' : 'حسب التقييم الهندسي'}</td><th>مدة ضمان الأعمال</th><td>${a.warrantyDays ? a.warrantyDays + ' يوم من التسليم' : 'حسب الأصول الفنية'}</td></tr>
+            <tr><th>المواصفات والشروط الفنية</th><td colspan="3" style="white-space:pre-line;">${app.esc(a.scopeDetails || '—')}</td></tr>
+          </table>
+
+          ${logs.length ? `
+            <h4 style="margin:6px 0 4px;">ثالثاً: كشف الدفعات واليوميات المنصرفة على العقد (المنصرف: ${app.fmtMoney(a.paidSoFar || 0)} ج.م | المتبقي: ${app.fmtMoney(a.remainingEscrow || 0)} ج.م)</h4>
+            <table style="margin-bottom:10px;">
+              <thead><tr><th>#</th><th>التاريخ</th><th>البيان</th><th>المبلغ</th></tr></thead>
+              <tbody>${logRows}</tbody>
+            </table>` : ''}
+
+          <div style="border:1px solid #000; padding:7px 9px; font-size:10.5px; margin-bottom:10px;">
+            1. يقر الطرفان بحجز 100% من قيمة هذا العقد في محفظة الضمان المالي لدى المنصة، ولا يُصرف أي مبلغ إلا بموافقة إلكترونية صريحة من صاحب العمل أو بقرار تحكيم إداري.<br/>
+            2. في حالة النزاع، تُعدّ المحادثات وصور التنفيذ وتسجيلات المكالمات داخل التطبيق حجة قاطعة، ويكون قرار التحكيم الإداري ملزماً للطرفين.
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 110px; gap:12px; align-items:center; margin-top:12px; text-align:center;">
+            <div style="border:1px solid #000; padding:6px;">
+              <div style="font-weight:bold; font-size:11px;">توقيع الطرف الأول (صاحب العمل)</div>
+              <div style="font-size:10px;">${app.esc(a.payerLegalName || a.payerName)}</div>
+              <div style="height:56px; display:flex; align-items:center; justify-content:center;">${a.payerSigBase64 ? `<img src="${a.payerSigBase64}" style="max-height:52px; max-width:140px;" />` : '...........................'}</div>
+            </div>
+            <div style="border:1px solid #000; padding:6px;">
+              <div style="font-weight:bold; font-size:11px;">توقيع الطرف الثاني (المنفّذ / المورّد)</div>
+              <div style="font-size:10px;">${app.esc(a.providerLegalName || a.providerName)}</div>
+              <div style="height:56px; display:flex; align-items:center; justify-content:center;">${a.providerSigBase64 ? `<img src="${a.providerSigBase64}" style="max-height:52px; max-width:140px;" />` : '...........................'}</div>
+            </div>
+            <div style="text-align:center;"><div id="print-contract-qr" style="display:inline-block;"></div><div style="font-size:8.5px; margin-top:2px;">امسح للتحقق</div></div>
+          </div>
+        </div>`;
+
+      window.DamanPrint(html, (area) => {
+        const el = area.querySelector('#print-contract-qr');
+        if (el && window.QRCode) new QRCode(el, { text: verifyUrl, width: 92, height: 92, colorDark: '#000', colorLight: '#fff' });
+      });
+    },
+
+    async uploadSignedContractPhoto(input, agId) {
+      const f = input.files && input.files[0];
+      const app = window.DamanApp;
+      if (!f || !app.user) return;
+      input.value = '';
+      try {
+        app.toast('جارٍ رفع صورة العقد الموقّع...', 'info');
+        const b64 = await app.compressImage(f, 920, 0.62);
+        const mediaId = await app.saveMedia(b64, { kind: 'signed_contract' });
+        const ag = this.agreements.find((x) => x.id === agId);
+        await app.db.collection('chatAgreements').doc(agId).update({
+          signedContractMedia: mediaId, contractStatus: 'pending_admin',
+          signedUploadedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await app.sendNotification('ADMIN', `📄 عقد موقّع بانتظار الاعتماد (${ag?.ticketNumber || ''})`, `${ag?.title || ''} — ${app.fmtMoney(ag?.totalAmount || 0)} ج.م`);
+        app.toast('تم رفع صورة العقد الموقّع وإرسالها للإدارة للاعتماد ✅', 'success');
+      } catch (e) { app.toast(e.message, 'error'); }
     },
 
     openReviewModal(agId) {
@@ -1144,8 +1411,7 @@
           const cnt = Number(d.ratingCount || 0);
           const avg = Number(d.ratingAvg || 5);
           const newCnt = cnt + 1;
-          const newAvg = Math.round(((avg * cnt + rating) / newCnt) * 10) / 10;
-          tx.update(tRef, { ratingCount: newCnt, ratingAvg: newAvg });
+          tx.update(tRef, { ratingCount: newCnt, ratingAvg: Math.round(((avg * cnt + rating) / newCnt) * 10) / 10 });
         });
         await app.db.collection('chatAgreements').doc(agId).update({ [isPayer ? 'ratedByPayer' : 'ratedByProvider']: true });
         document.getElementById('daman-rev-modal').classList.add('hidden');
@@ -1155,10 +1421,7 @@
 
     // ==================== WEBRTC VOICE CALLS + 30-DAY AUTO RECORDING ====================
     buildRtcConfig(app) {
-      const iceServers = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ];
+      const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
       const rawTurn = String(app.appConfig?.turnServer || '').trim();
       if (rawTurn) {
         const [urls, username, credential] = rawTurn.split('|');
@@ -1182,7 +1445,6 @@
 
         const pc = new RTCPeerConnection(this.buildRtcConfig(app));
         stream.getTracks().forEach((tr) => pc.addTrack(tr, stream));
-
         const callRef = app.db.collection('chats').doc(chatId).collection('calls').doc(callId);
         const callerCands = callRef.collection('callerCandidates');
         const calleeCands = callRef.collection('calleeCandidates');
@@ -1204,9 +1466,8 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await callRef.set({
-          offer: { type: offer.type, sdp: offer.sdp },
-          callerUid: app.user.uid, callerName: app.profile?.name || '',
-          calleeUid: otherUid, status: 'ringing',
+          offer: { type: offer.type, sdp: offer.sdp }, callerUid: app.user.uid,
+          callerName: app.profile?.name || '', calleeUid: otherUid, status: 'ringing',
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         await app.db.collection('incomingCalls').doc(otherUid).set({
@@ -1243,20 +1504,10 @@
       }
       this._pendingIncoming = data;
       b.classList.remove('hidden');
-      b.innerHTML = `
-        <div class="min-w-0">
-          <div class="text-xs font-black animate-pulse">📞 مكالمة صوتية واردة (مسجّلة للضمان)</div>
-          <div class="text-[11px] font-bold truncate">${window.DamanApp.esc(data.callerName || 'مستخدم')}</div>
-        </div>
-        <div class="flex gap-1.5 shrink-0">
-          <button onclick="DamanChat.acceptIncomingCall()" class="px-3 py-1.5 rounded-xl bg-white text-emerald-700 font-black text-xs">رد</button>
-          <button onclick="DamanChat.rejectIncomingCall()" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black text-xs">رفض</button>
-        </div>`;
+      b.innerHTML = `<div class="min-w-0"><div class="text-xs font-black animate-pulse">📞 مكالمة صوتية واردة (مسجّلة للضمان)</div><div class="text-[11px] font-bold truncate">${window.DamanApp.esc(data.callerName || 'مستخدم')}</div></div><div class="flex gap-1.5 shrink-0"><button onclick="DamanChat.acceptIncomingCall()" class="px-3 py-1.5 rounded-xl bg-white text-emerald-700 font-black text-xs">رد</button><button onclick="DamanChat.rejectIncomingCall()" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black text-xs">رفض</button></div>`;
     },
 
-    hideIncomingCallBanner() {
-      document.getElementById('daman-incoming-call-bar')?.classList.add('hidden');
-    },
+    hideIncomingCallBanner() { document.getElementById('daman-incoming-call-bar')?.classList.add('hidden'); },
 
     async rejectIncomingCall() {
       const app = window.DamanApp;
@@ -1272,12 +1523,10 @@
       const d = this._pendingIncoming;
       this.hideIncomingCallBanner();
       if (!d || !app.user) return;
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const pc = new RTCPeerConnection(this.buildRtcConfig(app));
         stream.getTracks().forEach((tr) => pc.addTrack(tr, stream));
-
         const callRef = app.db.collection('chats').doc(d.chatId).collection('calls').doc(d.callId);
         const callerCands = callRef.collection('callerCandidates');
         const calleeCands = callRef.collection('calleeCandidates');
@@ -1290,14 +1539,10 @@
         this.showCallOverlay(`متصل مع ${d.callerName}`);
         this.startCallTimer();
 
-        pc.ontrack = (ev) => {
-          const aud = document.getElementById('daman-remote-audio');
-          if (aud && ev.streams[0]) { aud.srcObject = ev.streams[0]; aud.play().catch(() => {}); }
-        };
+        pc.ontrack = (ev) => { const aud = document.getElementById('daman-remote-audio'); if (aud && ev.streams[0]) { aud.srcObject = ev.streams[0]; aud.play().catch(() => {}); } };
         pc.onicecandidate = (ev) => { if (ev.candidate) calleeCands.add(ev.candidate.toJSON()).catch(() => {}); };
 
-        const callSnap = await callRef.get();
-        const offer = callSnap.data()?.offer;
+        const offer = (await callRef.get()).data()?.offer;
         if (!offer) return this.endActiveCall(true);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await pc.createAnswer();
@@ -1308,13 +1553,8 @@
         this.callState.unsubRemoteCands = callerCands.onSnapshot((snap) => {
           snap.docChanges().forEach((ch) => { if (ch.type === 'added') pc.addIceCandidate(new RTCIceCandidate(ch.doc.data())).catch(() => {}); });
         });
-        this.callState.unsubCallDoc = callRef.onSnapshot((snap) => {
-          if (snap.data()?.status === 'ended') this.endActiveCall(false);
-        });
-      } catch (e) {
-        app.toast('تعذر فتح الميكروفون للرد', 'error');
-        this.endActiveCall(true);
-      }
+        this.callState.unsubCallDoc = callRef.onSnapshot((snap) => { if (snap.data()?.status === 'ended') this.endActiveCall(false); });
+      } catch (e) { app.toast('تعذر فتح الميكروفون للرد', 'error'); this.endActiveCall(true); }
     },
 
     startLocalRecording(localStream, remoteStream) {
@@ -1342,15 +1582,7 @@
         document.body.appendChild(ov);
       }
       ov.classList.remove('hidden');
-      ov.innerHTML = `
-        <div class="min-w-0">
-          <div class="font-black text-emerald-400 truncate"><i class="fa-solid fa-phone-volume me-1 animate-pulse"></i> ${window.DamanApp.esc(statusTxt)}</div>
-          <div id="daman-call-timer" class="text-[10px] text-amber-300 font-bold">🔴 مسجّلة تلقائياً لحفظ الحقوق</div>
-        </div>
-        <div class="flex items-center gap-1.5 shrink-0">
-          <button onclick="DamanChat.toggleMuteCall()" id="daman-mute-btn" class="w-8 h-8 rounded-xl bg-slate-800 text-white"><i class="fa-solid fa-microphone"></i></button>
-          <button onclick="DamanChat.endActiveCall(false)" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black">إنهاء</button>
-        </div>`;
+      ov.innerHTML = `<div class="min-w-0"><div class="font-black text-emerald-400 truncate"><i class="fa-solid fa-phone-volume me-1 animate-pulse"></i> ${window.DamanApp.esc(statusTxt)}</div><div id="daman-call-timer" class="text-[10px] text-amber-300 font-bold">🔴 مسجّلة تلقائياً لحفظ الحقوق</div></div><div class="flex items-center gap-1.5 shrink-0"><button onclick="DamanChat.toggleMuteCall()" id="daman-mute-btn" class="w-8 h-8 rounded-xl bg-slate-800 text-white"><i class="fa-solid fa-microphone"></i></button><button onclick="DamanChat.endActiveCall(false)" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black">إنهاء</button></div>`;
     },
 
     startCallTimer() {
@@ -1376,7 +1608,6 @@
       const cs = this.callState;
       if (!cs.active) return;
       cs.active = false;
-
       if (cs.timerInt) clearInterval(cs.timerInt);
       if (cs.unsubCallDoc) { try { cs.unsubCallDoc(); } catch (e) {} }
       if (cs.unsubRemoteCands) { try { cs.unsubRemoteCands(); } catch (e) {} }
@@ -1387,7 +1618,7 @@
           cs.mediaRecorder.onstop = async () => {
             if (!cs.recordedChunks.length || durationSec < 2) return;
             const blob = new Blob(cs.recordedChunks, { type: 'audio/webm' });
-            if (blob.size > 650000) return; // Stay well within Firestore 1MB safety
+            if (blob.size > 650000) return;
             const r = new FileReader();
             r.onloadend = async () => {
               try {
@@ -1407,7 +1638,6 @@
           cs.mediaRecorder.stop();
         } catch (e) {}
       }
-
       if (cs.localStream) cs.localStream.getTracks().forEach((t) => t.stop());
       if (cs.pc) { try { cs.pc.close(); } catch (e) {} }
       if (!silent && cs.chatId && cs.callId && app) {
@@ -1435,7 +1665,7 @@
       app.toast('تم إرسال تذكرة الدعم بنجاح ✅', 'success');
     },
 
-    // ==================== RENDER CONTRACT CARD ====================
+    // ==================== RENDER CONTRACT CARD (WITH CLEAR PAYOUT SCHEDULE & REQUESTS) ====================
     renderContractCard(a, app) {
       const uid = app.user?.uid;
       const isPayer = a.payerUid === uid;
@@ -1448,6 +1678,8 @@
         cancelled: '<span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[9.5px] font-black">ملغى</span>'
       };
       const canRate = a.status === 'completed' && ((isPayer && !a.ratedByPayer) || (isProv && !a.ratedByProvider));
+      const logsCount = Array.isArray(a.payoutLogs) ? a.payoutLogs.length : 0;
+      const isLump = a.paymentModel === 'lump_sum' || a.paymentModel === 'b2b_supply';
 
       return `
         <div class="glass-card rounded-2xl p-3.5 space-y-2 border-amber-500/40 text-xs">
@@ -1456,15 +1688,47 @@
             ${stLabels[a.status] || ''}
           </div>
           <div class="font-black text-white">${app.esc(a.title)}</div>
+
           <div class="grid grid-cols-2 gap-1.5 text-[10.5px] p-2 rounded-xl bg-slate-950 border border-slate-800">
-            <div>القيمة: <b class="text-emerald-400">${app.fmtMoney(a.totalAmount)} ج.م</b></div>
+            <div>إجمالي العقد: <b class="text-emerald-400">${app.fmtMoney(a.totalAmount)} ج.م</b></div>
             <div>المتبقي بالضمان: <b class="text-amber-300">${app.fmtMoney(a.remainingEscrow || 0)} ج.م</b></div>
             <div>البداية: <b class="text-white">${app.esc(a.startDate || a.date || '—')}</b></div>
             <div>التسليم: <b class="text-white">${app.esc(a.endDate || '—')}</b></div>
+            <div class="col-span-2 pt-1 border-t border-slate-800 text-[10px] text-sky-300">
+              <b>نظام الصرف:</b> ${this.paymentModelLabel(a.paymentModel)}${a.dailyRate ? ` (${app.fmtMoney(a.dailyRate)} ج.م/يوم • تأمين ${a.retentionPct || 0}%)` : ''}
+            </div>
           </div>
+
           <div class="text-[10px] text-slate-300">
             صاحب العمل: <b>${app.esc(a.payerLegalName || a.payerName)}</b> | المنفّذ: <b>${app.esc(a.providerLegalName || a.providerName)}</b>
           </div>
+
+          <!-- Pending Payout Request Banner -->
+          ${a.status === 'funded' && a.pendingPayoutReq ? `
+            <div class="p-2.5 rounded-xl bg-emerald-500/15 border-2 border-emerald-500 space-y-1.5">
+              <div class="font-black text-emerald-300 text-[11px]">
+                🔔 ${a.pendingPayoutReq.isFinalHandover ? 'طلب استلام وتصفية نهائية' : 'طلب صرف من المنفّذ'}: ${app.fmtMoney(a.pendingPayoutReq.netAmount)} ج.م
+              </div>
+              <div class="text-[10.5px] text-white">${app.esc(a.pendingPayoutReq.note)}${a.pendingPayoutReq.days ? ` (${a.pendingPayoutReq.days} يوم — تأمين محتجز: ${app.fmtMoney(a.pendingPayoutReq.retentionHeld || 0)} ج.م)` : ''}</div>
+              ${a.pendingPayoutReq.photoMedia ? `<button onclick="DamanApp.openMediaLightbox('${a.pendingPayoutReq.photoMedia}','صورة إثبات الشغل')" class="text-[10px] text-sky-300 underline font-bold">👁️ معاينة صورة الشغل المرفقة</button>` : ''}
+              ${isPayer ? `
+                <div class="grid grid-cols-2 gap-1.5 pt-1">
+                  <button onclick="DamanChat.approvePayoutRequest('${a.id}')" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10.5px]">✅ اعتماد وصرف الآن</button>
+                  <button onclick="DamanChat.rejectPayoutRequest('${a.id}')" class="py-1.5 rounded-lg bg-rose-500 text-white font-black text-[10.5px]">❌ رفض الطلب</button>
+                </div>` : '<div class="text-[10px] text-amber-300 font-bold">⏳ بانتظار موافقة صاحب العمل على الصرف...</div>'}
+            </div>` : ''}
+
+          <!-- Pending Mutual Deduction Banner -->
+          ${a.status === 'funded' && a.pendingDeduction ? `
+            <div class="p-2.5 rounded-xl bg-rose-500/15 border-2 border-rose-500 space-y-1.5">
+              <div class="font-black text-rose-300 text-[11px]">⚠️ إشعار خصم مقترح: ${app.fmtMoney(a.pendingDeduction.amount)} ج.م</div>
+              <div class="text-[10.5px] text-white">السبب: ${app.esc(a.pendingDeduction.reason)}</div>
+              ${isProv ? `
+                <div class="grid grid-cols-2 gap-1.5 pt-1">
+                  <button onclick="DamanChat.respondDeduction('${a.id}',true)" class="py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10.5px]">موافقة على الخصم</button>
+                  <button onclick="DamanChat.respondDeduction('${a.id}',false)" class="py-1.5 rounded-lg bg-rose-600 text-white font-black text-[10.5px]">رفض الخصم</button>
+                </div>` : '<div class="text-[10px] text-amber-300 font-bold">⏳ بانتظار رد المنفّذ على إشعار الخصم...</div>'}
+            </div>` : ''}
 
           <!-- Draft Actions -->
           ${a.status === 'draft' ? `
@@ -1476,9 +1740,10 @@
           <!-- Funded Contract Actions -->
           ${a.status === 'funded' ? `
             <div class="space-y-1.5">
-              <div class="grid grid-cols-2 gap-1.5">
-                <button onclick="DamanChat.openSignatureModal('${a.id}')" class="py-1.5 rounded-xl bg-slate-800 text-amber-300 font-bold text-[10.5px]">✍️ توقيع باللمس ${(isPayer && a.payerSigBase64) || (isProv && a.providerSigBase64) ? '✅' : ''}</button>
-                <button onclick="DamanChat.printContractA4('${a.id}')" class="py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10.5px]"><i class="fa-solid fa-print me-1"></i> طباعة A4 + QR</button>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button onclick="DamanChat.openSignatureModal('${a.id}')" class="py-1.5 rounded-xl bg-slate-800 text-amber-300 font-bold text-[10px]">✍️ توقيع ${(isPayer && a.payerSigBase64) || (isProv && a.providerSigBase64) ? '✅' : ''}</button>
+                <button onclick="DamanChat.printContractA4('${a.id}')" class="py-1.5 rounded-xl bg-white text-slate-950 font-black text-[10px]">🖨️ طباعة A4</button>
+                <button onclick="DamanChat.openContractHistoryModal('${a.id}')" class="py-1.5 rounded-xl bg-slate-800 text-sky-300 font-bold text-[10px]">📜 الدفعات (${logsCount})</button>
               </div>
 
               ${a.contractStatus !== 'approved' ? `
@@ -1490,19 +1755,25 @@
                   </label>
                 </div>` : `
                 <div class="text-[10px] text-emerald-400 font-black">✅ العقد الموقّع معتمد من الإدارة — أزرار التشغيل مفعّلة</div>
+                ${isProv && !a.pendingPayoutReq ? `
+                  <button onclick="DamanChat.openRequestPayoutModal('${a.id}')" class="w-full py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">
+                    ${a.paymentModel === 'daily_wages' ? '💸 طلب صرف يوميات عمل' : isLump ? '🏁 إشعار جاهزية للاستلام والتصفية' : '💸 طلب صرف دفعة / مستخلص'}
+                  </button>` : ''}
                 ${isPayer ? `
-                  <div class="grid grid-cols-3 gap-1.5">
-                    <button onclick="DamanChat.disburseFromContract('${a.id}')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[10px]">💸 صرف دفعة</button>
-                    <button onclick="DamanChat.extendContract('${a.id}')" class="py-2 rounded-xl bg-sky-500 text-slate-950 font-black text-[10px]">📅 تمديد/زيادة</button>
-                    <button onclick="DamanChat.settleContractFinal('${a.id}')" class="py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]">🏁 تصفية نهائية</button>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    ${!isLump ? `<button onclick="DamanChat.disburseFromContract('${a.id}')" class="py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[10.5px]">💸 صرف دفعة/يومية</button>` : ''}
+                    <button onclick="DamanChat.settleContractFinal('${a.id}')" class="${isLump ? 'col-span-2' : ''} py-2 rounded-xl bg-amber-500 text-slate-950 font-black text-[10.5px]">🏁 استلام وتصفية نهائية 100%</button>
+                    <button onclick="DamanChat.extendContract('${a.id}')" class="py-1.5 rounded-xl bg-sky-500/20 text-sky-300 border border-sky-500/40 font-black text-[10px]">📅 تمديد / زيادة</button>
+                    <button onclick="DamanChat.openProposeDeductionModal('${a.id}')" class="py-1.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-black text-[10px]">⚠️ إشعار خصم</button>
                   </div>` : ''}
                 <button onclick="DamanChat.openDispute('${a.id}')" class="w-full py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 font-bold text-[10px]">⚖️ فتح نزاع رسمي للتحكيم</button>`}
             </div>` : ''}
 
           ${a.status === 'completed' ? `
             <div class="flex gap-1.5">
-              <button onclick="DamanChat.printContractA4('${a.id}')" class="flex-1 py-1.5 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">طباعة نسخة العقد A4</button>
-              ${canRate ? `<button onclick="DamanChat.openReviewModal('${a.id}')" class="flex-1 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10.5px]">⭐ تقييم الطرف الآخر</button>` : ''}
+              <button onclick="DamanChat.openContractHistoryModal('${a.id}')" class="px-3 py-1.5 rounded-xl bg-slate-800 text-sky-300 font-bold text-[10.5px]">📜 الدفعات (${logsCount})</button>
+              <button onclick="DamanChat.printContractA4('${a.id}')" class="flex-1 py-1.5 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">طباعة A4</button>
+              ${canRate ? `<button onclick="DamanChat.openReviewModal('${a.id}')" class="flex-1 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10.5px]">⭐ تقييم</button>` : ''}
             </div>` : ''}
         </div>`;
     },
@@ -1515,12 +1786,10 @@
         return;
       }
 
-      // Active Chat Room View
       if (this.activeChatId) {
         const roomAgs = this.agreements.filter((a) => a.chatId === this.activeChatId && ['draft', 'funded', 'disputed'].includes(a.status));
         container.innerHTML = `
           <div class="flex flex-col h-[calc(100vh-145px)] space-y-2">
-            <!-- Room Top Bar -->
             <div class="glass-card rounded-2xl p-2.5 flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
                 <button onclick="DamanChat.closeActiveChat()" class="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0"><i class="fa-solid fa-arrow-right"></i></button>
@@ -1535,9 +1804,8 @@
               </div>
             </div>
 
-            ${roomAgs.length ? `<div class="max-h-44 overflow-y-auto space-y-2">${roomAgs.map((a) => this.renderContractCard(a, app)).join('')}</div>` : ''}
+            ${roomAgs.length ? `<div class="max-h-56 overflow-y-auto space-y-2">${roomAgs.map((a) => this.renderContractCard(a, app)).join('')}</div>` : ''}
 
-            <!-- Messages List -->
             <div id="daman-chat-scroll" class="flex-1 overflow-y-auto space-y-2 p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-xs">
               ${!this.activeMessages.length ? `<div class="text-center text-slate-500 py-10">ابدأ الاتفاق الآمن بالرسائل أو اضغط «عقد» لإبرام اتفاق رسمي مضمون.</div>` : this.activeMessages.map((m) => {
                 const mine = m.senderId === app.user.uid;
@@ -1553,7 +1821,6 @@
               }).join('')}
             </div>
 
-            <!-- Composer -->
             <form onsubmit="DamanChat.sendMessage(event)" class="flex items-center gap-1.5">
               <label class="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 flex items-center justify-center cursor-pointer shrink-0">
                 <i class="fa-solid fa-image"></i>
@@ -1566,7 +1833,6 @@
         return;
       }
 
-      // Main Tabs View (Chats | My Contracts | Support Tickets)
       container.innerHTML = `
         <div class="space-y-3">
           <div class="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px] font-extrabold">
@@ -1609,8 +1875,8 @@
             <div class="space-y-3 text-xs">
               <form onsubmit="DamanChat.submitSupportTicket(event)" class="glass-card rounded-2xl p-3.5 space-y-2">
                 <div class="font-black text-sky-400">فتح تذكرة دعم فني / شكوى</div>
-                <input id="tk-subj" type="text" required placeholder="عنوان التذكرة" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />
-                <textarea id="tk-msg" rows="3" required placeholder="اشرح المشكلة بالتفصيل..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea>
+                <div><label class="block text-[10px] text-slate-400 mb-1">عنوان التذكرة *</label><input id="tk-subj" type="text" required placeholder="مثال: استفسار عن عقد أو شحن" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+                <div><label class="block text-[10px] text-slate-400 mb-1">التفاصيل *</label><textarea id="tk-msg" rows="3" required placeholder="اشرح المشكلة بالتفصيل..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"></textarea></div>
                 <button type="submit" class="w-full py-2.5 rounded-xl bg-sky-500 text-slate-950 font-black">إرسال للإدارة</button>
               </form>
               ${this.tickets.map((t) => `
