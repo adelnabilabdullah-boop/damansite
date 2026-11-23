@@ -13,7 +13,7 @@
 
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="manifest" href="manifest.json?v=26" />
+  <link rel="manifest" href="manifest.json?v=28" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -61,7 +61,7 @@
   </div>
 
   <div id="daman-update-banner" class="hidden fixed inset-x-3 bottom-20 z-[115] max-w-md mx-auto bg-amber-500 text-slate-950 rounded-2xl px-3.5 py-2.5 shadow-2xl flex items-center justify-between gap-2">
-    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق</span>
+    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v28)</span>
     <button onclick="window.DamanApplyUpdate()" class="px-3 py-1 rounded-xl bg-slate-950 text-amber-400 text-[11px] font-black">تحديث الآن</button>
   </div>
 
@@ -126,6 +126,11 @@
   </div>
 
   <script>
+    window.DamanToggleHelp = function (id) {
+      const el = document.getElementById('fh-' + id);
+      if (el) el.classList.toggle('hidden');
+    };
+
     window.DamanLightbox = {
       open(src, title) {
         if (!src) return;
@@ -189,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=26').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=28').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -225,12 +230,15 @@
     });
   </script>
 
-  <script src="app-core.js?v=26"></script>
-  <script src="wallet-kyc.js?v=26"></script>
-  <script src="chat-support.js?v=26"></script>
-  <script src="projects-escrow.js?v=26"></script>
-  <script src="company-panel.js?v=26"></script>
-  <script src="admin.js?v=26"></script>
-  <script src="admin-ext.js?v=26"></script>
+  <script src="app-core.js?v=28"></script>
+  <script src="wallet-kyc.js?v=28"></script>
+  <script src="wallet-ops.js?v=28"></script>
+  <script src="chat-support.js?v=28"></script>
+  <script src="chat-extras.js?v=28"></script>
+  <script src="projects-escrow.js?v=28"></script>
+  <script src="company-panel.js?v=28"></script>
+  <script src="admin.js?v=28"></script>
+  <script src="admin-ext.js?v=28"></script>
+  <script src="admin-ext2.js?v=28"></script>
 </body>
 </html>
