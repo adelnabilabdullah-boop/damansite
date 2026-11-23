@@ -1,15 +1,25 @@
 (function () {
+  const ADMIN_VER = '27';
+
   const AdminMod = {
     subTab: 'treasury',
     loading: false,
     initialized: false,
     lastErrors: [],
 
+    _ext1Ready: false,
+    _ext2Ready: false,
+    _ext1Loading: false,
+    _ext2Loading: false,
+    _ext1Failed: false,
+    _ext2Failed: false,
+
     periodFilter: 'all',
     userSearch: '',
+    chatSearch: '',
     omniQuery: '',
     omniResults: null,
-    pageLimits: { kyc: 20, wallet: 25, users: 30, comms: 25 },
+    pageLimits: { kyc: 20, wallet: 25, users: 30, comms: 30 },
 
     counts: { kyc: 0, dep: 0, wd: 0, signed: 0, disputes: 0, posts: 0, reports: 0, tickets: 0 },
 
@@ -39,6 +49,63 @@
     dbFilter: '',
     tempPayoutReceipts: {},
     unsubAdminChatWatch: null,
+
+    // ==================== AUTO-LOADER FOR ADMIN EXTENSIONS ====================
+    registerExtension(slot, extObj) {
+      Object.assign(this, extObj);
+      if (slot === 1) { this._ext1Ready = true; this._ext1Loading = false; this._ext1Failed = false; }
+      if (slot === 2) { this._ext2Ready = true; this._ext2Loading = false; this._ext2Failed = false; }
+      this.rerender();
+    },
+
+    ensureExtensionsLoaded() {
+      const loadScript = (slot, file) => {
+        if (slot === 1 && (this._ext1Ready || this._ext1Loading)) return;
+        if (slot === 2 && (this._ext2Ready || this._ext2Loading)) return;
+        if (slot === 1) { this._ext1Loading = true; this._ext1Failed = false; }
+        if (slot === 2) { this._ext2Loading = true; this._ext2Failed = false; }
+        const sc = document.createElement('script');
+        sc.src = `${file}?v=${ADMIN_VER}&t=${Date.now()}`;
+        sc.onload = () => {
+          if (slot === 1) { this._ext1Loading = false; if (!this._ext1Ready) this._ext1Failed = true; }
+          if (slot === 2) { this._ext2Loading = false; if (!this._ext2Ready) this._ext2Failed = true; }
+          this.rerender();
+        };
+        sc.onerror = () => {
+          if (slot === 1) { this._ext1Loading = false; this._ext1Failed = true; }
+          if (slot === 2) { this._ext2Loading = false; this._ext2Failed = true; }
+          this.rerender();
+        };
+        document.body.appendChild(sc);
+      };
+      if (!this._ext1Ready) loadScript(1, 'admin-ext.js');
+      if (!this._ext2Ready) loadScript(2, 'admin-ext2.js');
+    },
+
+    retryExtension(slot) {
+      if (slot === 1) { this._ext1Failed = false; this._ext1Loading = false; }
+      if (slot === 2) { this._ext2Failed = false; this._ext2Loading = false; }
+      this.ensureExtensionsLoaded();
+      this.rerender();
+    },
+
+    renderExtFallback(slot, fileName) {
+      const failed = slot === 1 ? this._ext1Failed : this._ext2Failed;
+      if (!failed) {
+        this.ensureExtensionsLoaded();
+        return `<div class="glass-card rounded-2xl p-8 text-center text-xs text-amber-300 font-bold animate-pulse">جارٍ تحميل أدوات الإدارة (${fileName})...</div>`;
+      }
+      return `
+        <div class="glass-card rounded-2xl p-5 text-center space-y-3 border-rose-500/50 text-xs">
+          <i class="fa-solid fa-file-circle-exclamation text-2xl text-rose-400"></i>
+          <div class="font-black text-rose-300">ملف <b>${fileName}</b> غير مرفوع أو لم يكتمل تحميله بعد</div>
+          <p class="text-[11px] text-slate-300">تأكد من رفع ملف <b>${fileName}</b> على GitHub بنفس الاسم ثم اضغط إعادة التحميل.</p>
+          <div class="flex justify-center gap-2">
+            <button onclick="DamanAdmin.retryExtension(${slot})" class="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-black">إعادة التحميل</button>
+            <button onclick="DamanApp.forceClearCacheAndReload()" class="px-4 py-2 rounded-xl bg-slate-800 text-sky-300 font-bold">مسح الكاش</button>
+          </div>
+        </div>`;
+    },
 
     detachListeners() {
       if (this.unsubAdminChatWatch) {
@@ -219,7 +286,7 @@
           this.promoCodes = p;
         } else if (tab === 'comms') {
           const [c, r, t] = await Promise.all([
-            this.safeDocs(db.collection('chats').limit(this.pageLimits.comms || 25).get(), 'المحادثات'),
+            this.safeDocs(db.collection('chats').limit(this.pageLimits.comms || 30).get(), 'المحادثات'),
             this.safeDocs(db.collection('callRecordings').limit(this.pageLimits.comms || 25).get(), 'التسجيلات'),
             this.safeDocs(db.collection('supportTickets').limit(50).get(), 'التذاكر')
           ]);
@@ -479,6 +546,9 @@
       const bankAccount = document.getElementById('sw-bk-acc').value.trim();
       const bankIban = document.getElementById('sw-bk-iban').value.trim();
 
+      let instaPayLink = document.getElementById('sw-ip-link').value.trim();
+      if (instaPayLink && !/^https?:\/\//i.test(instaPayLink)) instaPayLink = 'https://' + instaPayLink;
+
       const patch = {
         depositChannels: {
           vodafone_cash: document.getElementById('sw-dep-vf').checked,
@@ -493,13 +563,10 @@
         paymentAccounts: {
           vodafoneCash: document.getElementById('sw-vf-num').value.trim(),
           vodafoneHolder: document.getElementById('sw-vf-holder').value.trim(),
-          instaPayLink: document.getElementById('sw-ip-link').value.trim(),
+          instaPayLink,
           instaPay: document.getElementById('sw-ip-addr').value.trim(),
           instaPayHolder: document.getElementById('sw-ip-holder').value.trim(),
-          bankName,
-          bankHolder,
-          bankAccount,
-          bankIban,
+          bankName, bankHolder, bankAccount, bankIban,
           bankInfo: `${bankName} — ${bankHolder} — ${bankAccount}`.trim()
         },
         backupAccounts: {
@@ -535,7 +602,7 @@
       const curAcc = Object.assign({}, app.appConfig?.paymentAccounts || {});
       if (channelKey === 'vodafoneCash') curAcc.vodafoneCash = val;
       else if (channelKey === 'instaPay') {
-        if (val.startsWith('http')) curAcc.instaPayLink = val;
+        if (/^https?:\/\//i.test(val) || val.includes('ipn.eg')) curAcc.instaPayLink = /^https?:\/\//i.test(val) ? val : 'https://' + val;
         else curAcc.instaPay = val;
       } else curAcc.bankAccount = val;
       await app.db.collection('settings').doc('appConfig').set({ paymentAccounts: curAcc }, { merge: true });
@@ -912,6 +979,9 @@
               <div class="text-[9.5px] text-slate-300">متاح ${app.fmtMoney(s.usersAvail)} | ضمان ${app.fmtMoney(s.usersEscrow)} | سحب ${app.fmtMoney(s.usersHoldW)}</div>
             </div>
           </div>
+          <div class="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-[10.5px] text-purple-200 text-center">
+            🎁 إجمالي رصيد الهدايا عند المستخدمين (غير نقدي): <b>${app.fmtMoney(s.usersBonus)} ج.م</b>
+          </div>
 
           <div class="glass-card rounded-2xl p-3 space-y-2">
             <div class="flex items-center justify-between"><span class="font-black text-amber-400">📊 الحركة حسب الفترة</span>
@@ -982,7 +1052,6 @@
             </div>
           </div>
 
-          <!-- 1. Wallet Details -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-amber-500/40">
             <div class="font-black text-amber-400">📱 1. بيانات المحفظة الإلكترونية النشطة</div>
             <div class="grid grid-cols-2 gap-2">
@@ -992,10 +1061,9 @@
             ${(bkup.vodafoneCash || []).length ? `<div class="flex flex-wrap gap-1 pt-1">${bkup.vodafoneCash.map((v) => `<button type="button" onclick="DamanAdmin.quickActivateBackup('vodafoneCash','${app.esc(v).replace(/'/g, "\\'")}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-[10px] font-bold">تفعيل: ${app.esc(v)}</button>`).join('')}</div>` : ''}
           </div>
 
-          <!-- 2. InstaPay Direct Link -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-purple-500/40">
             <div class="font-black text-purple-300">⚡ 2. بيانات إنستا باي (لينك التحويل المباشر)</div>
-            <div><label class="block text-[10px] text-purple-200 mb-1">رابط / لينك التحويل المباشر في إنستا باي (يدوس عليه يحوّله مباشرة) *</label><input id="sw-ip-link" type="url" value="${app.esc(acc.instaPayLink || '')}" placeholder="https://ipn.eg/S/username/instapay/..." class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-purple-500/50 text-emerald-300 font-bold" dir="ltr" /></div>
+            <div><label class="block text-[10px] text-purple-200 mb-1">رابط / لينك التحويل المباشر في إنستا باي *</label><input id="sw-ip-link" type="text" value="${app.esc(acc.instaPayLink || '')}" placeholder="https://ipn.eg/S/username/instapay/..." class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-purple-500/50 text-emerald-300 font-bold" dir="ltr" /></div>
             <div class="grid grid-cols-2 gap-2">
               <div><label class="block text-[10px] text-slate-300 mb-1">عنوان إنستا باي (IPA)</label><input id="sw-ip-addr" type="text" value="${app.esc(acc.instaPay || '')}" placeholder="name@instapay" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
               <div><label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب</label><input id="sw-ip-holder" type="text" value="${app.esc(acc.instaPayHolder || '')}" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
@@ -1003,11 +1071,10 @@
             ${(bkup.instaPay || []).length ? `<div class="flex flex-wrap gap-1 pt-1">${bkup.instaPay.map((v) => `<button type="button" onclick="DamanAdmin.quickActivateBackup('instaPay','${app.esc(v).replace(/'/g, "\\'")}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-purple-500 text-[10px] font-bold">تفعيل: ${app.esc(v)}</button>`).join('')}</div>` : ''}
           </div>
 
-          <!-- 3. Bank Account Separate Fields -->
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/40">
             <div class="font-black text-sky-400">🏦 3. بيانات الحساب البنكي النشط</div>
             <div class="grid grid-cols-2 gap-2">
-              <div><label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label><input id="sw-bk-name" type="text" value="${app.esc(acc.bankName || '')}" placeholder="مثال: البنك الأهلي المصري / CIB" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" /></div>
+              <div><label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label><input id="sw-bk-name" type="text" value="${app.esc(acc.bankName || '')}" placeholder="البنك الأهلي / مصر / CIB" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" /></div>
               <div><label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب البنكي *</label><input id="sw-bk-holder" type="text" value="${app.esc(acc.bankHolder || '')}" placeholder="الاسم كما في البنك" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-sky-500/40 text-white font-bold" /></div>
             </div>
             <div><label class="block text-[10px] text-slate-300 mb-1">رقم الحساب البنكي *</label><input id="sw-bk-acc" type="text" value="${app.esc(acc.bankAccount || '')}" placeholder="رقم الحساب البنكي" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-emerald-500/40 text-emerald-300 font-black" /></div>
@@ -1054,14 +1121,16 @@
           <div class="font-black text-emerald-400">طلبات الشحن والسحب المعلّقة (${pending.length})</div>
           ${!pending.length ? `<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد طلبات معلّقة ✅</div>` : pending.map((r) => `
             <div class="glass-card rounded-2xl p-3.5 space-y-2 ${r.duplicateRefFlag || r.phoneMismatchFlag || r.rapidFlipFlag ? 'border-2 border-rose-500 bg-rose-500/5' : 'border-amber-500/40'}">
-              ${r.duplicateRefFlag ? `<div class="p-1.5 rounded bg-rose-600 text-white font-black text-center text-[10px]">⚠️ الرقم المرجعي مكرر!</div>` : ''}
-              ${r.phoneMismatchFlag ? `<div class="p-1.5 rounded bg-amber-600 text-white font-black text-center text-[10px]">⚠️ رقم المحفظة مختلف عن رقم المستخدم!</div>` : ''}
+              ${r.duplicateRefFlag ? `<div class="p-1.5 rounded bg-rose-600 text-white font-black text-center text-[10px]">⚠️ تحذير: الرقم المرجعي مكرر!</div>` : ''}
+              ${r.phoneMismatchFlag ? `<div class="p-1.5 rounded bg-amber-600 text-white font-black text-center text-[10px]">⚠️ تنبيه: رقم محفظة الاستلام مختلف عن رقم المستخدم!</div>` : ''}
+              ${r.rapidFlipFlag ? `<div class="p-1.5 rounded bg-purple-600 text-white font-black text-center text-[10px]">⚠️ تنبيه: سحب سريع على قناة مختلفة بدون تعاملات!</div>` : ''}
               <div class="flex justify-between items-center">
                 <b class="${r.type === 'deposit' ? 'text-emerald-400' : 'text-amber-400'}">${r.type === 'deposit' ? '⬇️ شحن / إيداع' : '⬆️ سحب كاش'} — ${app.fmtMoney(r.amount)} ج.م</b>
-                <button onclick="DamanAdmin.openUser360Modal('${r.userId}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[10px] font-bold">ملف 360°</button>
+                <button onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${r.userId}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[10px] font-bold">ملف 360°</button>
               </div>
               <div class="text-[11px] text-slate-200">${app.esc(r.userLegalName || r.userName)} (${app.esc(r.userPhone || '')}) • ${this.channelAr(r.channel)} • ${app.esc(r.date || '')}</div>
               ${r.txRef ? `<div class="text-[10.5px] text-amber-300">المرجع: <b class="select-all">${app.esc(r.txRef)}</b> | من: ${app.esc(r.senderAccount || '')}</div>` : ''}
+              ${r.targetAccountUsed ? `<div class="text-[10px] text-slate-400">الحساب المستلم وقت الطلب: ${app.esc(r.targetAccountUsed)}</div>` : ''}
               ${r.destAccount ? `<div class="text-[11px] text-emerald-300 font-black">تحويل إلى: <span class="select-all">${app.esc(r.destAccount)}</span> (الصافي: ${app.fmtMoney(r.netPayout || r.amount)} ج.م)</div>` : ''}
               ${r.type === 'deposit' ? `
                 <div class="flex items-center gap-2 p-2 rounded-xl bg-slate-950 border border-emerald-500/30">
@@ -1079,12 +1148,14 @@
               </div>
             </div>`).join('')}
           <div class="font-bold text-slate-400 pt-2">المنفّذة (${done.length})</div>
-          ${done.slice(0, 12).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${r.type === 'deposit' ? '⬇️' : '⬆️'} ${app.esc(r.userName)} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م</span><b class="${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(r.status)}</b></div>`).join('')}
+          ${done.slice(0, 15).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${r.type === 'deposit' ? '⬇️' : '⬆️'} ${app.esc(r.userName)} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م</span><b class="${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(r.status)}</b></div>`).join('')}
+          <button onclick="DamanAdmin.loadMore('wallet')" class="w-full py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 font-bold">تحميل المزيد</button>
         </div>`;
     },
 
     renderKycTab(app) {
       const pending = this.kycReqs.filter((k) => k.status === 'pending');
+      const others = this.kycReqs.filter((k) => k.status !== 'pending');
       return `
         <div class="space-y-3 text-xs">
           <div class="font-black text-amber-400">طلبات التوثيق المعلّقة (${pending.length})</div>
@@ -1112,6 +1183,7 @@
                 </div>
               </div>`;
           }).join('')}
+          ${others.length ? `<div class="font-bold text-slate-400 pt-1">طلبات تمت مراجعتها (${others.length})</div>${others.slice(0, 10).map((k) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${app.esc(k.legalName)} (${app.esc(k.nationalId)})</span><b class="${k.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(k.status)}</b></div>`).join('')}` : ''}
         </div>`;
     },
 
@@ -1152,6 +1224,8 @@
         return;
       }
 
+      this.ensureExtensionsLoaded();
+
       const isMain = app.isAdmin();
       const tabs = [
         isMain ? ['treasury', '💰 الخزنة والميزان'] : null,
@@ -1186,10 +1260,10 @@
       const omniBox = this.omniResults ? `
         <div class="glass-card rounded-2xl p-3 border-amber-500/50 space-y-2 text-[11px]">
           <div class="flex justify-between"><b class="text-amber-400">نتائج البحث: "${app.esc(this.omniQuery)}"</b><button onclick="DamanAdmin.omniResults=null; DamanAdmin.rerender()" class="text-rose-400 font-bold">إغلاق ×</button></div>
-          ${this.omniResults.users.map((u) => `<div onclick="DamanAdmin.openUser360Modal('${u.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>👤 ${app.esc(u.name)} (${app.esc(u.phone || '')})</span><b class="text-sky-300">ملف 360°</b></div>`).join('')}
+          ${this.omniResults.users.map((u) => `<div onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${u.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>👤 ${app.esc(u.name)} (${app.esc(u.phone || '')})</span><b class="text-sky-300">ملف 360°</b></div>`).join('')}
           ${this.omniResults.wallets.map((w) => `<div onclick="DamanAdmin.setSubTab('wallet')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>💳 ${app.esc(w.userName)}</span><b class="text-emerald-400">${app.fmtMoney(w.amount)} (${this.statusAr(w.status)})</b></div>`).join('')}
           ${this.omniResults.contracts.map((a) => `<div onclick="DamanAdmin.openContractAdminModal('${a.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)}</b></div>`).join('')}
-          ${this.omniResults.companies.map((co) => `<div onclick="DamanAdmin.openCompanyControlModal('${co.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>🏢 ${app.esc(co.name)} (${app.esc(co.code)})</span><b class="text-purple-300">تحكّم</b></div>`).join('')}
+          ${this.omniResults.companies.map((co) => `<div onclick="if(DamanAdmin.openCompanyControlModal) DamanAdmin.openCompanyControlModal('${co.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>🏢 ${app.esc(co.name)} (${app.esc(co.code)})</span><b class="text-purple-300">تحكّم</b></div>`).join('')}
         </div>` : '';
 
       let body = '';
@@ -1199,14 +1273,14 @@
         else if (this.subTab === 'wallet') body = this.renderWalletTab(app);
         else if (this.subTab === 'kyc') body = this.renderKycTab(app);
         else if (this.subTab === 'contracts') body = this.renderContractsTab(app);
-        else if (this.subTab === 'market') body = this.renderMarketTab ? this.renderMarketTab(app) : '<div class="text-center text-amber-300 p-6">ارفع ملف admin-ext.js</div>';
-        else if (this.subTab === 'ads') body = this.renderAdsAndBrandingTab ? this.renderAdsAndBrandingTab(app) : '';
-        else if (this.subTab === 'companies') body = this.renderCompaniesTab ? this.renderCompaniesTab(app) : '';
-        else if (this.subTab === 'users') body = this.renderUsersTab ? this.renderUsersTab(app) : '';
-        else if (this.subTab === 'comms') body = this.renderCommsTab ? this.renderCommsTab(app) : '';
-        else if (this.subTab === 'security') body = this.renderSecurityTab ? this.renderSecurityTab(app) : '';
-        else if (this.subTab === 'db') body = this.renderDbTab ? this.renderDbTab(app) : '';
-        else if (this.subTab === 'settings') body = this.renderSettingsTab ? this.renderSettingsTab(app) : '';
+        else if (this.subTab === 'market') body = this.renderMarketTab ? this.renderMarketTab(app) : this.renderExtFallback(1, 'admin-ext.js');
+        else if (this.subTab === 'ads') body = this.renderAdsAndBrandingTab ? this.renderAdsAndBrandingTab(app) : this.renderExtFallback(1, 'admin-ext.js');
+        else if (this.subTab === 'comms') body = this.renderCommsTab ? this.renderCommsTab(app) : this.renderExtFallback(1, 'admin-ext.js');
+        else if (this.subTab === 'companies') body = this.renderCompaniesTab ? this.renderCompaniesTab(app) : this.renderExtFallback(2, 'admin-ext2.js');
+        else if (this.subTab === 'users') body = this.renderUsersTab ? this.renderUsersTab(app) : this.renderExtFallback(2, 'admin-ext2.js');
+        else if (this.subTab === 'security') body = this.renderSecurityTab ? this.renderSecurityTab(app) : this.renderExtFallback(2, 'admin-ext2.js');
+        else if (this.subTab === 'db') body = this.renderDbTab ? this.renderDbTab(app) : this.renderExtFallback(2, 'admin-ext2.js');
+        else if (this.subTab === 'settings') body = this.renderSettingsTab ? this.renderSettingsTab(app) : this.renderExtFallback(2, 'admin-ext2.js');
         else body = this.renderTreasuryTab(app);
       } catch (e) {
         body = `<div class="p-4 rounded-2xl bg-rose-500/20 border border-rose-500 text-xs text-rose-200">خطأ عرض: ${app.esc(e.message)}</div>`;
@@ -1214,9 +1288,12 @@
 
       container.innerHTML = `
         <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <h2 class="text-sm font-black text-purple-300"><i class="fa-solid fa-crown me-1 text-amber-400"></i> لوحة سيطرة الإدارة الشاملة</h2>
-            <button onclick="DamanAdmin.loadTabData(DamanAdmin.subTab)" class="px-3 py-1 rounded-xl bg-slate-800 text-amber-300 text-[10px] font-black"><i class="fa-solid fa-rotate me-1"></i>تحديث</button>
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-sm font-black text-purple-300"><i class="fa-solid fa-crown me-1 text-amber-400"></i> لوحة سيطرة الإدارة (v${ADMIN_VER})</h2>
+            <div class="flex gap-1.5">
+              <button onclick="DamanApp.forceClearCacheAndReload()" class="px-2.5 py-1 rounded-xl bg-slate-800 text-sky-300 text-[10px] font-bold">🧹 كاش</button>
+              <button onclick="DamanAdmin.loadTabData(DamanAdmin.subTab)" class="px-3 py-1 rounded-xl bg-slate-800 text-amber-300 text-[10px] font-black"><i class="fa-solid fa-rotate me-1"></i>تحديث</button>
+            </div>
           </div>
           ${pills.length ? `<div class="flex flex-wrap gap-1.5 p-2 rounded-2xl bg-slate-900/90 border border-rose-500/40">${pills.join('')}</div>` : ''}
           <form onsubmit="DamanAdmin.runOmniSearch(event)" class="flex gap-1.5 text-xs">
@@ -1238,5 +1315,11 @@
   };
 
   window.DamanAdmin = AdminMod;
+
+  if (Array.isArray(window.__damanAdminExtQueue)) {
+    window.__damanAdminExtQueue.forEach(([slot, obj]) => AdminMod.registerExtension(slot, obj));
+    window.__damanAdminExtQueue = [];
+  }
+
   if (window.DamanApp) window.DamanApp.registerModule('admin', AdminMod);
 })();
