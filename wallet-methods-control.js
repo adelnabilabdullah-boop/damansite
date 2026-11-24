@@ -30,6 +30,12 @@
       'بنك أخرى'
     ],
 
+    getAccountHolderName(app) {
+      const a = app || window.DamanApp;
+      if (!a || !a.profile) return 'صاحب الحساب المسجّل';
+      return (a.profile.legalName || a.profile.name || a.profile.companyName || 'صاحب الحساب المسجّل').trim();
+    },
+
     // ==================== 1. LOAD & SAVE CONFIG IN FIRESTORE ====================
     async loadConfig() {
       const app = window.DamanApp;
@@ -85,7 +91,37 @@
       });
     },
 
-    // ==================== 2. ADMIN CONTROL CARD INSIDE "💳 محوّل الحسابات" ====================
+    // ==================== 2. WALLET SCREEN MANDATORY SAME-OWNER NOTICE ====================
+    injectWalletScreenOwnershipNotice() {
+      const app = window.DamanApp;
+      if (!app || app.activeTab !== 'wallet') return;
+      const main = document.getElementById('app-main');
+      if (!main || document.getElementById('daman-wallet-owner-rule-banner')) return;
+
+      const root = main.firstElementChild || main;
+      const holderName = this.getAccountHolderName(app);
+
+      const card = document.createElement('div');
+      card.id = 'daman-wallet-owner-rule-banner';
+      card.className = 'mb-3 p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-xs space-y-1 shadow-lg';
+      card.innerHTML = `
+        <div class="font-black text-rose-300 flex items-center gap-1.5">
+          <i class="fa-solid fa-user-shield text-sm"></i>
+          <span>🛡️ شرط أساسي للإيداع والسحب (نفس صاحب الحساب فقط)</span>
+        </div>
+        <p class="text-[10.5px] text-slate-100 leading-relaxed">
+          يُشترط أن يتم <b>الإيداع أو السحب</b> من وإلى محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب الحساب نفسه (${app.esc(holderName)})</b>. يُرفض أي تحويل من أو إلى رقم أو حساب يخص شخصاً آخر.
+        </p>`;
+
+      const slaBanner = document.getElementById('daman-wallet-sla-banner');
+      if (slaBanner && slaBanner.parentNode === root) {
+        root.insertBefore(card, slaBanner.nextSibling);
+      } else {
+        root.insertBefore(card, root.firstElementChild);
+      }
+    },
+
+    // ==================== 3. ADMIN CONTROL CARD INSIDE "💳 محوّل الحسابات" ====================
     renderAdminControlBox(app) {
       const d = this.config.deposit;
       const w = this.config.withdraw;
@@ -100,7 +136,6 @@
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <!-- Deposit Methods Control -->
             <div class="p-2.5 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
               <div class="font-black text-amber-300 text-[11px]">📥 وسائل الإيداع المفعّلة للمستخدمين:</div>
               <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
@@ -117,7 +152,6 @@
               </label>
             </div>
 
-            <!-- Withdraw Methods Control -->
             <div class="p-2.5 rounded-2xl bg-slate-950 border border-sky-500/40 space-y-2">
               <div class="font-black text-sky-300 text-[11px]">📤 وسائل السحب المفعّلة للمستخدمين:</div>
               <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
@@ -145,7 +179,6 @@
       if (!app || !app.isAdmin()) return;
       if (document.getElementById('daman-pmc-admin-box')) return;
 
-      // Check if we are currently viewing the Accounts Switcher sub-tab in Admin
       const isAccountsSubTab =
         window.DamanAdmin?.subTab === 'accounts' ||
         (container && (container.textContent || '').includes('محوّل الحسابات') && (container.querySelector('input[id*="instapay" i], input[id*="bank" i], input[id*="wallet" i]')));
@@ -157,7 +190,75 @@
       }
     },
 
-    // ==================== 3. ENHANCE DEPOSIT MODAL (DYNAMIC 1..3 METHODS) ====================
+    // ==================== 4. MODAL DETECTION & OWNERSHIP DECLARATION ====================
+    detectModalKind(modal) {
+      if (window.DamanWalletSLA && typeof DamanWalletSLA.detectModalKind === 'function') {
+        const k = DamanWalletSLA.detectModalKind(modal);
+        if (k) return k;
+      }
+      if (!modal) return '';
+      const id = (modal.id || '').toLowerCase();
+      if (id.includes('deposit') || id.includes('topup') || id.includes('charge')) return 'deposit';
+      if (id.includes('withdraw') || id.includes('payout')) return 'withdraw';
+      if (id.includes('kyc') || id.includes('post') || id.includes('admin') || id.includes('u360') || id.includes('calc') || id.includes('qr') || id.includes('bday')) {
+        return '';
+      }
+      const header = modal.querySelector('h2, h3, h4');
+      const form = modal.querySelector('form');
+      if (!header || !form || !form.querySelector('input[type="number"]')) return '';
+      const hTxt = (header.textContent || '').trim();
+      if (hTxt.includes('إيداع') || hTxt.includes('شحن المحفظة') || hTxt.includes('شحن رصيد')) return 'deposit';
+      if (hTxt.includes('سحب') || hTxt.includes('تحويل أرباح')) return 'withdraw';
+      return '';
+    },
+
+    injectModalOwnershipNotice(form, kind) {
+      const app = window.DamanApp;
+      if (!app || !form) return;
+      const holderName = this.getAccountHolderName(app);
+      const isDeposit = kind === 'deposit';
+
+      // Inject clear same-owner banner + mandatory declaration checkbox
+      if (!form.querySelector('.daman-same-owner-box')) {
+        const box = document.createElement('div');
+        box.className = 'daman-same-owner-box p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-[11px] leading-relaxed space-y-2';
+        box.innerHTML = `
+          <div class="font-black text-rose-300 flex items-center gap-1.5">
+            <i class="fa-solid fa-user-check"></i>
+            <span>🛡️ تنبيه إلزامي: ${isDeposit ? 'الإيداع' : 'السحب'} بنفس اسم صاحب الحساب فقط</span>
+          </div>
+          <p class="text-[10.5px] text-slate-100">
+            ${isDeposit
+              ? `يجب أن يتم التحويل من رقم محفظة أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب هذا الحساب (${app.esc(holderName)})</b> فقط. أي إيداع محوّل من رقم أو حساب شخص آخر سيتم تعليقه أو رفضه.`
+              : `يجب أن يكون رقم المحفظة أو حساب إنستا باي أو الحساب البنكي المستلم مسجّلاً <b>باسم صاحب هذا الحساب (${app.esc(holderName)})</b> فقط. لا يُسمح بالتحويل لحسابات أطراف أخرى.`}
+          </p>
+          <label class="flex items-start gap-2 pt-1.5 border-t border-rose-500/35 text-[10.5px] font-black text-amber-200 cursor-pointer">
+            <input type="checkbox" required class="accent-amber-500 mt-0.5 shrink-0" />
+            <span>
+              ${isDeposit
+                ? `أقرّ بأن التحويل تم من رقم أو حساب مسجّل باسمي الشخصي (${app.esc(holderName)}) وليس من حساب شخص آخر.`
+                : `أقرّ بأن الرقم أو الحساب البنكي المكتوب صحيح 100% ومسجّل باسمي الشخصي (${app.esc(holderName)}) وليس باسم شخص آخر.`}
+            </span>
+          </label>`;
+
+        const slaNotice = form.querySelector('.daman-modal-sla-notice');
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (slaNotice && slaNotice.parentNode === form) {
+          form.insertBefore(box, slaNotice);
+        } else if (submitBtn && submitBtn.parentNode === form) {
+          form.insertBefore(box, submitBtn);
+        } else {
+          form.appendChild(box);
+        }
+      }
+
+      // Remove duplicate checkbox inside SLA notice on withdraw so user ticks ONE clear unified checkbox
+      if (!isDeposit) {
+        const slaCheckboxRow = form.querySelector('.daman-modal-sla-notice label');
+        if (slaCheckboxRow) slaCheckboxRow.remove();
+      }
+    },
+
     classifyOptionValue(opt) {
       const v = (opt.value || '').toLowerCase();
       const t = (opt.textContent || '').toLowerCase();
@@ -170,6 +271,9 @@
     applyDepositMethodsToModal(modal) {
       const form = modal.querySelector('form');
       if (!form) return;
+
+      this.injectModalOwnershipNotice(form, 'deposit');
+
       const sel = form.querySelector('select');
       if (!sel) return;
 
@@ -191,7 +295,7 @@
       }
     },
 
-    // ==================== 4. ENHANCE WITHDRAW MODAL (ADD BANK ACCOUNT + STRUCTURED FIELDS) ====================
+    // ==================== 5. ENHANCE WITHDRAW MODAL (BANK ACCOUNT + SAME-OWNER FIELDS) ====================
     findWithdrawAccountInput(form) {
       const inputs = Array.from(form.querySelectorAll('input[type="text"], input[type="tel"], input:not([type])'));
       for (const inp of inputs) {
@@ -208,10 +312,12 @@
       const app = window.DamanApp;
       const form = modal.querySelector('form');
       if (!form || !app) return;
+
+      this.injectModalOwnershipNotice(form, 'withdraw');
+
       const sel = form.querySelector('select');
       if (!sel) return;
 
-      // 1. Ensure "🏦 تحويل إلى حساب بنكي" option exists in the Withdraw <select>
       let bankOpt = Array.from(sel.options).find((o) => this.classifyOptionValue(o) === 'bank');
       if (!bankOpt) {
         bankOpt = document.createElement('option');
@@ -220,7 +326,6 @@
         sel.appendChild(bankOpt);
       }
 
-      // 2. Apply Admin enable/disable settings to all 3 withdraw options
       const enabledMap = this.config.withdraw;
       let firstEnabledVal = '';
       Array.from(sel.options).forEach((opt) => {
@@ -237,9 +342,10 @@
         sel.value = firstEnabledVal;
       }
 
-      // 3. Inject structured Bank Account fields right below the standard target account input
       const accInp = this.findWithdrawAccountInput(form);
       if (!accInp) return;
+
+      const holderName = this.getAccountHolderName(app);
 
       let bankBox = document.getElementById('daman-wd-bank-fields');
       if (!bankBox) {
@@ -247,7 +353,7 @@
         bankBox.id = 'daman-wd-bank-fields';
         bankBox.className = 'hidden p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2 text-xs';
         bankBox.innerHTML = `
-          <div class="font-black text-emerald-300 text-[11px]">🏦 بيانات الحساب البنكي المستلم للتحويل:</div>
+          <div class="font-black text-emerald-300 text-[11px]">🏦 بيانات الحساب البنكي المستلم (باسم صاحب الحساب فقط):</div>
           <div>
             <label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label>
             <select id="daman-wd-bank-name" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold">
@@ -255,8 +361,8 @@
             </select>
           </div>
           <div>
-            <label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب بالكامل (كما في البنك) *</label>
-            <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${app.esc(app.profile?.legalName || app.profile?.name || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
+            <label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب البنكي بالكامل (مطابق لاسمك في التطبيق) *</label>
+            <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${app.esc(holderName)}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
           </div>
           <div>
             <label class="block text-[10px] text-slate-300 mb-1">رقم الحساب البنكي أو رقم الـ IBAN *</label>
@@ -338,24 +444,24 @@
 
     scanOpenModals() {
       document.querySelectorAll('.daman-modal:not(.hidden)').forEach((modal) => {
-        const kind = window.DamanWalletSLA?.detectModalKind ? DamanWalletSLA.detectModalKind(modal) : '';
+        const kind = this.detectModalKind(modal);
         if (kind === 'deposit') this.applyDepositMethodsToModal(modal);
         else if (kind === 'withdraw') this.applyWithdrawMethodsToModal(modal);
       });
     },
 
-    // ==================== 5. UPDATE HEALTH DIAGNOSTIC TO 22/22 ====================
+    // ==================== 6. UPDATE HEALTH DIAGNOSTIC TO 22/22 ====================
     patchHealthDiagnostic() {
       const app = window.DamanApp;
-      if (!app || !window.DamanSync || DamanSync._healthV44Patched) return;
-      DamanSync._healthV44Patched = true;
+      if (!app || !window.DamanSync || DamanSync._healthV45Patched) return;
+      DamanSync._healthV45Patched = true;
 
       DamanSync.openHealthReportModal = function () {
         const checks = [
           ['النواة الأساسية (app-core)', !!window.DamanApp],
           ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
           ['يوم عمل + رقم مرجعي اختياري (wallet-sla)', !!window.DamanWalletSLA],
-          ['تحكم وسائل الإيداع والسحب + السحب البنكي (v44)', !!window.DamanWalletMethods],
+          ['وسائل الإيداع والسحب + تنبيه نفس صاحب الحساب (v45)', !!window.DamanWalletMethods],
           ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
           ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
           ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
@@ -391,7 +497,7 @@
         m.innerHTML = `
           <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v44 (${passed}/${checks.length})</h3>
+              <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v45 (${passed}/${checks.length})</h3>
               <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-1.5">
@@ -425,16 +531,29 @@
         };
       }
 
+      if (typeof app.renderCurrentTab === 'function' && !app._pmcWalletTabHooked) {
+        app._pmcWalletTabHooked = true;
+        const origRenderTab = app.renderCurrentTab.bind(app);
+        app.renderCurrentTab = () => {
+          origRenderTab();
+          if (app.activeTab === 'wallet') setTimeout(() => this.injectWalletScreenOwnershipNotice(), 90);
+        };
+      }
+
       if (typeof MutationObserver !== 'undefined') {
         this._obs = new MutationObserver(() => {
           clearTimeout(this._timer);
-          this._timer = setTimeout(() => this.scanOpenModals(), 70);
+          this._timer = setTimeout(() => {
+            if (window.DamanApp?.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
+            this.scanOpenModals();
+          }, 70);
         });
         this._obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       }
 
       setTimeout(() => {
         this.patchHealthDiagnostic();
+        if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
         this.scanOpenModals();
         if (app.activeTab === 'admin') {
           const main = document.getElementById('app-main');
