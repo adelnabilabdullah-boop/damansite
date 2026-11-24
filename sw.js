@@ -16,7 +16,8 @@ const CORE_ASSETS = [
   './admin.js?v=28',
   './admin-ext.js?v=28',
   './admin-ext2.js?v=28',
-  './categories-ads.js?v=33'
+  './categories-ads.js?v=30',
+  './categories-pack.js?v=33'
 ];
 
 self.addEventListener('install', (event) => {
