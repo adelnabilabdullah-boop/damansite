@@ -32,7 +32,33 @@
       return window.DamanWalletSLA?.slaConfig?.durationText || 'يوم عمل واحد (24 ساعة عمل)';
     },
 
-    // ==================== 1. LOAD SETTINGS & RECEIVING ACCOUNTS ====================
+    // ==================== CLEAN BUTTON LABELS: "إيداع" & "سحب" ONLY ====================
+    cleanDepositWithdrawButtons() {
+      const app = window.DamanApp;
+      const main = document.getElementById('app-main');
+      if (!main) return;
+      const isEn = app && app.lang === 'en';
+
+      main.querySelectorAll('button').forEach((btn) => {
+        if (btn.closest('.daman-modal')) return;
+        const oc = btn.getAttribute('onclick') || '';
+        const txt = (btn.textContent || '').trim();
+
+        if (oc.includes('openDepositModal') || txt.includes('شحن / إيداع') || /إيداع\s*\(/.test(txt)) {
+          const targetLabel = isEn ? 'Deposit' : 'إيداع';
+          if (txt !== targetLabel) {
+            btn.innerHTML = `<i class="fa-solid fa-circle-plus me-1"></i> ${targetLabel}`;
+          }
+        } else if (oc.includes('openWithdrawModal') || txt.includes('سحب كاش') || /سحب\s*\(/.test(txt)) {
+          const targetLabel = isEn ? 'Withdraw' : 'سحب';
+          if (txt !== targetLabel) {
+            btn.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket me-1"></i> ${targetLabel}`;
+          }
+        }
+      });
+    },
+
+    // ==================== 1. LOAD & SAVE SETTINGS & RECEIVING ACCOUNTS ====================
     async loadAllSettings() {
       const app = window.DamanApp;
       if (!app || !app.db) return;
@@ -49,13 +75,12 @@
           if (d.withdraw) this.config.withdraw = Object.assign({}, this.config.withdraw, d.withdraw);
         }
 
-        const mergedAcc = Object.assign(
+        this.accountsInfo = Object.assign(
           {},
           app.appConfig || {},
           cfgSnap && cfgSnap.exists ? cfgSnap.data() : {},
           accSnap && accSnap.exists ? accSnap.data() : {}
         );
-        this.accountsInfo = mergedAcc;
       } catch (e) {}
     },
 
@@ -96,7 +121,7 @@
         const depCnt = Object.values(dep).filter(Boolean).length;
         const wdCnt = Object.values(wd).filter(Boolean).length;
         await app.logAudit('payment_methods_ctrl', `تحديث وسائل الإيداع (${depCnt}/3) والسحب (${wdCnt}/3)`);
-        app.toast(`تم حفظ وتفعيل وسائل الإيداع (${depCnt}) والسحب (${wdCnt}) بنجاح ✅`, 'success');
+        app.toast('تم حفظ وتفعيل إعدادات الإيداع والسحب بنجاح ✅', 'success');
       });
     },
 
@@ -151,7 +176,7 @@
       }
     },
 
-    // ==================== 3. DEPOSIT MODAL (3 METHODS + OPTIONAL REF + SAME OWNER + 1 BUSINESS DAY) ====================
+    // ==================== 3. DEPOSIT MODAL ====================
     getReceivingAccountDetails(method) {
       const c = Object.assign({}, this.accountsInfo, window.DamanApp?.appConfig || {});
       if (method === 'wallet') {
@@ -236,7 +261,7 @@
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs shadow-2xl">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> إيداع وشحن رصيد المحفظة</h3>
+            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> إيداع</h3>
             <button type="button" onclick="document.getElementById('daman-deposit-modal').classList.add('hidden')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
@@ -275,7 +300,6 @@
               <div id="daman-dep-receipt-preview" class="mt-1.5"></div>
             </div>
 
-            <!-- Mandatory Same Account Owner Banner + Declaration -->
             <div class="p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-[11px] leading-relaxed space-y-2">
               <div class="font-black text-rose-300 flex items-center gap-1.5">
                 <i class="fa-solid fa-user-check"></i>
@@ -290,13 +314,12 @@
               </label>
             </div>
 
-            <!-- 1 Business Day SLA Notice -->
             <div class="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-[10.5px] text-amber-100 leading-relaxed">
               <b class="text-amber-300">⏱️ مدة التنفيذ:</b> يتم مراجعة إيصال التحويل وإضافة الرصيد إلى محفظتك خلال <b>${app.esc(slaText)}</b>.
             </div>
 
             <button type="submit" class="w-full py-3 rounded-2xl bg-emerald-500 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20">
-              <i class="fa-solid fa-paper-plane me-1"></i> إرسال طلب الإيداع للمراجعة
+              <i class="fa-solid fa-paper-plane me-1"></i> إرسال طلب الإيداع
             </button>
           </form>
         </div>`;
@@ -379,7 +402,7 @@
       });
     },
 
-    // ==================== 4. WITHDRAW MODAL (3 METHODS INCLUDING BANK ACCOUNT + SAME OWNER + 1 BUSINESS DAY) ====================
+    // ==================== 4. WITHDRAW MODAL ====================
     updateWithdrawMethodUI() {
       const method = document.getElementById('daman-wd-method')?.value || 'wallet';
       const standardBox = document.getElementById('daman-wd-standard-box');
@@ -423,7 +446,7 @@
 
       const isFrozen = app.profile?.status === 'frozen' || !!app.profile?.frozen;
       if (isFrozen) {
-        return app.toast('❄️ حسابك مجمّد مؤقتاً — لا يمكن سحب الأرباح لحين انتهاء المراجعة الإدارية.', 'error');
+        return app.toast('❄️ حسابك مجمّد مؤقتاً — لا يمكن السحب لحين انتهاء المراجعة الإدارية.', 'error');
       }
 
       if (app.appConfig?.requireKycForWithdraw && app.profile?.kycStatus !== 'verified') {
@@ -457,7 +480,7 @@
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 border-sky-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs shadow-2xl">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-black text-sky-400"><i class="fa-solid fa-circle-arrow-up me-1"></i> سحب الأرباح من المحفظة</h3>
+            <h3 class="text-sm font-black text-sky-400"><i class="fa-solid fa-circle-arrow-up me-1"></i> سحب</h3>
             <button type="button" onclick="document.getElementById('daman-withdraw-modal').classList.add('hidden')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
@@ -474,13 +497,11 @@
               </select>
             </div>
 
-            <!-- Standard Wallet / InstaPay input -->
             <div id="daman-wd-standard-box">
               <label id="daman-wd-target-lbl" class="block text-[10.5px] text-slate-300 font-bold mb-1">2. رقم المحفظة الإلكترونية المستلمة *</label>
               <input id="daman-wd-target" type="text" required value="${app.esc(app.profile?.phone || '')}" placeholder="010xxxxxxxx" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
             </div>
 
-            <!-- Structured Bank Account Fields -->
             <div id="daman-wd-bank-box" class="hidden p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2">
               <div class="font-black text-emerald-300 text-[11px]">🏦 بيانات الحساب البنكي المستلم (باسم صاحب الحساب فقط):</div>
               <div>
@@ -507,7 +528,6 @@
               <input id="daman-wd-amount" type="number" min="${minWd}" max="${Math.floor(avail)}" step="1" required placeholder="الحد الأدنى ${minWd} ج.م" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-emerald-300 font-black text-base text-center" />
             </div>
 
-            <!-- Mandatory Same Account Owner Banner + Declaration -->
             <div class="p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-[11px] leading-relaxed space-y-2">
               <div class="font-black text-rose-300 flex items-center gap-1.5">
                 <i class="fa-solid fa-user-check"></i>
@@ -522,7 +542,6 @@
               </label>
             </div>
 
-            <!-- 1 Business Day SLA Notice -->
             <div class="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-[10.5px] text-amber-100 leading-relaxed">
               <b class="text-amber-300">⏱️ مدة التنفيذ:</b> يتم مراجعة طلب السحب وتحويل المبلغ إلى حسابك خلال <b>${app.esc(slaText)}</b>.
             </div>
@@ -572,7 +591,6 @@
           const today = app.todayLocal();
           const methodLabels = { wallet: 'محفظة إلكترونية', instapay: 'إنستا باي', bank: '🏦 حساب بنكي' };
 
-          // Atomic Firestore batch matching strict mathematical balance lock in Firestore Rules
           const batch = app.db.batch();
           const userRef = app.db.collection('users').doc(app.user.uid);
           const reqRef = app.db.collection('walletRequests').doc();
@@ -615,7 +633,7 @@
 
           await app.sendNotification(
             'ADMIN',
-            '📤 طلب سحب أرباح جديد',
+            '📤 طلب سحب جديد',
             `${holderName} طلب سحب ${app.fmtMoney(amount)} ج.م عبر ${methodLabels[method] || method} (${targetAccount}).`
           ).catch(() => {});
 
@@ -634,6 +652,8 @@
       if (!app || app.activeTab !== 'wallet') return;
       const main = document.getElementById('app-main');
       if (!main) return;
+
+      this.cleanDepositWithdrawButtons();
 
       if (!document.getElementById('daman-wallet-owner-rule-banner')) {
         const root = main.firstElementChild || main;
@@ -656,7 +676,6 @@
         else root.insertBefore(card, root.firstElementChild);
       }
 
-      // Fix bank label display in history cards
       main.querySelectorAll('.glass-card, .rounded-xl, .rounded-2xl').forEach((card) => {
         if (card.dataset.bankLabelFixed) return;
         const txt = card.textContent || '';
@@ -754,13 +773,11 @@
 
       this.loadAllSettings();
 
-      // Override DamanWallet deposit & withdraw methods directly
       if (window.DamanWallet) {
         DamanWallet.openDepositModal = () => this.openDepositModal();
         DamanWallet.openWithdrawModal = () => this.openWithdrawModal();
       }
 
-      // Capture clicks on any Deposit/Withdraw button in the UI so it always opens our unified modals
       document.addEventListener('click', (ev) => {
         const btn = ev.target && ev.target.closest && ev.target.closest('button');
         if (!btn || btn.closest('.daman-modal')) return;
@@ -790,8 +807,17 @@
         const origRenderTab = app.renderCurrentTab.bind(app);
         app.renderCurrentTab = () => {
           origRenderTab();
-          if (app.activeTab === 'wallet') setTimeout(() => this.injectWalletScreenOwnershipNotice(), 90);
+          setTimeout(() => {
+            this.cleanDepositWithdrawButtons();
+            if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
+          }, 80);
         };
+      }
+
+      const mainEl = document.getElementById('app-main');
+      if (mainEl && typeof MutationObserver !== 'undefined') {
+        const obs = new MutationObserver(() => this.cleanDepositWithdrawButtons());
+        obs.observe(mainEl, { childList: true, subtree: true });
       }
 
       setTimeout(() => {
@@ -799,16 +825,14 @@
           DamanWallet.openDepositModal = () => this.openDepositModal();
           DamanWallet.openWithdrawModal = () => this.openWithdrawModal();
         }
+        this.cleanDepositWithdrawButtons();
         if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
-        if (app.activeTab === 'admin') {
-          const main = document.getElementById('app-main');
-          if (main) this.injectAdminAccountsControl(main, app);
-        }
-      }, 700);
+        if (app.activeTab === 'admin' && mainEl) this.injectAdminAccountsControl(mainEl, app);
+      }, 650);
     }
   };
 
   window.DamanWalletMethods = DepositWithdrawEngine;
-  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', () => setTimeout(() => DepositWithdrawEngine.boot(), 700));
-  else setTimeout(() => DepositWithdrawEngine.boot(), 700);
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', () => setTimeout(() => DepositWithdrawEngine.boot(), 650));
+  else setTimeout(() => DepositWithdrawEngine.boot(), 650);
 })();
