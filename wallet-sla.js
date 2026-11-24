@@ -41,7 +41,15 @@
       this.enhanceWalletTab();
     },
 
-    // ==================== 1. WALLET TAB SLA BANNER & PENDING BADGES ====================
+    openFinancialSupport() {
+      if (window.DamanChat && typeof DamanChat.openSupportChat === 'function') {
+        DamanChat.openSupportChat();
+      } else if (window.DamanApp) {
+        DamanApp.switchTab('chat');
+      }
+    },
+
+    // ==================== 1. WALLET TAB SLA BANNER, SUPPORT BUTTON & PENDING BADGES ====================
     enhanceWalletTab() {
       const app = window.DamanApp;
       if (!app || app.activeTab !== 'wallet') return;
@@ -52,16 +60,21 @@
         const root = main.firstElementChild || main;
         const box = document.createElement('div');
         box.id = 'daman-wallet-sla-banner';
-        box.className = 'mb-3 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-xs flex items-start justify-between gap-2';
+        box.className = 'mb-3 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-xs space-y-2';
         box.innerHTML = `
-          <div class="flex items-start gap-2 min-w-0">
-            <i class="fa-solid fa-clock text-amber-400 text-sm mt-0.5 shrink-0"></i>
-            <div class="space-y-0.5 leading-relaxed">
-              <div class="font-black text-amber-300">⏱️ مدة تنفيذ الإيداع والسحب: خلال ${app.esc(this.slaConfig.durationText)}</div>
-              <div class="text-[10.5px] text-slate-200">تُراجع جميع طلبات شحن المحفظة وسحب الأرباح وتُنفّذ رسمياً خلال <b>${app.esc(this.slaConfig.durationText)}</b> (عدا الإجازات الرسمية).</div>
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-start gap-2 min-w-0">
+              <i class="fa-solid fa-clock text-amber-400 text-sm mt-0.5 shrink-0"></i>
+              <div class="space-y-0.5 leading-relaxed">
+                <div class="font-black text-amber-300">⏱️ مدة تنفيذ الإيداع والسحب: خلال ${app.esc(this.slaConfig.durationText)}</div>
+                <div class="text-[10.5px] text-slate-200">تُراجع جميع طلبات شحن المحفظة وسحب الأرباح وتُنفّذ رسمياً خلال <b>${app.esc(this.slaConfig.durationText)}</b> (عدا الإجازات الرسمية).</div>
+              </div>
             </div>
-          </div>
-          ${app.isAdmin() ? `<button type="button" onclick="DamanWalletSLA.editSlaConfigAdmin()" class="px-2 py-1 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 text-[9.5px] font-black shrink-0">تعديل</button>` : ''}`;
+            <div class="flex items-center gap-1 shrink-0">
+              ${app.isAdmin() ? `<button type="button" onclick="DamanWalletSLA.editSlaConfigAdmin()" class="px-2 py-1 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 text-[9.5px] font-black">تعديل</button>` : ''}
+              <button type="button" onclick="DamanWalletSLA.openFinancialSupport()" class="px-2.5 py-1 rounded-lg bg-sky-500/20 border border-sky-500/50 text-sky-300 text-[9.5px] font-black">💬 دعم</button>
+            </div>
+          </div>`;
 
         const calcBar = document.getElementById('daman-wallet-calc-bar');
         if (calcBar && calcBar.parentNode === root) root.insertBefore(box, calcBar.nextSibling);
@@ -85,7 +98,7 @@
       });
     },
 
-    // ==================== 2. DEPOSIT & WITHDRAW MODALS SLA NOTICE ====================
+    // ==================== 2. DEPOSIT & WITHDRAW MODALS (OPTIONAL REF + QUICK AMOUNTS + SLA + CONFIRM) ====================
     detectModalKind(modal) {
       if (!modal) return '';
       const id = (modal.id || '').toLowerCase();
@@ -108,6 +121,122 @@
       return '';
     },
 
+    findDepositRefInput(form) {
+      const inputs = Array.from(form.querySelectorAll('input[type="text"], input:not([type])'));
+      for (const inp of inputs) {
+        const id = (inp.id || '').toLowerCase();
+        const name = (inp.name || '').toLowerCase();
+        const ph = (inp.placeholder || '').toLowerCase();
+        let lblText = '';
+        if (inp.id) {
+          const forLbl = form.querySelector(`label[for="${inp.id}"]`);
+          if (forLbl) lblText = forLbl.textContent || '';
+        }
+        if (!lblText && inp.previousElementSibling && inp.previousElementSibling.tagName === 'LABEL') {
+          lblText = inp.previousElementSibling.textContent || '';
+        }
+        if (!lblText && inp.parentElement) {
+          const pLbl = inp.parentElement.querySelector('label');
+          if (pLbl) lblText = pLbl.textContent || '';
+        }
+        const hay = `${id} ${name} ${ph} ${lblText}`.toLowerCase();
+        const isRef = hay.includes('ref') || hay.includes('مرجع') || hay.includes('العملية') || hay.includes('العمليه') || hay.includes('الإيصال') || hay.includes('الايصال');
+        const isPhoneOnly = (hay.includes('هاتف') || hay.includes('موبايل') || hay.includes('المحول منه') || hay.includes('wallet') || hay.includes('phone')) && !isRef;
+        if (isRef && !isPhoneOnly) return { inp, lblText };
+      }
+      return null;
+    },
+
+    makeDepositRefOptional(modal, form) {
+      const found = this.findDepositRefInput(form);
+      if (!found || found.inp.dataset.optRefApplied) return;
+      const { inp } = found;
+      inp.dataset.optRefApplied = '1';
+
+      // 1. Remove HTML required constraint
+      inp.removeAttribute('required');
+      inp.required = false;
+      inp.placeholder = 'الرقم المرجعي للتحويل (اختياري — يمكنك تركه فارغاً)';
+
+      // 2. Update label text cleanly to show (اختياري) instead of *
+      let lbl = inp.id ? form.querySelector(`label[for="${inp.id}"]`) : null;
+      if (!lbl && inp.previousElementSibling && inp.previousElementSibling.tagName === 'LABEL') lbl = inp.previousElementSibling;
+      if (!lbl && inp.parentElement) lbl = inp.parentElement.querySelector('label');
+      if (lbl && !lbl.textContent.includes('اختياري')) {
+        lbl.innerHTML = lbl.innerHTML.replace(/\s*\*/g, '') + ' <span class="text-emerald-400 font-bold">(اختياري)</span>';
+      }
+
+      // 3. Clear auto-generated fallback if user focuses the field again
+      inp.addEventListener('focus', () => {
+        if (inp.dataset.autoFilledRef === '1' && inp.value.startsWith('بدون مرجع -')) {
+          inp.value = '';
+          delete inp.dataset.autoFilledRef;
+        }
+      });
+
+      // 4. Capture-phase submit handler: if blank, inject unique fallback so any legacy JS validation or duplicate check passes seamlessly
+      if (!form.dataset.optRefSubmitBound) {
+        form.dataset.optRefSubmitBound = '1';
+        form.addEventListener('submit', () => {
+          if (!inp.value.trim()) {
+            inp.value = `بدون مرجع - ${String(Date.now()).slice(-6)}`;
+            inp.dataset.autoFilledRef = '1';
+            // If modal stays open (e.g., user forgot receipt image) and submit button isn't busy, clear it cleanly
+            setTimeout(() => {
+              const btn = form.querySelector('button[type="submit"]');
+              if (!modal.classList.contains('hidden') && (!btn || !btn.disabled) && inp.dataset.autoFilledRef === '1') {
+                inp.value = '';
+                delete inp.dataset.autoFilledRef;
+              }
+            }, 2500);
+          }
+        }, true);
+      }
+    },
+
+    injectQuickDepositAmounts(form) {
+      if (form.querySelector('.daman-quick-amts')) return;
+      const numInp = form.querySelector('input[type="number"]');
+      if (!numInp) return;
+
+      const presets = [500, 1000, 5000, 10000, 25000];
+      const row = document.createElement('div');
+      row.className = 'daman-quick-amts flex items-center gap-1 overflow-x-auto pt-1.5';
+      row.innerHTML = presets.map((val) => `
+        <button type="button" data-qamt="${val}" class="shrink-0 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-400 text-amber-300 font-black text-[10px]">+${val.toLocaleString('en-US')}</button>`).join('');
+
+      row.addEventListener('click', (ev) => {
+        const b = ev.target.closest('button[data-qamt]');
+        if (!b) return;
+        numInp.value = b.getAttribute('data-qamt');
+        numInp.dispatchEvent(new Event('input', { bubbles: true }));
+        numInp.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      numInp.insertAdjacentElement('afterend', row);
+    },
+
+    injectQuickCopyForAccounts(modal) {
+      if (modal.querySelector('.daman-dep-copy-bar')) return;
+      // Skip if the modal already has built-in copy buttons
+      const existingCopy = Array.from(modal.querySelectorAll('button')).some((b) => (b.textContent || '').includes('نسخ'));
+      if (existingCopy) return;
+
+      const txt = modal.innerText || '';
+      const phones = Array.from(new Set(txt.match(/01[0125]\d{8}/g) || []));
+      if (!phones.length) return;
+
+      const form = modal.querySelector('form');
+      if (!form) return;
+      const bar = document.createElement('div');
+      bar.className = 'daman-dep-copy-bar flex flex-wrap gap-1.5 pb-1';
+      bar.innerHTML = phones.slice(0, 2).map((ph) => `
+        <button type="button" onclick="navigator.clipboard.writeText('${ph}'); DamanApp.toast('تم نسخ الرقم ${ph} ✅','success')" class="px-2.5 py-1 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 font-black text-[10px]">
+          <i class="fa-regular fa-copy me-1"></i> نسخ الرقم (${ph})
+        </button>`).join('');
+      form.insertBefore(bar, form.firstElementChild);
+    },
+
     enhanceOpenWalletModals() {
       const app = window.DamanApp;
       if (!app) return;
@@ -118,10 +247,17 @@
         const form = modal.querySelector('form');
         if (!form) return;
 
+        const isDeposit = kind === 'deposit';
+
+        if (isDeposit) {
+          this.makeDepositRefOptional(modal, form);
+          this.injectQuickDepositAmounts(form);
+          this.injectQuickCopyForAccounts(modal);
+        }
+
         if (!form.querySelector('.daman-modal-sla-notice')) {
-          const isDeposit = kind === 'deposit';
           const notice = document.createElement('div');
-          notice.className = `daman-modal-sla-notice p-3 rounded-2xl border text-[11px] leading-relaxed space-y-1 ${
+          notice.className = `daman-modal-sla-notice p-3 rounded-2xl border text-[11px] leading-relaxed space-y-1.5 ${
             isDeposit
               ? 'bg-amber-500/15 border-amber-500/50 text-amber-100'
               : 'bg-rose-500/15 border-rose-500/50 text-rose-100'
@@ -131,7 +267,12 @@
               <i class="fa-solid fa-clock"></i>
               <span>⏱️ تنبيه هام: يتم تنفيذ الطلب خلال ${app.esc(this.slaConfig.durationText)}</span>
             </div>
-            <p class="text-[10.5px]">${app.esc(isDeposit ? this.slaConfig.depositNote : this.slaConfig.withdrawNote)}</p>`;
+            <p class="text-[10.5px]">${app.esc(isDeposit ? this.slaConfig.depositNote : this.slaConfig.withdrawNote)}</p>
+            ${!isDeposit ? `
+              <label class="flex items-start gap-2 pt-1.5 border-t border-rose-500/30 text-[10.5px] font-black text-white cursor-pointer">
+                <input type="checkbox" required class="accent-rose-500 mt-0.5 shrink-0" />
+                <span>أؤكد أن رقم المحفظة أو حساب إنستا باي / البنك المكتوب صحيح 100% وعلى مسؤوليتي الشخصية.</span>
+              </label>` : ''}`;
 
           const submitBtn = form.querySelector('button[type="submit"]');
           if (submitBtn && submitBtn.parentNode === form) {
@@ -141,7 +282,6 @@
           }
         }
 
-        // Wait up to 15s for modal to actually close after receipt upload finishes
         if (!form.dataset.slaSubmitBound) {
           form.dataset.slaSubmitBound = '1';
           form.addEventListener('submit', () => {
@@ -164,7 +304,6 @@
       const app = window.DamanApp;
       if (!app) return;
 
-      // Fix 1: Save idExpiryDate AFTER #daman-kyc-modal closes (never overwritten by slow image uploads)
       if (!this._kycExpiryReliableBound) {
         this._kycExpiryReliableBound = true;
         document.addEventListener('submit', (ev) => {
@@ -177,7 +316,7 @@
           let tries = 0;
           const waitClose = setInterval(() => {
             tries++;
-            if (tries > 75) return clearInterval(waitClose); // up to 30s for slow connections
+            if (tries > 75) return clearInterval(waitClose);
             if (modal.classList.contains('hidden')) {
               clearInterval(waitClose);
               setTimeout(async () => {
@@ -193,7 +332,6 @@
         });
       }
 
-      // Fix 2: Separate Birthday Greeting from Wallet Self-Credit (resilient against strict Firestore Rules)
       if (window.DamanKycBdayQR && !DamanKycBdayQR._rulesResilientV41) {
         DamanKycBdayQR._rulesResilientV41 = true;
         DamanKycBdayQR.checkAndCelebrateUserBirthday = async function () {
@@ -244,7 +382,6 @@
               }).catch(() => {});
               giftSummary = `🎁 هدية عيد ميلادك: تم إضافة ${app.fmtMoney(giftVal)} ج.م إلى محفظتك مجاناً!`;
             } catch (err) {
-              // Firestore rules prevented self-credit -> notify Admin to grant in 1 click!
               giftSummary = `🎁 هدية عيد ميلادك (${app.fmtMoney(giftVal)} ج.م) جاري تفعيلها فوراً من الإدارة!`;
               await app.sendNotification('ADMIN', '🎂 عيد ميلاد عضو اليوم — يستحق هديته', `اليوم عيد ميلاد ${userName} — الهدية المقررة: ${app.fmtMoney(giftVal)} ج.م (من لوحة أعياد الميلاد والهدايا).`).catch(() => {});
             }
@@ -287,7 +424,6 @@
         };
       }
 
-      // Preserve green badge styling on "🩺 فحص الترابط" across all dynamic admin tabs
       if (window.DamanAdmin && typeof DamanAdmin.render === 'function' && !DamanAdmin._healthStylePreservedV41) {
         DamanAdmin._healthStylePreservedV41 = true;
         const origAdmRender = DamanAdmin.render.bind(DamanAdmin);
@@ -300,13 +436,13 @@
         };
       }
 
-      if (window.DamanSync && typeof DamanSync.openHealthReportModal === 'function' && !DamanSync._healthV41Patched) {
-        DamanSync._healthV41Patched = true;
+      if (window.DamanSync && typeof DamanSync.openHealthReportModal === 'function' && !DamanSync._healthV42Patched) {
+        DamanSync._healthV42Patched = true;
         DamanSync.openHealthReportModal = function () {
           const checks = [
             ['النواة الأساسية (app-core)', !!window.DamanApp],
             ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
-            ['تنبيه يوم عمل + حماية التوقيت (wallet-sla v41)', !!window.DamanWalletSLA],
+            ['يوم عمل + رقم مرجعي اختياري + تأكيد السحب (wallet-sla v42)', !!window.DamanWalletSLA],
             ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
             ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
             ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
@@ -342,7 +478,7 @@
           m.innerHTML = `
             <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
               <div class="flex items-center justify-between gap-2">
-                <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v41 (${passed}/${checks.length})</h3>
+                <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v42 (${passed}/${checks.length})</h3>
                 <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
               </div>
               <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] flex items-center justify-between">
