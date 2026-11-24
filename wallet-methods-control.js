@@ -3,13 +3,12 @@
     _booted: false,
     _obs: null,
     _timer: null,
-    _unsubConfig: null,
-    _hasSavedPmcDoc: false,
+    _unsubAppCfg: null,
     _topVerifyTriggerEl: null,
     _topVerifyOnclick: '',
     config: {
-      deposit: { wallet: true, instapay: true, bank: true },
-      withdraw: { wallet: true, instapay: true, bank: true }
+      deposit: { vodafone_cash: true, instapay: true, bank: true },
+      withdraw: { vodafone_cash: true, instapay: true, bank: true }
     },
 
     EGYPT_BANKS: [
@@ -50,7 +49,19 @@
       } catch (e) {}
     },
 
-    // ==================== 1. UNIFY CONTRACT VERIFY (HIDE FULL TOP BANNER -> POWER BOTTOM CARD) ====================
+    // ==================== 1. PATCH channelShort FOR BANK ====================
+    patchChannelShort() {
+      if (window.DamanWallet && typeof DamanWallet.channelShort === 'function' && !DamanWallet._bankShortPatchedV56) {
+        DamanWallet._bankShortPatchedV56 = true;
+        const origShort = DamanWallet.channelShort.bind(DamanWallet);
+        DamanWallet.channelShort = function (ch) {
+          if (ch === 'bank') return '🏦 تحويل بنكي';
+          return origShort(ch);
+        };
+      }
+    },
+
+    // ==================== 2. UNIFY CONTRACT VERIFY (HIDE FULL TOP BANNER -> POWER BOTTOM CARD) ====================
     findTopVerifyBanner(main) {
       if (!main) return null;
       const existing = main.querySelector('[data-daman-hidden-top-verify="1"]');
@@ -60,7 +71,6 @@
       let best = null;
       let bestLen = Infinity;
 
-      // Pass 1: Find the smallest container holding BOTH title AND "فحص الآن" button
       for (const el of candidates) {
         if (el.id === 'app-main' || el.closest('.daman-modal')) continue;
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -74,7 +84,6 @@
       }
       if (best) return best;
 
-      // Pass 2: Fallback to closest card wrapper around the title
       for (const el of candidates) {
         if (el.id === 'app-main' || el.closest('.daman-modal')) continue;
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -128,17 +137,10 @@
 
     openUnifiedContractVerify() {
       if (this._topVerifyTriggerEl && document.body.contains(this._topVerifyTriggerEl)) {
-        try {
-          this._topVerifyTriggerEl.click();
-          return;
-        } catch (e) {}
+        try { this._topVerifyTriggerEl.click(); return; } catch (e) {}
       }
-
       if (this._topVerifyOnclick) {
-        try {
-          new Function(this._topVerifyOnclick)();
-          return;
-        } catch (e) {}
+        try { new Function(this._topVerifyOnclick)(); return; } catch (e) {}
       }
 
       const secMod = window.DamanSecurityMod;
@@ -154,11 +156,7 @@
         const fnKey =
           preferred.find((k) => typeof secMod[k] === 'function') ||
           Object.keys(secMod).find((k) => typeof secMod[k] === 'function' && /open/i.test(k) && /(verify|contract|check|qr)/i.test(k));
-
-        if (fnKey) {
-          secMod[fnKey]();
-          return;
-        }
+        if (fnKey) { secMod[fnKey](); return; }
       }
 
       if (window.DamanShareQR && typeof DamanShareQR.openVerifyModal === 'function') {
@@ -168,99 +166,90 @@
       }
     },
 
-    // ==================== 2. REAL-TIME SYNC WITH FIRESTORE & ADMIN 6 TOGGLES ====================
-    applyFlagsFromAppConfig(ac) {
-      if (!ac || typeof ac !== 'object') return;
-      if (typeof ac.enableDepositCash === 'boolean') this.config.deposit.wallet = ac.enableDepositCash;
-      if (typeof ac.enableDepositInstapay === 'boolean') this.config.deposit.instapay = ac.enableDepositInstapay;
-      if (typeof ac.enableDepositBank === 'boolean') this.config.deposit.bank = ac.enableDepositBank;
-      if (typeof ac.enableWithdrawCash === 'boolean') this.config.withdraw.wallet = ac.enableWithdrawCash;
-      if (typeof ac.enableWithdrawInstapay === 'boolean') this.config.withdraw.instapay = ac.enableWithdrawInstapay;
-      if (typeof ac.enableWithdrawBank === 'boolean') this.config.withdraw.bank = ac.enableWithdrawBank;
+    // ==================== 3. LIVE SYNC WITH settings/appConfig (depositChannels & withdrawChannels) ====================
+    applyChannelsFromCfg(cfg) {
+      if (!cfg || typeof cfg !== 'object') return;
+      const dc = cfg.depositChannels || {};
+      const wc = cfg.withdrawChannels || {};
+
+      this.config.deposit = {
+        vodafone_cash: dc.vodafone_cash !== false,
+        instapay: dc.instapay !== false,
+        bank: dc.bank !== false
+      };
+      this.config.withdraw = {
+        vodafone_cash: wc.vodafone_cash !== false,
+        instapay: wc.instapay !== false,
+        bank: wc.bank !== false
+      };
     },
 
     startConfigListener() {
       const app = window.DamanApp;
       if (!app || !app.db) return;
 
-      this.applyFlagsFromAppConfig(app.appConfig);
+      this.applyChannelsFromCfg(app.appConfig);
 
-      if (this._unsubConfig) {
-        try { this._unsubConfig(); } catch (e) {}
+      if (this._unsubAppCfg) {
+        try { this._unsubAppCfg(); } catch (e) {}
       }
 
-      this._unsubConfig = app.db
+      this._unsubAppCfg = app.db
         .collection('settings')
-        .doc('paymentMethodsControl')
+        .doc('appConfig')
         .onSnapshot(
           (snap) => {
             if (snap.exists) {
-              this._hasSavedPmcDoc = true;
-              const d = snap.data() || {};
-              if (d.deposit) this.config.deposit = Object.assign({}, this.config.deposit, d.deposit);
-              if (d.withdraw) this.config.withdraw = Object.assign({}, this.config.withdraw, d.withdraw);
+              const data = snap.data() || {};
+              app.appConfig = Object.assign({}, app.appConfig || {}, data);
+              this.applyChannelsFromCfg(data);
               this.syncAdminCheckboxesFromConfig();
               this.scanOpenModals();
-            } else {
-              // Fallback read from appConfig if paymentMethodsControl isn't created yet
-              app.db.collection('settings').doc('appConfig').get().then((cfgSnap) => {
-                if (cfgSnap && cfgSnap.exists && !this._hasSavedPmcDoc) {
-                  this.applyFlagsFromAppConfig(cfgSnap.data());
-                  this.scanOpenModals();
-                }
-              }).catch(() => {});
             }
           },
           () => {}
         );
     },
 
-    async persistConfigToFirestore(silent = false) {
+    async persistChannelsToAppConfig(silent = false) {
       const app = window.DamanApp;
       if (!app || !app.db || !app.isAdmin || !app.isAdmin()) return;
 
       const d = this.config.deposit;
       const w = this.config.withdraw;
 
-      if (!d.wallet && !d.instapay && !d.bank) {
-        d.wallet = true;
+      if (!d.vodafone_cash && !d.instapay && !d.bank) {
+        d.vodafone_cash = true;
         this.syncAdminCheckboxesFromConfig();
         return app.toast('يجب إبقاء وسيلة إيداع واحدة مفعّلة على الأقل!', 'error');
       }
-      if (!w.wallet && !w.instapay && !w.bank) {
-        w.wallet = true;
+      if (!w.vodafone_cash && !w.instapay && !w.bank) {
+        w.vodafone_cash = true;
         this.syncAdminCheckboxesFromConfig();
         return app.toast('يجب إبقاء وسيلة سحب واحدة مفعّلة على الأقل!', 'error');
       }
 
+      const payload = {
+        depositChannels: {
+          vodafone_cash: !!d.vodafone_cash,
+          instapay: !!d.instapay,
+          bank: !!d.bank
+        },
+        withdrawChannels: {
+          vodafone_cash: !!w.vodafone_cash,
+          instapay: !!w.instapay,
+          bank: !!w.bank
+        }
+      };
+
+      app.appConfig = Object.assign({}, app.appConfig || {}, payload);
+
       try {
-        this._hasSavedPmcDoc = true;
-        await app.db.collection('settings').doc('paymentMethodsControl').set(
-          {
-            deposit: { wallet: !!d.wallet, instapay: !!d.instapay, bank: !!d.bank },
-            withdraw: { wallet: !!w.wallet, instapay: !!w.instapay, bank: !!w.bank },
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedBy: app.user?.uid || ''
-          },
-          { merge: true }
-        );
-
-        await app.db.collection('settings').doc('appConfig').set(
-          {
-            enableDepositCash: !!d.wallet,
-            enableDepositInstapay: !!d.instapay,
-            enableDepositBank: !!d.bank,
-            enableWithdrawCash: !!w.wallet,
-            enableWithdrawInstapay: !!w.instapay,
-            enableWithdrawBank: !!w.bank
-          },
-          { merge: true }
-        ).catch(() => {});
-
+        await app.db.collection('settings').doc('appConfig').set(payload, { merge: true });
         if (!silent) {
-          const depCnt = Object.values(d).filter(Boolean).length;
-          const wdCnt = Object.values(w).filter(Boolean).length;
-          app.toast(`تم حفظ وتفعيل وسائل الإيداع (${depCnt}) والسحب (${wdCnt}) ✅`, 'success');
+          const depCnt = Object.values(payload.depositChannels).filter(Boolean).length;
+          const wdCnt = Object.values(payload.withdrawChannels).filter(Boolean).length;
+          app.toast(`تم تحديث وسائل الإيداع (${depCnt}) والسحب (${wdCnt}) فوراً ✅`, 'success');
         }
       } catch (e) {}
     },
@@ -303,13 +292,12 @@
     },
 
     syncAdminCheckboxesFromConfig() {
-      if (!this._hasSavedPmcDoc) return;
       const map = this.findAdminToggleCheckboxes();
       if (!map) return;
-      if (map.depWallet) map.depWallet.checked = this.config.deposit.wallet !== false;
+      if (map.depWallet) map.depWallet.checked = this.config.deposit.vodafone_cash !== false;
       if (map.depInstapay) map.depInstapay.checked = this.config.deposit.instapay !== false;
       if (map.depBank) map.depBank.checked = this.config.deposit.bank !== false;
-      if (map.wdWallet) map.wdWallet.checked = this.config.withdraw.wallet !== false;
+      if (map.wdWallet) map.wdWallet.checked = this.config.withdraw.vodafone_cash !== false;
       if (map.wdInstapay) map.wdInstapay.checked = this.config.withdraw.instapay !== false;
       if (map.wdBank) map.wdBank.checked = this.config.withdraw.bank !== false;
     },
@@ -333,47 +321,43 @@
       if (!map) return;
 
       const entries = [
-        [map.depWallet, 'deposit', 'wallet'],
+        [map.depWallet, 'deposit', 'vodafone_cash'],
         [map.depInstapay, 'deposit', 'instapay'],
         [map.depBank, 'deposit', 'bank'],
-        [map.wdWallet, 'withdraw', 'wallet'],
+        [map.wdWallet, 'withdraw', 'vodafone_cash'],
         [map.wdInstapay, 'withdraw', 'instapay'],
         [map.wdBank, 'withdraw', 'bank']
       ];
 
       let newlyBound = false;
       entries.forEach(([cb, group, key]) => {
-        if (!cb || cb.dataset.pmcSyncedV55) return;
-        cb.dataset.pmcSyncedV55 = '1';
+        if (!cb || cb.dataset.pmcSyncedV56) return;
+        cb.dataset.pmcSyncedV56 = '1';
         newlyBound = true;
-
-        if (!this._hasSavedPmcDoc) {
-          this.config[group][key] = !!cb.checked;
-        }
 
         cb.addEventListener('change', () => {
           this.config[group][key] = !!cb.checked;
-          this.persistConfigToFirestore(false);
+          this.persistChannelsToAppConfig(false);
         });
       });
 
       const parentForm = (map.depWallet || map.wdBank)?.closest('form');
-      if (parentForm && !parentForm.dataset.pmcFormSyncedV55) {
-        parentForm.dataset.pmcFormSyncedV55 = '1';
+      if (parentForm && !parentForm.dataset.pmcFormSyncedV56) {
+        parentForm.dataset.pmcFormSyncedV56 = '1';
         parentForm.addEventListener('submit', () => {
           entries.forEach(([cb, group, key]) => {
             if (cb) this.config[group][key] = !!cb.checked;
           });
-          this.persistConfigToFirestore(true);
+          setTimeout(() => this.persistChannelsToAppConfig(true), 250);
         });
       }
 
-      if (newlyBound && this._hasSavedPmcDoc) {
+      if (newlyBound) {
         this.syncAdminCheckboxesFromConfig();
       }
     },
 
-    // ==================== 3. CLEAN BUTTON LABELS: STRICTLY "إيداع" & "سحب" ====================
+    // ==================== 4. CLEAN BUTTON LABELS: STRICTLY "إيداع" & "سحب" ====================
     cleanDepositWithdrawButtons() {
       const app = window.DamanApp;
       const main = document.getElementById('app-main');
@@ -399,7 +383,7 @@
       });
     },
 
-    // ==================== 4. WALLET SCREEN SAME-OWNER BANNER & BANK LABELS ====================
+    // ==================== 5. WALLET SCREEN SAME-OWNER BANNER ====================
     injectWalletScreenOwnershipNotice() {
       const app = window.DamanApp;
       if (!app || app.activeTab !== 'wallet') return;
@@ -431,62 +415,9 @@
         if (slaBanner && slaBanner.parentNode === root) root.insertBefore(card, slaBanner.nextSibling);
         else root.insertBefore(card, root.firstElementChild);
       }
-
-      this.fixBankLabelsInDOM(main);
     },
 
-    fixBankLabelsInDOM(rootEl) {
-      if (!rootEl) return;
-      rootEl.querySelectorAll('.glass-card, .rounded-xl, .rounded-2xl').forEach((card) => {
-        if (card.dataset.bankLabelFixed) return;
-        const txt = card.textContent || '';
-        if (txt.includes('حساب/IBAN:') && (txt.includes('إنستا باي') || txt.includes('محفظة إلكترونية'))) {
-          card.dataset.bankLabelFixed = '1';
-          card.querySelectorAll('span, div, b').forEach((el) => {
-            if (el.children.length === 0) {
-              const t = el.textContent.trim();
-              if (t === 'إنستا باي' || t === 'محفظة إلكترونية') {
-                el.textContent = '🏦 حساب بنكي';
-              }
-            }
-          });
-        }
-      });
-    },
-
-    // ==================== 5. ENHANCE ORIGINAL DEPOSIT & WITHDRAW MODALS + DEDUP GUARD ====================
-    detectModalKind(modal) {
-      if (!modal) return '';
-      const id = (modal.id || '').toLowerCase();
-      if (id.includes('kyc') || id.includes('post') || id.includes('admin') || id.includes('u360') || id.includes('calc') || id.includes('qr') || id.includes('bday') || id.includes('health') || id.includes('notif') || id.includes('auth') || id.includes('verify')) {
-        return '';
-      }
-      if (id.includes('deposit') || id.includes('topup') || id.includes('charge')) return 'deposit';
-      if (id.includes('withdraw') || id.includes('payout')) return 'withdraw';
-
-      if (window.DamanWalletSLA && typeof DamanWalletSLA.detectModalKind === 'function') {
-        const k = DamanWalletSLA.detectModalKind(modal);
-        if (k) return k;
-      }
-
-      const header = modal.querySelector('h2, h3, h4');
-      const form = modal.querySelector('form');
-      if (!header || !form || !form.querySelector('input[type="number"]')) return '';
-      const hTxt = (header.textContent || '').trim();
-      if (hTxt.includes('إيداع') || hTxt.includes('شحن')) return 'deposit';
-      if (hTxt.includes('سحب')) return 'withdraw';
-      return '';
-    },
-
-    classifyMethodText(val, txt) {
-      const v = String(val || '').toLowerCase();
-      const t = String(txt || '').toLowerCase();
-      if (v.includes('insta') || t.includes('إنستا') || t.includes('انستا') || t.includes('instapay')) return 'instapay';
-      if (v.includes('bank') || t.includes('بنك') || t.includes('iban')) return 'bank';
-      if (v.includes('wallet') || v.includes('vodafone') || v.includes('cash') || t.includes('محفظ') || t.includes('فودافون') || t.includes('كاش')) return 'wallet';
-      return '';
-    },
-
+    // ==================== 6. ENHANCE DEPOSIT & WITHDRAW MODALS (SAME-OWNER + 3 BANK FIELDS + DEDUP) ====================
     deduplicateModalElements(form) {
       if (!form) return;
       ['.daman-quick-amts', '.daman-same-owner-box', '.daman-modal-sla-notice'].forEach((selector) => {
@@ -495,19 +426,6 @@
           list.forEach((el, idx) => { if (idx > 0) el.remove(); });
         }
       });
-    },
-
-    cleanModalTitle(modal) {
-      const header = modal.querySelector('h2, h3, h4');
-      if (!header) return;
-      const t = header.textContent || '';
-      if (/\(\s*\d+\s*وسائل\s*\)|\(\s*وسيلتين\s*\)/.test(t)) {
-        header.childNodes.forEach((node) => {
-          if (node.nodeType === 3) {
-            node.textContent = node.textContent.replace(/\s*\(\s*\d+\s*وسائل\s*\)|\s*\(\s*وسيلتين\s*\)/g, '');
-          }
-        });
-      }
     },
 
     injectModalOwnershipNotice(form, kind) {
@@ -552,63 +470,90 @@
       this.deduplicateModalElements(form);
     },
 
-    findWithdrawAccountInput(form) {
-      const inputs = Array.from(form.querySelectorAll('input[type="text"], input[type="tel"], input:not([type])'));
-      for (const inp of inputs) {
-        if (inp.closest('#daman-wd-bank-fields')) continue;
-        const hay = `${inp.id || ''} ${inp.name || ''} ${inp.placeholder || ''}`.toLowerCase();
-        if (hay.includes('acc') || hay.includes('target') || hay.includes('wallet') || hay.includes('phone') || hay.includes('ipa') || hay.includes('حساب') || hay.includes('رقم') || hay.includes('محفظ')) {
-          return inp;
-        }
-      }
-      return inputs.find((i) => !i.closest('#daman-wd-bank-fields')) || null;
-    },
-
-    buildWithdrawBankFieldsBox(form, accInp) {
+    enhanceWithdrawBankFields(modal) {
       const app = window.DamanApp;
-      let bankBox = form.querySelector('#daman-wd-bank-fields');
-      if (bankBox || !app) return bankBox;
+      const form = modal.querySelector('form');
+      const sel = modal.querySelector('#wd-channel');
+      const accInp = modal.querySelector('#wd-dest');
+      if (!app || !form || !sel || !accInp) return;
 
       const holderName = this.getHolderName(app);
-      bankBox = document.createElement('div');
-      bankBox.id = 'daman-wd-bank-fields';
-      bankBox.className = 'hidden p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2 text-xs';
-      bankBox.innerHTML = `
-        <div class="font-black text-emerald-300 text-[11px]">🏦 بيانات الحساب البنكي المستلم (باسم صاحب الحساب فقط):</div>
-        <div>
-          <label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label>
-          <select id="daman-wd-bank-name" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold">
-            ${this.EGYPT_BANKS.map((b) => `<option value="${this.esc(b)}">${this.esc(b)}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب البنكي بالكامل (مطابق لاسمك في التطبيق) *</label>
-          <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${this.esc(holderName)}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
-        </div>
-        <div>
-          <label class="block text-[10px] text-slate-300 mb-1">رقم الحساب البنكي أو رقم الـ IBAN *</label>
-          <input id="daman-wd-bank-iban" type="text" dir="ltr" placeholder="EG00 0000 0000 0000 0000 0000 000" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-black" />
-        </div>`;
+      let bankBox = form.querySelector('#daman-wd-bank-fields');
 
-      const anchor = accInp.parentElement && accInp.parentElement !== form ? accInp.parentElement : accInp;
-      anchor.insertAdjacentElement('afterend', bankBox);
+      if (!bankBox) {
+        bankBox = document.createElement('div');
+        bankBox.id = 'daman-wd-bank-fields';
+        bankBox.className = 'hidden p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2 text-xs';
+        bankBox.innerHTML = `
+          <div class="font-black text-emerald-300 text-[11px]">🏦 بيانات الحساب البنكي المستلم (باسم صاحب الحساب فقط):</div>
+          <div>
+            <label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label>
+            <select id="daman-wd-bank-name" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold">
+              ${this.EGYPT_BANKS.map((b) => `<option value="${this.esc(b)}">${this.esc(b)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب البنكي بالكامل (مطابق لاسمك في التطبيق) *</label>
+            <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${this.esc(holderName)}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-300 mb-1">رقم الحساب البنكي أو رقم الـ IBAN *</label>
+            <input id="daman-wd-bank-iban" type="text" dir="ltr" placeholder="EG00 0000 0000 0000 0000 0000 000" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-black" />
+          </div>`;
 
-      const syncVal = () => {
-        if (form.dataset.damanWdBankActive !== '1') return;
-        const bName = (form.querySelector('#daman-wd-bank-name')?.value || '').trim();
-        const bHolder = (form.querySelector('#daman-wd-bank-holder')?.value || '').trim();
-        const bIban = (form.querySelector('#daman-wd-bank-iban')?.value || '').trim();
-        accInp.value = `🏦 ${bName} | الاسم: ${bHolder} | حساب/IBAN: ${bIban}`;
-        accInp.dataset.bankSynced = '1';
+        const anchor = accInp.parentElement && accInp.parentElement !== form ? accInp.parentElement : accInp;
+        anchor.insertAdjacentElement('afterend', bankBox);
+
+        const syncVal = () => {
+          if (sel.value !== 'bank') return;
+          const bName = (form.querySelector('#daman-wd-bank-name')?.value || '').trim();
+          const bHolder = (form.querySelector('#daman-wd-bank-holder')?.value || '').trim();
+          const bIban = (form.querySelector('#daman-wd-bank-iban')?.value || '').trim();
+          accInp.value = `🏦 ${bName} | الاسم: ${bHolder} | حساب/IBAN: ${bIban}`;
+        };
+
+        bankBox.addEventListener('input', syncVal);
+        bankBox.addEventListener('change', syncVal);
+      }
+
+      const toggleMode = () => {
+        const isBank = sel.value === 'bank';
+        const accWrapper = accInp.parentElement && accInp.parentElement !== form ? accInp.parentElement : accInp;
+        const hInp = form.querySelector('#daman-wd-bank-holder');
+        const iInp = form.querySelector('#daman-wd-bank-iban');
+
+        if (isBank) {
+          bankBox.classList.remove('hidden');
+          accWrapper.classList.add('hidden');
+          accInp.required = false;
+          if (hInp) hInp.required = true;
+          if (iInp) iInp.required = true;
+          const bName = (form.querySelector('#daman-wd-bank-name')?.value || '').trim();
+          const bHolder = (hInp?.value || '').trim();
+          const bIban = (iInp?.value || '').trim();
+          accInp.value = `🏦 ${bName} | الاسم: ${bHolder} | حساب/IBAN: ${bIban}`;
+        } else {
+          bankBox.classList.add('hidden');
+          accWrapper.classList.remove('hidden');
+          accInp.required = true;
+          if (hInp) hInp.required = false;
+          if (iInp) iInp.required = false;
+        }
       };
 
-      bankBox.addEventListener('input', syncVal);
-      bankBox.addEventListener('change', syncVal);
+      if (!sel.dataset.wdBankModeBoundV56) {
+        sel.dataset.wdBankModeBoundV56 = '1';
+        sel.addEventListener('change', () => {
+          toggleMode();
+          setTimeout(toggleMode, 10);
+        });
+      }
+      toggleMode();
 
-      if (!form.dataset.wdBankSubmitBoundV55) {
-        form.dataset.wdBankSubmitBoundV55 = '1';
+      if (!form.dataset.wdBankSubmitBoundV56) {
+        form.dataset.wdBankSubmitBoundV56 = '1';
         form.addEventListener('submit', (ev) => {
-          if (form.dataset.damanWdBankActive !== '1') return;
+          if (sel.value !== 'bank') return;
           const bName = (form.querySelector('#daman-wd-bank-name')?.value || '').trim();
           const bHolder = (form.querySelector('#daman-wd-bank-holder')?.value || '').trim();
           const bIban = (form.querySelector('#daman-wd-bank-iban')?.value || '').trim();
@@ -625,165 +570,37 @@
           accInp.value = `🏦 ${bName} | الاسم: ${bHolder} | حساب/IBAN: ${bIban}`;
         }, true);
       }
-
-      return bankBox;
-    },
-
-    setWithdrawBankMode(form, accInp, bankBox, isBank) {
-      if (!form || !accInp || !bankBox) return;
-      const accWrapper = accInp.parentElement && accInp.parentElement !== form ? accInp.parentElement : accInp;
-      const hInp = form.querySelector('#daman-wd-bank-holder');
-      const iInp = form.querySelector('#daman-wd-bank-iban');
-      form.dataset.damanWdBankActive = isBank ? '1' : '0';
-
-      if (isBank) {
-        bankBox.classList.remove('hidden');
-        accWrapper.classList.add('hidden');
-        accInp.required = false;
-        if (hInp) hInp.required = true;
-        if (iInp) iInp.required = true;
-        const bName = (form.querySelector('#daman-wd-bank-name')?.value || '').trim();
-        const bHolder = (hInp?.value || '').trim();
-        const bIban = (iInp?.value || '').trim();
-        accInp.value = `🏦 ${bName} | الاسم: ${bHolder} | حساب/IBAN: ${bIban}`;
-        accInp.dataset.bankSynced = '1';
-      } else {
-        bankBox.classList.add('hidden');
-        accWrapper.classList.remove('hidden');
-        accInp.required = true;
-        if (hInp) hInp.required = false;
-        if (iInp) iInp.required = false;
-        if (accInp.dataset.bankSynced === '1') {
-          accInp.value = '';
-          delete accInp.dataset.bankSynced;
-        }
-      }
-    },
-
-    applyMethodsToModal(modal, kind) {
-      const form = modal.querySelector('form');
-      if (!form) return;
-
-      this.cleanModalTitle(modal);
-      this.injectModalOwnershipNotice(form, kind);
-
-      const enabledMap = kind === 'deposit' ? this.config.deposit : this.config.withdraw;
-      const sel = form.querySelector('select:not(#daman-wd-bank-name)');
-
-      if (sel) {
-        let accInp = null;
-        let bankBox = null;
-
-        if (kind === 'withdraw') {
-          let bankOpt = Array.from(sel.options).find((o) => this.classifyMethodText(o.value, o.textContent) === 'bank');
-          if (!bankOpt) {
-            bankOpt = document.createElement('option');
-            bankOpt.value = 'bank';
-            bankOpt.textContent = '🏦 تحويل إلى حساب بنكي (IBAN / رقم حساب)';
-            sel.appendChild(bankOpt);
-          }
-          accInp = this.findWithdrawAccountInput(form);
-          if (accInp) bankBox = this.buildWithdrawBankFieldsBox(form, accInp);
-        }
-
-        let firstEnabledVal = '';
-        Array.from(sel.options).forEach((opt) => {
-          const mKind = this.classifyMethodText(opt.value, opt.textContent);
-          if (!mKind) return;
-          const allowed = enabledMap[mKind] !== false;
-          opt.hidden = !allowed;
-          opt.disabled = !allowed;
-          if (allowed && !firstEnabledVal) firstEnabledVal = opt.value;
-        });
-
-        const curOpt = sel.options[sel.selectedIndex];
-        if (curOpt && curOpt.disabled && firstEnabledVal) {
-          sel.value = firstEnabledVal;
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-
-        if (kind === 'withdraw' && accInp && bankBox) {
-          const syncMode = () => {
-            const cOpt = sel.options[sel.selectedIndex];
-            const isBank = !!(cOpt && this.classifyMethodText(cOpt.value, cOpt.textContent) === 'bank');
-            this.setWithdrawBankMode(form, accInp, bankBox, isBank);
-          };
-          if (!sel.dataset.wdBankModeBoundV55) {
-            sel.dataset.wdBankModeBoundV55 = '1';
-            sel.addEventListener('change', syncMode);
-          }
-          syncMode();
-        }
-      }
-
-      const methodBtns = Array.from(modal.querySelectorAll('button[type="button"]')).filter((btn) => {
-        if (btn.closest('.daman-quick-amts') || btn.closest('#daman-wd-bank-fields')) return false;
-        const txt = (btn.textContent || '').trim();
-        if (txt.includes('نسخ') || txt.includes('سحب الكل') || txt.includes('إغلاق') || txt.includes('معاينة') || txt.includes('فتح')) return false;
-        const oc = (btn.getAttribute('onclick') || '').toLowerCase();
-        const mKind = this.classifyMethodText(btn.dataset.method || oc, txt);
-        return !!mKind && (oc.includes('method') || oc.includes('deposit') || oc.includes('withdraw') || !!btn.dataset.method || btn.parentElement?.className.includes('grid'));
-      });
-
-      if (methodBtns.length >= 2) {
-        const btnParent = methodBtns[0].parentElement;
-        const accInp = kind === 'withdraw' ? this.findWithdrawAccountInput(form) : null;
-        const bankBox = accInp ? this.buildWithdrawBankFieldsBox(form, accInp) : null;
-
-        if (kind === 'withdraw' && btnParent && !btnParent.querySelector('[data-method="bank"]') && !methodBtns.some((b) => this.classifyMethodText(b.dataset.method || b.getAttribute('onclick'), b.textContent) === 'bank')) {
-          const bankBtn = document.createElement('button');
-          bankBtn.type = 'button';
-          bankBtn.dataset.method = 'bank';
-          bankBtn.className = 'px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-200 font-black text-[11px]';
-          bankBtn.textContent = '🏦 حساب بنكي';
-          btnParent.appendChild(bankBtn);
-          methodBtns.push(bankBtn);
-
-          bankBtn.addEventListener('click', () => {
-            methodBtns.forEach((b) => b.classList.remove('border-emerald-400', 'bg-emerald-500/20', 'text-emerald-300'));
-            bankBtn.classList.add('border-emerald-400', 'bg-emerald-500/20', 'text-emerald-300');
-            if (accInp && bankBox) this.setWithdrawBankMode(form, accInp, bankBox, true);
-          });
-
-          methodBtns.forEach((b) => {
-            if (b === bankBtn || b.dataset.wdNonBankBoundV55) return;
-            b.dataset.wdNonBankBoundV55 = '1';
-            b.addEventListener('click', () => {
-              bankBtn.classList.remove('border-emerald-400', 'bg-emerald-500/20', 'text-emerald-300');
-              if (accInp && bankBox) this.setWithdrawBankMode(form, accInp, bankBox, false);
-            });
-          });
-        }
-
-        methodBtns.forEach((btn) => {
-          const mKind = this.classifyMethodText(btn.dataset.method || btn.getAttribute('onclick'), btn.textContent);
-          if (!mKind) return;
-          btn.classList.toggle('hidden', enabledMap[mKind] === false);
-        });
-      }
     },
 
     scanOpenModals() {
-      document.querySelectorAll('.daman-modal:not(.hidden)').forEach((modal) => {
-        const kind = this.detectModalKind(modal);
-        if (kind === 'deposit' || kind === 'withdraw') {
-          this.applyMethodsToModal(modal, kind);
+      const depModal = document.getElementById('daman-deposit-modal');
+      if (depModal && !depModal.classList.contains('hidden')) {
+        const form = depModal.querySelector('form');
+        if (form) this.injectModalOwnershipNotice(form, 'deposit');
+      }
+
+      const wdModal = document.getElementById('daman-withdraw-modal');
+      if (wdModal && !wdModal.classList.contains('hidden')) {
+        const form = wdModal.querySelector('form');
+        if (form) {
+          this.injectModalOwnershipNotice(form, 'withdraw');
+          this.enhanceWithdrawBankFields(wdModal);
         }
-      });
+      }
     },
 
-    // ==================== 6. HEALTH DIAGNOSTIC REPORT (v55 - 22/22 CHECKS) ====================
+    // ==================== 7. HEALTH DIAGNOSTIC REPORT (v56 - 22/22 CHECKS) ====================
     patchHealthDiagnostic() {
       const app = window.DamanApp;
-      if (!app || !window.DamanSync || DamanSync._healthV55Patched) return;
-      DamanSync._healthV55Patched = true;
+      if (!app || !window.DamanSync || DamanSync._healthV56Patched) return;
+      DamanSync._healthV56Patched = true;
 
       DamanSync.openHealthReportModal = function () {
         const checks = [
           ['النواة الأساسية (app-core)', !!window.DamanApp],
-          ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
+          ['المحفظة والتوثيق (wallet-kyc + ops v56)', !!window.DamanWallet],
           ['يوم عمل + رقم مرجعي اختياري (wallet-sla)', !!window.DamanWalletSLA],
-          ['ترابط الإدارة والمحفظة + توحيد فحص العقد السفلي (v55)', !!window.DamanWalletMethods],
+          ['ترابط الإدارة والمحفظة + توحيد فحص العقد (v56)', !!window.DamanWalletMethods],
           ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
           ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
           ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
@@ -800,7 +617,7 @@
           ['كاميرا QR + كاميرا التوثيق + أعياد الميلاد (kyc-bday-qr)', !!(window.DamanKycBdayQR && DamanKycBdayQR._rulesResilientV41)],
           ['الإشعارات الجماعية + الحاسبة + انتهاء البطاقات (admin-growth-ops)', !!window.DamanGrowthOps],
           ['التحقق العام من العقود + الحظر والتجميد (security-verify-ban)', !!window.DamanSecurityMod],
-          ['ربط الإشعارات والصوت والتكامل (system-sync)', !!this._booted],
+          ['توجيه الإشعارات بالضغط والصوت (system-sync v56)', !!(this._booted && this._notifLinksPatchedV56)],
           ['اتصال Firebase Firestore + QRCode', !!(app.db && app.auth && typeof window.QRCode !== 'undefined')]
         ];
 
@@ -819,7 +636,7 @@
         m.innerHTML = `
           <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v55 (${passed}/${checks.length})</h3>
+              <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص المنظومة الشامل v56 (${passed}/${checks.length})</h3>
               <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="space-y-1.5">
@@ -834,10 +651,11 @@
       };
     },
 
-    // ==================== 7. BOOT & GLOBAL WIRING ====================
+    // ==================== 8. BOOT & GLOBAL WIRING ====================
     runPass() {
       const app = window.DamanApp;
       if (!app) return;
+      this.patchChannelShort();
       this.syncHomeContractVerifyWiring();
       this.cleanDepositWithdrawButtons();
       if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
@@ -852,6 +670,7 @@
       this._booted = true;
 
       this.clearLegacyBackups();
+      this.patchChannelShort();
       this.startConfigListener();
       this.patchHealthDiagnostic();
 
@@ -868,20 +687,17 @@
         }
       }, true);
 
-      if (window.DamanAdmin && typeof DamanAdmin.render === 'function' && !DamanAdmin._pmcHookedV55) {
-        DamanAdmin._pmcHookedV55 = true;
+      if (window.DamanAdmin && typeof DamanAdmin.render === 'function' && !DamanAdmin._pmcHookedV56) {
+        DamanAdmin._pmcHookedV56 = true;
         const origAdmRender = DamanAdmin.render.bind(DamanAdmin);
         DamanAdmin.render = (container, a) => {
           origAdmRender(container, a);
-          setTimeout(() => {
-            this.wireAdminAccountsToggles();
-            this.fixBankLabelsInDOM(container);
-          }, 50);
+          setTimeout(() => this.wireAdminAccountsToggles(), 50);
         };
       }
 
-      if (typeof app.renderCurrentTab === 'function' && !app._pmcTabHookedV55) {
-        app._pmcTabHookedV55 = true;
+      if (typeof app.renderCurrentTab === 'function' && !app._pmcTabHookedV56) {
+        app._pmcTabHookedV56 = true;
         const origRenderTab = app.renderCurrentTab.bind(app);
         app.renderCurrentTab = () => {
           origRenderTab();
