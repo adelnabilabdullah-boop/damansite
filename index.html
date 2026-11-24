@@ -61,7 +61,7 @@
   </div>
 
   <div id="daman-update-banner" class="hidden fixed inset-x-3 bottom-20 z-[115] max-w-md mx-auto bg-amber-500 text-slate-950 rounded-2xl px-3.5 py-2.5 shadow-2xl flex items-center justify-between gap-2">
-    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v55)</span>
+    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v56)</span>
     <button onclick="window.DamanApplyUpdate()" class="px-3 py-1 rounded-xl bg-slate-950 text-amber-400 text-[11px] font-black">تحديث الآن</button>
   </div>
 
@@ -194,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=55').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=56').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -238,7 +238,7 @@
 
   <script src="app-core.js?v=28"></script>
   <script src="wallet-kyc.js?v=28"></script>
-  <script src="wallet-ops.js?v=28"></script>
+  <script src="wallet-ops.js?v=56"></script>
   <script src="chat-support.js?v=28"></script>
   <script src="chat-extras.js?v=28"></script>
   <script src="chat-media.js?v=29"></script>
@@ -255,12 +255,12 @@
   <script src="post-contact-guard.js?v=36"></script>
   <script src="kyc-vault.js?v=36"></script>
   <script src="share-qr.js?v=36"></script>
-  <script src="system-sync.js?v=38"></script>
+  <script src="system-sync.js?v=56"></script>
   <script src="kyc-bday-qr.js?v=39"></script>
   <script src="admin-growth-ops.js?v=40"></script>
   <script src="wallet-sla.js?v=42"></script>
   <script src="security-verify-ban.js?v=43"></script>
-  <script src="wallet-methods-control.js?v=55"></script>
+  <script src="wallet-methods-control.js?v=56"></script>
   <script>
     (function () {
       const K = window.DamanKycBdayQR;
