@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v21';
+const CACHE_NAME = 'damansite-v29';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -10,7 +10,7 @@ const CORE_ASSETS = [
   './company-panel.js?v=21',
   './admin.js?v=21'
 ];
-
+  './chat-media.js?v=29',
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS).catch(() => {}))
