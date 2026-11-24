@@ -9,6 +9,17 @@
       withdraw: { wallet: true, instapay: true, bank: true }
     },
     accountsInfo: {},
+    domSnapshot: {
+      walletNumber: '',
+      walletHolder: '',
+      instapayLink: '',
+      instapayAddress: '',
+      instapayHolder: '',
+      bankName: '',
+      bankAccount: '',
+      bankIban: '',
+      bankHolder: ''
+    },
 
     EGYPT_BANKS: [
       'البنك الأهلي المصري (NBE)',
@@ -59,6 +70,58 @@
       });
     },
 
+    // Capture live values from Admin "محوّل الحسابات" inputs/textareas in DOM
+    harvestAccountsFromAdminDOM() {
+      const main = document.getElementById('app-main');
+      if (!main) return;
+
+      const fields = Array.from(main.querySelectorAll('input[type="text"], input[type="tel"], input[type="url"], input:not([type]), textarea'));
+      if (!fields.length) return;
+
+      const getContext = (el) => {
+        const lbl = el.id ? main.querySelector(`label[for="${el.id}"]`) : null;
+        const prevLbl = el.previousElementSibling && el.previousElementSibling.tagName === 'LABEL' ? el.previousElementSibling : null;
+        const card = el.closest('.glass-card, .rounded-2xl, .rounded-xl, div');
+        const cardHead = card ? (card.querySelector('h1,h2,h3,h4,.font-black')?.textContent || '') : '';
+        return `${el.id || ''} ${el.name || ''} ${el.placeholder || ''} ${(lbl || prevLbl)?.textContent || ''} ${cardHead}`.toLowerCase();
+      };
+
+      const snap = Object.assign({}, this.domSnapshot);
+      fields.forEach((el) => {
+        const val = (el.value || '').trim();
+        if (!val) return;
+        const ctx = getContext(el);
+
+        if ((ctx.includes('محفظ') || ctx.includes('wallet') || ctx.includes('كاش')) && !ctx.includes('احتياط')) {
+          if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
+            if (!snap.walletHolder) snap.walletHolder = val;
+          } else if (!snap.walletNumber) {
+            snap.walletNumber = val;
+          }
+        } else if (ctx.includes('إنستا') || ctx.includes('انستا') || ctx.includes('instapay') || ctx.includes('ipa')) {
+          if (val.startsWith('http') || ctx.includes('رابط') || ctx.includes('لينك') || ctx.includes('link')) {
+            if (!snap.instapayLink) snap.instapayLink = val;
+          } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
+            if (!snap.instapayHolder) snap.instapayHolder = val;
+          } else if (!snap.instapayAddress) {
+            snap.instapayAddress = val;
+          }
+        } else if (ctx.includes('بنك') || ctx.includes('bank') || ctx.includes('iban') || ctx.includes('حساب')) {
+          if (ctx.includes('iban')) {
+            if (!snap.bankIban) snap.bankIban = val;
+          } else if (ctx.includes('اسم البنك') || (ctx.includes('بنك') && !ctx.includes('صاحب') && !ctx.includes('رقم') && !ctx.includes('حساب'))) {
+            if (!snap.bankName) snap.bankName = val;
+          } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder')) {
+            if (!snap.bankHolder) snap.bankHolder = val;
+          } else if (!snap.bankAccount) {
+            snap.bankAccount = val;
+          }
+        }
+      });
+
+      this.domSnapshot = snap;
+    },
+
     flattenObject(obj, prefix = '', out = {}) {
       if (!obj || typeof obj !== 'object') return out;
       if (Array.isArray(obj)) {
@@ -79,8 +142,10 @@
     },
 
     async loadAllSettings() {
+      this.harvestAccountsFromAdminDOM();
       const app = window.DamanApp;
       const flat = {};
+
       [app?.appConfig, window.DamanWallet?.accounts, window.DamanAdmin?.accounts].forEach((src) => {
         if (src && typeof src === 'object') this.flattenObject(src, '', flat);
       });
@@ -122,10 +187,12 @@
     },
 
     getReceivingAccountDetails(method) {
+      this.harvestAccountsFromAdminDOM();
       const flat = this.flattenObject(window.DamanApp?.appConfig || {}, '', Object.assign({}, this.accountsInfo));
+      const snap = this.domSnapshot;
 
       if (method === 'wallet') {
-        let num = this.findValueByKeyPatterns(
+        let num = snap.walletNumber || this.findValueByKeyPatterns(
           flat,
           ['vodafoneCash', 'vodafoneNumber', 'walletNumber', 'cashNumber', 'depositWallet', 'etisalatCash', 'orangeCash', 'wePay', 'mobileWallet', 'walletPhone', 'receiveWallet', 'activeWallet'],
           ['wallet'],
@@ -139,26 +206,26 @@
             }
           }
         }
-        const name = this.findValueByKeyPatterns(flat, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'walletAccountName'], ['wallet', 'name'], [])
+        const name = snap.walletHolder
+          || this.findValueByKeyPatterns(flat, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'walletAccountName'], ['wallet', 'name'], [])
           || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
-        const provider = this.findValueByKeyPatterns(flat, ['walletProvider', 'walletType', 'cashProvider'], ['wallet', 'provider'], []);
 
         return {
           title: '📱 بيانات المحفظة الإلكترونية المعتمدة للإيداع',
           rows: [
-            { label: 'اسم الحساب / المستلم', value: name, copy: false },
-            { label: 'رقم المحفظة', value: num, copy: !!num },
-            { label: 'نوع المحفظة', value: provider || 'فودافون كاش / اتصالات / أورنج / وي', copy: false }
+            { label: 'اسم صاحب المحفظة', value: name, copy: false },
+            { label: 'رقم المحفظة', value: num, copy: !!num }
           ]
         };
       }
 
       if (method === 'instapay') {
-        let ipa = this.findValueByKeyPatterns(
+        const link = snap.instapayLink || this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
+        let ipa = snap.instapayAddress || this.findValueByKeyPatterns(
           flat,
-          ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'instapayLink', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
+          ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
           ['insta'],
-          ['name', 'holder', 'owner', 'enable', 'active', 'min', 'max']
+          ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max']
         );
         if (!ipa) {
           for (const v of Object.values(flat)) {
@@ -168,23 +235,24 @@
             }
           }
         }
-        const name = this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
+        const name = snap.instapayHolder
+          || this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
           || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
-        const phone = this.findValueByKeyPatterns(flat, ['instapayPhone', 'instapayMobile'], ['insta', 'phone'], []);
 
         return {
           title: '⚡ بيانات حساب إنستا باي (InstaPay) المعتمد للإيداع',
+          link,
           rows: [
-            { label: 'اسم الحساب / المستلم', value: name, copy: false },
-            { label: 'عنوان / حساب إنستا باي', value: ipa, copy: !!ipa },
-            { label: 'رقم الموبايل المربوط', value: phone, copy: !!phone }
+            { label: 'اسم صاحب الحساب', value: name, copy: false },
+            { label: 'عنوان إنستا باي (IPA)', value: ipa, copy: !!ipa },
+            { label: 'رابط التحويل المباشر', value: link, copy: !!link }
           ]
         };
       }
 
-      const bankName = this.findValueByKeyPatterns(flat, ['bankName', 'depositBankName', 'activeBankName'], ['bank', 'name'], ['holder', 'owner', 'user']);
-      let bankAcc = this.findValueByKeyPatterns(flat, ['bankAccount', 'bankAccountNumber', 'accountNumber', 'depositBank', 'bankAcc', 'activeBankAccount'], ['bank', 'acc'], ['name', 'holder', 'owner', 'enable']);
-      let iban = this.findValueByKeyPatterns(flat, ['bankIban', 'iban', 'ibanNumber'], ['iban'], []);
+      const bankName = snap.bankName || this.findValueByKeyPatterns(flat, ['bankName', 'depositBankName', 'activeBankName'], ['bank', 'name'], ['holder', 'owner', 'user']);
+      let bankAcc = snap.bankAccount || this.findValueByKeyPatterns(flat, ['bankAccount', 'bankAccountNumber', 'accountNumber', 'depositBank', 'bankAcc', 'activeBankAccount'], ['bank', 'acc'], ['name', 'holder', 'owner', 'enable']);
+      const iban = snap.bankIban || this.findValueByKeyPatterns(flat, ['bankIban', 'iban', 'ibanNumber'], ['iban'], []);
       if (!bankAcc && !iban) {
         for (const v of Object.values(flat)) {
           if (typeof v === 'string' && (/^EG\d{20,}/i.test(v.replace(/\s+/g, '')) || /^\d{12,24}$/.test(v.replace(/\s+/g, '')))) {
@@ -193,13 +261,14 @@
           }
         }
       }
-      const bankHolder = this.findValueByKeyPatterns(flat, ['bankHolderName', 'bankHolder', 'bankAccountName', 'bankOwner', 'companyLegalName'], ['bank', 'holder'], [])
+      const bankHolder = snap.bankHolder
+        || this.findValueByKeyPatterns(flat, ['bankHolderName', 'bankHolder', 'bankAccountName', 'bankOwner', 'companyLegalName'], ['bank', 'holder'], [])
         || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
 
       return {
         title: '🏦 بيانات الحساب البنكي المعتمد للإيداع',
         rows: [
-          { label: 'اسم الحساب / المستلم', value: bankHolder, copy: false },
+          { label: 'اسم صاحب الحساب البنكي', value: bankHolder, copy: false },
           { label: 'اسم البنك', value: bankName, copy: false },
           { label: 'رقم الحساب البنكي', value: bankAcc, copy: !!bankAcc },
           { label: 'رقم الـ IBAN', value: iban, copy: !!iban }
@@ -268,6 +337,10 @@
         return;
       }
 
+      const linkBtn = info.link && /^https?:\/\//i.test(info.link)
+        ? `<a href="${app.esc(info.link)}" target="_blank" rel="noopener noreferrer" class="mt-1.5 w-full py-2 rounded-xl bg-sky-500 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1.5"><i class="fa-solid fa-arrow-up-right-from-square"></i> فتح رابط التحويل المباشر في إنستا باي</a>`
+        : '';
+
       box.innerHTML = `
         <div class="text-[10.5px] font-black text-amber-300 pb-1 border-b border-slate-800">${app.esc(info.title)}</div>
         <div class="space-y-1.5 pt-1.5">
@@ -282,7 +355,8 @@
                   <i class="fa-regular fa-copy me-1"></i> نسخ
                 </button>` : ''}
             </div>`).join('')}
-        </div>`;
+        </div>
+        ${linkBtn}`;
     },
 
     async openDepositModal() {
@@ -290,6 +364,7 @@
       if (!app) return;
       if (!app.user) return app.openAuthModal?.();
 
+      this.harvestAccountsFromAdminDOM();
       const holderName = this.getHolderName(app);
       const slaText = this.getSlaDuration();
       const d = this.config.deposit;
@@ -460,7 +535,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV47', async () => {
+      await app.withLock('submitDepositV48', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -702,7 +777,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV47', async () => {
+      await app.withLock('submitWithdrawV48', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
@@ -828,6 +903,7 @@
           origRenderTab();
           setTimeout(() => {
             this.cleanDepositWithdrawButtons();
+            this.harvestAccountsFromAdminDOM();
             if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
           }, 80);
         };
@@ -835,7 +911,10 @@
 
       const mainEl = document.getElementById('app-main');
       if (mainEl && typeof MutationObserver !== 'undefined') {
-        const obs = new MutationObserver(() => this.cleanDepositWithdrawButtons());
+        const obs = new MutationObserver(() => {
+          this.cleanDepositWithdrawButtons();
+          this.harvestAccountsFromAdminDOM();
+        });
         obs.observe(mainEl, { childList: true, subtree: true });
       }
 
@@ -845,6 +924,7 @@
           DamanWallet.openWithdrawModal = () => this.openWithdrawModal();
         }
         this.cleanDepositWithdrawButtons();
+        this.harvestAccountsFromAdminDOM();
         if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
       }, 650);
     }
