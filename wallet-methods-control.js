@@ -2,6 +2,8 @@
   const DepositWithdrawEngine = {
     _booted: false,
     _receiptDataUrl: '',
+    _depositTimerId: null,
+    _depositSecondsLeft: 600,
     config: {
       deposit: { wallet: true, instapay: true, bank: true },
       withdraw: { wallet: true, instapay: true, bank: true }
@@ -19,7 +21,7 @@
       'مصرف أبوظبي الإسلامي (ADIB)',
       'البنك العربي الأفريقي (AAIB)',
       'بنك التعمير والإسكان',
-      'بنك آخر'
+      'بنك أخرى'
     ],
 
     getHolderName(app) {
@@ -32,7 +34,6 @@
       return window.DamanWalletSLA?.slaConfig?.durationText || 'يوم عمل واحد (24 ساعة عمل)';
     },
 
-    // ==================== CLEAN BUTTON LABELS: "إيداع" & "سحب" ONLY ====================
     cleanDepositWithdrawButtons() {
       const app = window.DamanApp;
       const main = document.getElementById('app-main');
@@ -58,219 +59,199 @@
       });
     },
 
-    // ==================== 1. SMART LOADER FOR ALL SETTINGS & RECEIVING ACCOUNTS ====================
-    async loadAllSettings() {
-      const app = window.DamanApp;
-      if (!app || !app.db) return;
-      try {
-        // Read entire settings collection (only ~4 small docs) so we NEVER miss where Admin saved the accounts!
-        const settingsSnap = await app.db.collection('settings').get().catch(() => null);
-        const merged = Object.assign({}, app.appConfig || {}, window.DamanWallet?.accounts || {});
-
-        if (settingsSnap && !settingsSnap.empty) {
-          settingsSnap.docs.forEach((doc) => {
-            const d = doc.data() || {};
-            if (doc.id === 'paymentMethodsControl') {
-              if (d.deposit) this.config.deposit = Object.assign({}, this.config.deposit, d.deposit);
-              if (d.withdraw) this.config.withdraw = Object.assign({}, this.config.withdraw, d.withdraw);
-            } else {
-              Object.keys(d).forEach((k) => {
-                if (d[k] !== '' && d[k] !== null && d[k] !== undefined) {
-                  merged[k] = d[k];
-                }
-              });
-            }
-          });
+    flattenObject(obj, prefix = '', out = {}) {
+      if (!obj || typeof obj !== 'object') return out;
+      if (Array.isArray(obj)) {
+        obj.forEach((item, idx) => this.flattenObject(item, `${prefix}[${idx}]`, out));
+        return out;
+      }
+      Object.keys(obj).forEach((k) => {
+        const val = obj[k];
+        const path = prefix ? `${prefix}.${k}` : k;
+        if (val !== null && val !== undefined && typeof val !== 'object') {
+          out[path] = val;
+          if (!(k in out) || out[k] === '') out[k] = val;
+        } else if (val && typeof val === 'object') {
+          this.flattenObject(val, path, out);
         }
-
-        // Also check admin-ext / wallet cached account objects in window
-        [window.DamanAdmin, window.DamanWallet, window.DamanApp].forEach((obj) => {
-          if (!obj || typeof obj !== 'object') return;
-          ['accounts', 'receivingAccounts', 'paymentAccounts', 'bankConfig', 'appConfig'].forEach((prop) => {
-            if (obj[prop] && typeof obj[prop] === 'object') {
-              Object.assign(merged, obj[prop]);
-            }
-          });
-        });
-
-        this.accountsInfo = merged;
-      } catch (e) {}
+      });
+      return out;
     },
 
-    pickFirstNonEmpty(obj, keys) {
-      for (const k of keys) {
-        const val = obj[k];
-        if (typeof val === 'string' && val.trim()) return val.trim();
-        if (typeof val === 'number' && val > 0) return String(val);
+    async loadAllSettings() {
+      const app = window.DamanApp;
+      const flat = {};
+      [app?.appConfig, window.DamanWallet?.accounts, window.DamanAdmin?.accounts].forEach((src) => {
+        if (src && typeof src === 'object') this.flattenObject(src, '', flat);
+      });
+
+      if (app && app.db) {
+        try {
+          const settingsSnap = await app.db.collection('settings').get();
+          if (settingsSnap && !settingsSnap.empty) {
+            settingsSnap.docs.forEach((doc) => {
+              const d = doc.data() || {};
+              if (doc.id === 'paymentMethodsControl') {
+                if (d.deposit) this.config.deposit = Object.assign({}, this.config.deposit, d.deposit);
+                if (d.withdraw) this.config.withdraw = Object.assign({}, this.config.withdraw, d.withdraw);
+              } else {
+                this.flattenObject(d, doc.id, flat);
+              }
+            });
+          }
+        } catch (e) {}
+      }
+      this.accountsInfo = flat;
+    },
+
+    findValueByKeyPatterns(flatObj, exactKeys, includeTokens, excludeTokens = []) {
+      for (const k of exactKeys) {
+        const v = flatObj[k];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+        if (typeof v === 'number' && v > 0) return String(v);
+      }
+      for (const [path, val] of Object.entries(flatObj)) {
+        if (typeof val !== 'string' && typeof val !== 'number') continue;
+        const sVal = String(val).trim();
+        if (!sVal) continue;
+        const lowPath = path.toLowerCase();
+        if (excludeTokens.some((ex) => lowPath.includes(ex))) continue;
+        if (includeTokens.every((inc) => lowPath.includes(inc))) return sVal;
       }
       return '';
     },
 
     getReceivingAccountDetails(method) {
-      const c = Object.assign({}, this.accountsInfo, window.DamanApp?.appConfig || {});
+      const flat = this.flattenObject(window.DamanApp?.appConfig || {}, '', Object.assign({}, this.accountsInfo));
 
       if (method === 'wallet') {
-        let num = this.pickFirstNonEmpty(c, [
-          'vodafoneCash', 'vodafoneNumber', 'walletNumber', 'cashNumber', 'depositWallet',
-          'etisalatCash', 'orangeCash', 'wePay', 'mobileWallet', 'walletPhone', 'receiveWallet',
-          'activeWallet', 'accountWallet'
-        ]);
-        // Fallback: scan all values in settings for an Egyptian 010/011/012/015 number
+        let num = this.findValueByKeyPatterns(
+          flat,
+          ['vodafoneCash', 'vodafoneNumber', 'walletNumber', 'cashNumber', 'depositWallet', 'etisalatCash', 'orangeCash', 'wePay', 'mobileWallet', 'walletPhone', 'receiveWallet', 'activeWallet'],
+          ['wallet'],
+          ['name', 'holder', 'owner', 'support', 'whatsapp', 'enable', 'active', 'min', 'max', 'fee']
+        );
         if (!num) {
-          for (const [k, v] of Object.entries(c)) {
+          for (const [k, v] of Object.entries(flat)) {
             if (typeof v === 'string' && /^01[0125]\d{8}$/.test(v.trim()) && !k.toLowerCase().includes('support') && !k.toLowerCase().includes('whatsapp')) {
               num = v.trim();
               break;
             }
           }
         }
-        const name = this.pickFirstNonEmpty(c, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'receiverName']);
+        const name = this.findValueByKeyPatterns(flat, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'walletAccountName'], ['wallet', 'name'], [])
+          || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+        const provider = this.findValueByKeyPatterns(flat, ['walletProvider', 'walletType', 'cashProvider'], ['wallet', 'provider'], []);
+
         return {
-          title: '📱 التحويل إلى المحفظة الإلكترونية (فودافون / اتصالات / أورنج / وي كاش)',
-          value: num || 'غير مسجّل بعد — أدخله من الإدارة ← محوّل الحسابات',
-          extra: name ? `اسم المستلم: ${name}` : '',
-          copyVal: num || ''
+          title: '📱 بيانات المحفظة الإلكترونية المعتمدة للإيداع',
+          rows: [
+            { label: 'رقم المحفظة', value: num, copy: !!num },
+            { label: 'اسم صاحب المحفظة', value: name, copy: false },
+            { label: 'نوع المحفظة', value: provider || 'فودافون كاش / اتصالات / أورنج / وي', copy: false }
+          ]
         };
       }
 
       if (method === 'instapay') {
-        let ipa = this.pickFirstNonEmpty(c, [
-          'instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'instapayLink',
-          'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'
-        ]);
+        let ipa = this.findValueByKeyPatterns(
+          flat,
+          ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'instapayLink', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
+          ['insta'],
+          ['name', 'holder', 'owner', 'enable', 'active', 'min', 'max']
+        );
         if (!ipa) {
-          for (const v of Object.values(c)) {
+          for (const v of Object.values(flat)) {
             if (typeof v === 'string' && v.toLowerCase().includes('@instapay')) {
               ipa = v.trim();
               break;
             }
           }
         }
-        const name = this.pickFirstNonEmpty(c, ['instapayName', 'instapayHolder', 'instapayOwner', 'receiverName']);
+        const name = this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
+          || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+        const phone = this.findValueByKeyPatterns(flat, ['instapayPhone', 'instapayMobile'], ['insta', 'phone'], []);
+
         return {
-          title: '⚡ التحويل عبر إنستا باي (InstaPay)',
-          value: ipa || 'غير مسجّل بعد — أدخله من الإدارة ← محوّل الحسابات',
-          extra: name ? `اسم الحساب: ${name}` : '',
-          copyVal: ipa || ''
+          title: '⚡ بيانات حساب إنستا باي (InstaPay) المعتمد للإيداع',
+          rows: [
+            { label: 'عنوان / حساب إنستا باي', value: ipa, copy: !!ipa },
+            { label: 'اسم صاحب الحساب', value: name, copy: false },
+            { label: 'رقم الموبايل المربوط', value: phone, copy: !!phone }
+          ]
         };
       }
 
-      // Bank account
-      const bankName = this.pickFirstNonEmpty(c, ['bankName', 'depositBankName', 'activeBankName']) || 'الحساب البنكي المعتمد';
-      let bankAcc = this.pickFirstNonEmpty(c, [
-        'bankAccount', 'bankIban', 'iban', 'bankAccountNumber', 'accountNumber',
-        'depositBank', 'bankAcc', 'activeBankAccount'
-      ]);
-      if (!bankAcc) {
-        for (const v of Object.values(c)) {
+      const bankName = this.findValueByKeyPatterns(flat, ['bankName', 'depositBankName', 'activeBankName'], ['bank', 'name'], ['holder', 'owner', 'user']);
+      let bankAcc = this.findValueByKeyPatterns(flat, ['bankAccount', 'bankAccountNumber', 'accountNumber', 'depositBank', 'bankAcc', 'activeBankAccount'], ['bank', 'acc'], ['name', 'holder', 'owner', 'enable']);
+      let iban = this.findValueByKeyPatterns(flat, ['bankIban', 'iban', 'ibanNumber'], ['iban'], []);
+      if (!bankAcc && !iban) {
+        for (const v of Object.values(flat)) {
           if (typeof v === 'string' && (/^EG\d{20,}/i.test(v.replace(/\s+/g, '')) || /^\d{12,24}$/.test(v.replace(/\s+/g, '')))) {
             bankAcc = v.trim();
             break;
           }
         }
       }
-      const bankHolder = this.pickFirstNonEmpty(c, ['bankHolderName', 'bankHolder', 'bankAccountName', 'companyLegalName', 'receiverName']);
+      const bankHolder = this.findValueByKeyPatterns(flat, ['bankHolderName', 'bankHolder', 'bankAccountName', 'bankOwner', 'companyLegalName'], ['bank', 'holder'], [])
+        || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+
       return {
-        title: `🏦 التحويل البنكي (${bankName})`,
-        value: bankAcc || 'غير مسجّل بعد — أدخله من الإدارة ← محوّل الحسابات',
-        extra: bankHolder ? `اسم صاحب الحساب: ${bankHolder}` : '',
-        copyVal: bankAcc || ''
+        title: '🏦 بيانات الحساب البنكي المعتمد للإيداع',
+        rows: [
+          { label: 'اسم البنك', value: bankName, copy: false },
+          { label: 'اسم صاحب الحساب', value: bankHolder, copy: false },
+          { label: 'رقم الحساب البنكي', value: bankAcc, copy: !!bankAcc },
+          { label: 'رقم الـ IBAN', value: iban, copy: !!iban }
+        ]
       };
     },
 
-    async saveConfigFromAdmin(e) {
-      if (e) e.preventDefault();
-      const app = window.DamanApp;
-      if (!app || !app.isAdmin()) return;
-
-      const dep = {
-        wallet: !!document.getElementById('pmc-dep-wallet')?.checked,
-        instapay: !!document.getElementById('pmc-dep-instapay')?.checked,
-        bank: !!document.getElementById('pmc-dep-bank')?.checked
-      };
-      const wd = {
-        wallet: !!document.getElementById('pmc-wd-wallet')?.checked,
-        instapay: !!document.getElementById('pmc-wd-instapay')?.checked,
-        bank: !!document.getElementById('pmc-wd-bank')?.checked
-      };
-
-      if (!dep.wallet && !dep.instapay && !dep.bank) {
-        return app.toast('يجب تفعيل وسيلة إيداع واحدة على الأقل!', 'error');
+    stopDepositCountdown() {
+      if (this._depositTimerId) {
+        clearInterval(this._depositTimerId);
+        this._depositTimerId = null;
       }
-      if (!wd.wallet && !wd.instapay && !wd.bank) {
-        return app.toast('يجب تفعيل وسيلة سحب واحدة على الأقل!', 'error');
-      }
-
-      this.config.deposit = dep;
-      this.config.withdraw = wd;
-
-      await app.withLock('savePaymentMethodsCtrl', async () => {
-        await app.db.collection('settings').doc('paymentMethodsControl').set({
-          deposit: dep,
-          withdraw: wd,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedBy: app.user.uid
-        }, { merge: true });
-
-        const depCnt = Object.values(dep).filter(Boolean).length;
-        const wdCnt = Object.values(wd).filter(Boolean).length;
-        await app.logAudit('payment_methods_ctrl', `تحديث وسائل الإيداع (${depCnt}/3) والسحب (${wdCnt}/3)`);
-        app.toast('تم حفظ وتفعيل إعدادات الإيداع والسحب بنجاح ✅', 'success');
-      });
     },
 
-    // ==================== 2. COMPRESS RECEIPT IMAGE ====================
-    compressReceiptImage(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('تعذر قراءة الصورة'));
-        reader.onload = () => {
-          const img = new Image();
-          img.onerror = () => reject(new Error('ملف الصورة غير صالح'));
-          img.onload = () => {
-            const maxSide = 1100;
-            const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(img.width * scale);
-            canvas.height = Math.round(img.height * scale);
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', 0.78));
-          };
-          img.src = reader.result;
-        };
-        reader.readAsDataURL(file);
-      });
+    closeDepositModal() {
+      this.stopDepositCountdown();
+      document.getElementById('daman-deposit-modal')?.classList.add('hidden');
     },
 
-    async handleReceiptFileChange(inp) {
-      const app = window.DamanApp;
-      const file = inp.files && inp.files[0];
-      const previewBox = document.getElementById('daman-dep-receipt-preview');
-      if (!file) {
-        this._receiptDataUrl = '';
-        if (previewBox) previewBox.innerHTML = '';
-        return;
-      }
-      try {
-        if (previewBox) previewBox.innerHTML = `<div class="text-amber-300 text-[10.5px] font-bold">جارٍ تجهيز صورة الإيصال...</div>`;
-        const dataUrl = await this.compressReceiptImage(file);
-        this._receiptDataUrl = dataUrl;
-        if (previewBox) {
-          previewBox.innerHTML = `
-            <div class="flex items-center justify-between gap-2 p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40">
-              <span class="text-emerald-300 font-black text-[10.5px]">✅ تم إرفاق صورة الإيصال بنجاح</span>
-              <button type="button" onclick="DamanLightbox.open(DamanWalletMethods._receiptDataUrl, 'معاينة إيصال التحويل')" class="px-2.5 py-1 rounded-lg bg-slate-900 text-amber-300 text-[10px] font-black">معاينة</button>
-            </div>`;
+    startDepositCountdown() {
+      this.stopDepositCountdown();
+      this._depositSecondsLeft = 10 * 60;
+
+      const tick = () => {
+        const modal = document.getElementById('daman-deposit-modal');
+        if (!modal || modal.classList.contains('hidden')) {
+          this.stopDepositCountdown();
+          return;
         }
-      } catch (err) {
-        this._receiptDataUrl = '';
-        if (previewBox) previewBox.innerHTML = '';
-        app.toast(err.message || 'تعذر معالجة صورة الإيصال', 'error');
-      }
+        const timerEl = document.getElementById('daman-dep-countdown-val');
+        const boxEl = document.getElementById('daman-dep-countdown-box');
+        const mins = Math.floor(this._depositSecondsLeft / 60);
+        const secs = this._depositSecondsLeft % 60;
+        if (timerEl) timerEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+        if (boxEl && this._depositSecondsLeft <= 120) {
+          boxEl.classList.remove('bg-amber-500/15', 'border-amber-500/50', 'text-amber-200');
+          boxEl.classList.add('bg-rose-500/20', 'border-rose-500', 'text-rose-200');
+        }
+
+        if (this._depositSecondsLeft <= 0) {
+          this.closeDepositModal();
+          window.DamanApp?.toast('⏳ انتهت مدة جلسة الإيداع (10 دقائق) — أعد فتح نافذة الإيداع للمتابعة.', 'warning');
+          return;
+        }
+        this._depositSecondsLeft -= 1;
+      };
+
+      tick();
+      this._depositTimerId = setInterval(tick, 1000);
     },
 
-    // ==================== 3. DEPOSIT MODAL ====================
     updateDepositMethodUI() {
       const app = window.DamanApp;
       const method = document.getElementById('daman-dep-method')?.value || 'wallet';
@@ -278,17 +259,29 @@
       if (!box || !app) return;
 
       const info = this.getReceivingAccountDetails(method);
+      const validRows = info.rows.filter((r) => r.value && String(r.value).trim());
+
+      if (!validRows.length) {
+        box.innerHTML = `
+          <div class="text-[10.5px] font-black text-amber-300">${app.esc(info.title)}</div>
+          <div class="text-[11px] font-bold text-rose-300 pt-1">⚠️ لم يتم حفظ بيانات هذه الوسيلة بعد — راجع الإدارة ← محوّل الحسابات.</div>`;
+        return;
+      }
+
       box.innerHTML = `
-        <div class="text-[10.5px] font-black text-amber-300">${app.esc(info.title)}</div>
-        <div class="flex items-center justify-between gap-2 pt-1">
-          <div class="min-w-0">
-            <div class="text-xs font-black ${info.copyVal ? 'text-white' : 'text-rose-300'} select-all break-all" dir="ltr">${app.esc(info.value)}</div>
-            ${info.extra ? `<div class="text-[10px] text-slate-300 mt-0.5">${app.esc(info.extra)}</div>` : ''}
-          </div>
-          ${info.copyVal ? `
-            <button type="button" onclick="navigator.clipboard.writeText('${app.esc(info.copyVal).replace(/'/g, "\\'")}'); DamanApp.toast('تم النسخ بنجاح ✅','success')" class="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10.5px] shrink-0">
-              <i class="fa-regular fa-copy me-1"></i> نسخ
-            </button>` : ''}
+        <div class="text-[10.5px] font-black text-amber-300 pb-1 border-b border-slate-800">${app.esc(info.title)}</div>
+        <div class="space-y-1.5 pt-1.5">
+          ${validRows.map((r) => `
+            <div class="flex items-center justify-between gap-2 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-slate-800">
+              <div class="min-w-0">
+                <div class="text-[9.5px] text-slate-400">${app.esc(r.label)}:</div>
+                <div class="text-xs font-black text-white select-all break-all" ${r.copy ? 'dir="ltr"' : ''}>${app.esc(r.value)}</div>
+              </div>
+              ${r.copy ? `
+                <button type="button" onclick="navigator.clipboard.writeText('${app.esc(r.value).replace(/'/g, "\\'")}'); DamanApp.toast('تم النسخ بنجاح ✅','success')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">
+                  <i class="fa-regular fa-copy me-1"></i> نسخ
+                </button>` : ''}
+            </div>`).join('')}
         </div>`;
     },
 
@@ -296,9 +289,6 @@
       const app = window.DamanApp;
       if (!app) return;
       if (!app.user) return app.openAuthModal?.();
-
-      await this.loadAllSettings();
-      this._receiptDataUrl = '';
 
       const holderName = this.getHolderName(app);
       const slaText = this.getSlaDuration();
@@ -317,13 +307,21 @@
         document.body.appendChild(m);
       }
       m.classList.remove('hidden');
+      this._receiptDataUrl = '';
       try { history.pushState({ damanModal: 'depositModal' }, ''); } catch (e) {}
 
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs shadow-2xl">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> إيداع</h3>
-            <button type="button" onclick="document.getElementById('daman-deposit-modal').classList.add('hidden')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+            <button type="button" onclick="DamanWalletMethods.closeDepositModal()" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div id="daman-dep-countdown-box" class="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-amber-200 flex items-center justify-between gap-2">
+            <div class="text-[10.5px] font-bold leading-snug">
+              ⏳ هذه الصفحة مفتوحة لمدة <b>10 دقائق فقط</b> لإتمام التحويل وتأكيد الإيداع
+            </div>
+            <span id="daman-dep-countdown-val" dir="ltr" class="px-2.5 py-1 rounded-xl bg-slate-950 border border-amber-400/50 text-amber-300 font-black text-xs shrink-0">10:00</span>
           </div>
 
           <form onsubmit="DamanWalletMethods.submitDeposit(event)" class="space-y-3">
@@ -334,7 +332,9 @@
               </select>
             </div>
 
-            <div id="daman-dep-target-box" class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-1"></div>
+            <div id="daman-dep-target-box" class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-1">
+              <div class="text-[10.5px] text-amber-300 font-bold">جارٍ تحميل بيانات الحساب...</div>
+            </div>
 
             <div>
               <label class="block text-[10.5px] text-slate-300 font-bold mb-1">2. المبلغ المحوّل (ج.م) *</label>
@@ -385,13 +385,70 @@
           </form>
         </div>`;
 
+      this.startDepositCountdown();
       this.updateDepositMethodUI();
+      await this.loadAllSettings();
+      this.updateDepositMethodUI();
+    },
+
+    compressReceiptImage(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('تعذر قراءة الصورة'));
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('ملف الصورة غير صالح'));
+          img.onload = () => {
+            const maxSide = 1100;
+            const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.78));
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    },
+
+    async handleReceiptFileChange(inp) {
+      const app = window.DamanApp;
+      const file = inp.files && inp.files[0];
+      const previewBox = document.getElementById('daman-dep-receipt-preview');
+      if (!file) {
+        this._receiptDataUrl = '';
+        if (previewBox) previewBox.innerHTML = '';
+        return;
+      }
+      try {
+        if (previewBox) previewBox.innerHTML = `<div class="text-amber-300 text-[10.5px] font-bold">جارٍ تجهيز صورة الإيصال...</div>`;
+        const dataUrl = await this.compressReceiptImage(file);
+        this._receiptDataUrl = dataUrl;
+        if (previewBox) {
+          previewBox.innerHTML = `
+            <div class="flex items-center justify-between gap-2 p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40">
+              <span class="text-emerald-300 font-black text-[10.5px]">✅ تم إرفاق صورة الإيصال بنجاح</span>
+              <button type="button" onclick="DamanLightbox.open(DamanWalletMethods._receiptDataUrl, 'معاينة إيصال التحويل')" class="px-2.5 py-1 rounded-lg bg-slate-900 text-amber-300 text-[10px] font-black">معاينة</button>
+            </div>`;
+        }
+      } catch (err) {
+        this._receiptDataUrl = '';
+        if (previewBox) previewBox.innerHTML = '';
+        app.toast(err.message || 'تعذر معالجة صورة الإيصال', 'error');
+      }
     },
 
     async submitDeposit(e) {
       e.preventDefault();
       const app = window.DamanApp;
       if (!app || !app.user) return;
+      if (this._depositSecondsLeft <= 0) {
+        this.closeDepositModal();
+        return app.toast('⏳ انتهت مدة الـ 10 دقائق للجلسة — أعد فتح نافذة الإيداع.', 'warning');
+      }
 
       const method = document.getElementById('daman-dep-method')?.value || 'wallet';
       const amount = Math.round((parseFloat(document.getElementById('daman-dep-amount')?.value) || 0) * 100) / 100;
@@ -403,7 +460,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV45', async () => {
+      await app.withLock('submitDepositV46', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -453,7 +510,7 @@
             `${holderName} أرسل طلب إيداع بمبلغ ${app.fmtMoney(amount)} ج.م عبر ${methodLabels[method] || method}.`
           ).catch(() => {});
 
-          document.getElementById('daman-deposit-modal')?.classList.add('hidden');
+          this.closeDepositModal();
           this._receiptDataUrl = '';
           app.toast(`تم إرسال طلب الإيداع (${app.fmtMoney(amount)} ج.م) — يتم التنفيذ خلال ${this.getSlaDuration()} ✅`, 'success');
           if (app.activeTab === 'wallet') app.renderCurrentTab();
@@ -463,7 +520,6 @@
       });
     },
 
-    // ==================== 4. WITHDRAW MODAL ====================
     updateWithdrawMethodUI() {
       const method = document.getElementById('daman-wd-method')?.value || 'wallet';
       const standardBox = document.getElementById('daman-wd-standard-box');
@@ -646,7 +702,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV45', async () => {
+      await app.withLock('submitWithdrawV46', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
@@ -707,7 +763,6 @@
       });
     },
 
-    // ==================== 5. WALLET SCREEN BANNER & ADMIN CONTROL CARD ====================
     injectWalletScreenOwnershipNotice() {
       const app = window.DamanApp;
       if (!app || app.activeTab !== 'wallet') return;
@@ -736,96 +791,8 @@
         if (slaBanner && slaBanner.parentNode === root) root.insertBefore(card, slaBanner.nextSibling);
         else root.insertBefore(card, root.firstElementChild);
       }
-
-      main.querySelectorAll('.glass-card, .rounded-xl, .rounded-2xl').forEach((card) => {
-        if (card.dataset.bankLabelFixed) return;
-        const txt = card.textContent || '';
-        if (txt.includes('حساب/IBAN:') && txt.includes('إنستا باي')) {
-          card.dataset.bankLabelFixed = '1';
-          card.querySelectorAll('span, div, b').forEach((el) => {
-            if (el.children.length === 0 && el.textContent.trim() === 'إنستا باي') el.textContent = '🏦 حساب بنكي';
-          });
-        }
-      });
     },
 
-    renderAdminControlBox() {
-      const d = this.config.deposit;
-      const w = this.config.withdraw;
-      return `
-        <form id="daman-pmc-admin-box" onsubmit="DamanWalletMethods.saveConfigFromAdmin(event)" class="glass-card rounded-2xl p-3.5 border-2 border-emerald-500/50 space-y-3 text-xs mb-3">
-          <div class="flex items-center justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-black text-emerald-400">🎛️ التحكم الكامل في وسائل الإيداع والسحب</h3>
-              <p class="text-[10px] text-slate-300">فعّل أو أوقف أي وسيلة للإيداع وللسحب (بما فيها الحساب البنكي في السحب).</p>
-            </div>
-            <span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black shrink-0">تحكم مباشر</span>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div class="p-2.5 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
-              <div class="font-black text-amber-300 text-[11px]">📥 وسائل الإيداع المفعّلة للمستخدمين:</div>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
-                <span>📱 محفظة إلكترونية (كاش)</span>
-                <input id="pmc-dep-wallet" type="checkbox" ${d.wallet ? 'checked' : ''} class="accent-amber-500 w-4 h-4" />
-              </label>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
-                <span>⚡ إنستا باي (InstaPay)</span>
-                <input id="pmc-dep-instapay" type="checkbox" ${d.instapay ? 'checked' : ''} class="accent-amber-500 w-4 h-4" />
-              </label>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
-                <span>🏦 حساب بنكي (تحويل بنكي)</span>
-                <input id="pmc-dep-bank" type="checkbox" ${d.bank ? 'checked' : ''} class="accent-amber-500 w-4 h-4" />
-              </label>
-            </div>
-
-            <div class="p-2.5 rounded-2xl bg-slate-950 border border-sky-500/40 space-y-2">
-              <div class="font-black text-sky-300 text-[11px]">📤 وسائل السحب المفعّلة للمستخدمين:</div>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
-                <span>📱 محفظة إلكترونية (كاش)</span>
-                <input id="pmc-wd-wallet" type="checkbox" ${w.wallet ? 'checked' : ''} class="accent-sky-500 w-4 h-4" />
-              </label>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer">
-                <span>⚡ إنستا باي (InstaPay)</span>
-                <input id="pmc-wd-instapay" type="checkbox" ${w.instapay ? 'checked' : ''} class="accent-sky-500 w-4 h-4" />
-              </label>
-              <label class="flex items-center justify-between gap-2 text-[11px] text-emerald-300 font-bold cursor-pointer">
-                <span>🏦 حساب بنكي (IBAN / رقم حساب)</span>
-                <input id="pmc-wd-bank" type="checkbox" ${w.bank ? 'checked' : ''} class="accent-emerald-500 w-4 h-4" />
-              </label>
-            </div>
-          </div>
-
-          <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20">
-            💾 حفظ وتفعيل إعدادات الإيداع والسحب فوراً
-          </button>
-        </form>`;
-    },
-
-    injectAdminAccountsControl(container, app) {
-      if (!app || !app.isAdmin() || !container) return;
-      if (document.getElementById('daman-pmc-admin-box')) return;
-
-      const Adm = window.DamanAdmin;
-      if (Adm && (Adm._viewingCategoriesTab || Adm._viewingKycVaultTab || Adm._viewingBdayTab || Adm._viewingBroadcastTab || Adm._viewingBanTab)) {
-        return;
-      }
-
-      const tabBar = container.querySelector('.overflow-x-auto');
-      if (!tabBar) return;
-
-      const activeBtn = Array.from(tabBar.querySelectorAll('button')).find((b) =>
-        (b.className || '').includes('bg-amber-500') || (b.className || '').includes('bg-purple-600')
-      );
-      const activeTxt = activeBtn ? (activeBtn.textContent || '') : '';
-      if (Adm?.subTab === 'accounts' || activeTxt.includes('محوّل') || activeTxt.includes('الحسابات')) {
-        if (tabBar.nextElementSibling) {
-          tabBar.nextElementSibling.insertAdjacentHTML('afterbegin', this.renderAdminControlBox());
-        }
-      }
-    },
-
-    // ==================== 6. BOOT & HOOK ALL DEPOSIT / WITHDRAW TRIGGERS ====================
     boot() {
       if (this._booted) return;
       const app = window.DamanApp;
@@ -854,15 +821,6 @@
         }
       }, true);
 
-      if (window.DamanAdmin && typeof DamanAdmin.render === 'function' && !DamanAdmin._pmcHooked) {
-        DamanAdmin._pmcHooked = true;
-        const origAdmRender = DamanAdmin.render.bind(DamanAdmin);
-        DamanAdmin.render = (container, a) => {
-          origAdmRender(container, a);
-          setTimeout(() => this.injectAdminAccountsControl(container, a), 40);
-        };
-      }
-
       if (typeof app.renderCurrentTab === 'function' && !app._pmcWalletTabHooked) {
         app._pmcWalletTabHooked = true;
         const origRenderTab = app.renderCurrentTab.bind(app);
@@ -888,7 +846,6 @@
         }
         this.cleanDepositWithdrawButtons();
         if (app.activeTab === 'wallet') this.injectWalletScreenOwnershipNotice();
-        if (app.activeTab === 'admin' && mainEl) this.injectAdminAccountsControl(mainEl, app);
       }, 650);
     }
   };
