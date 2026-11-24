@@ -1,11 +1,12 @@
 (function () {
-  const STORAGE_KEY = 'damansite_insta_backup_v52';
+  const STORAGE_KEY = 'damansite_insta_backup_v53';
 
   const DepositWithdrawEngine = {
     _booted: false,
     _receiptDataUrl: '',
     _depositTimerId: null,
     _depositSecondsLeft: 600,
+    _guardIntervalId: null,
     config: {
       deposit: { wallet: true, instapay: true, bank: true },
       withdraw: { wallet: true, instapay: true, bank: true }
@@ -355,6 +356,10 @@
         clearInterval(this._depositTimerId);
         this._depositTimerId = null;
       }
+      if (this._guardIntervalId) {
+        clearInterval(this._guardIntervalId);
+        this._guardIntervalId = null;
+      }
     },
 
     closeDepositModal() {
@@ -393,6 +398,18 @@
 
       tick();
       this._depositTimerId = setInterval(tick, 1000);
+
+      // Guard against any external script writing "0" or "true" into IPA display inside open deposit modal
+      this._guardIntervalId = setInterval(() => {
+        const modal = document.getElementById('daman-deposit-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        const targetBox = document.getElementById('daman-dep-target-box');
+        if (!targetBox) return;
+        const txt = targetBox.textContent || '';
+        if ((txt.includes('IPA') || txt.includes('إنستا')) && (/\b0\b/.test(txt) || /\btrue\b/i.test(txt))) {
+          this.updateDepositMethodUI();
+        }
+      }, 300);
     },
 
     updateDepositMethodUI() {
@@ -609,7 +626,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV52', async () => {
+      await app.withLock('submitDepositV53', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -851,7 +868,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV52', async () => {
+      await app.withLock('submitWithdrawV53', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
