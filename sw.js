@@ -1,16 +1,24 @@
-const CACHE_NAME = 'damansite-v29';
+const CACHE_NAME = 'damansite-v30';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './manifest.json?v=21',
-  './app-core.js?v=21',
-  './wallet-kyc.js?v=21',
-  './chat-support.js?v=21',
-  './projects-escrow.js?v=21',
-  './company-panel.js?v=21',
-  './admin.js?v=21'
-];
+  './icon-192.png',
+  './icon-512.png',
+  './manifest.json?v=28',
+  './app-core.js?v=28',
+  './wallet-kyc.js?v=28',
+  './wallet-ops.js?v=28',
+  './chat-support.js?v=28',
+  './chat-extras.js?v=28',
   './chat-media.js?v=29',
+  './projects-escrow.js?v=28',
+  './company-panel.js?v=28',
+  './admin.js?v=28',
+  './admin-ext.js?v=28',
+  './admin-ext2.js?v=28',
+  './categories-ads.js?v=30'
+];
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS).catch(() => {}))
@@ -34,7 +42,13 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = event.request.url;
-  if (url.includes('firestore.googleapis.com') || url.includes('identitytoolkit.googleapis.com')) return;
+  if (
+    url.includes('firestore.googleapis.com') ||
+    url.includes('identitytoolkit.googleapis.com') ||
+    url.includes('accounts.google.com')
+  ) {
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
