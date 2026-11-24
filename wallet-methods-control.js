@@ -27,6 +27,16 @@
       'بنك آخر'
     ],
 
+    esc(str) {
+      if (window.DamanApp && typeof DamanApp.esc === 'function') return DamanApp.esc(str);
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    },
+
     getHolderName(app) {
       const a = app || window.DamanApp;
       if (!a || !a.profile) return 'صاحب الحساب المسجّل';
@@ -40,34 +50,45 @@
       } catch (e) {}
     },
 
-    // ==================== 1. UNIFY CONTRACT VERIFY (HIDE TOP BANNER -> POWER BOTTOM CARD) ====================
+    // ==================== 1. UNIFY CONTRACT VERIFY (HIDE FULL TOP BANNER -> POWER BOTTOM CARD) ====================
     findTopVerifyBanner(main) {
       if (!main) return null;
       const existing = main.querySelector('[data-daman-hidden-top-verify="1"]');
       if (existing) return existing;
 
-      const candidates = Array.from(main.querySelectorAll('div, section, button'));
+      const candidates = Array.from(main.querySelectorAll('div, section, button, a'));
       let best = null;
       let bestLen = Infinity;
 
+      // Pass 1: Find the smallest container holding BOTH title AND "فحص الآن" button
       for (const el of candidates) {
         if (el.id === 'app-main' || el.closest('.daman-modal')) continue;
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (txt.length > 260) continue;
-        const hasTitle = txt.includes('فحص والتحقق من أي عقد رسمي') || (txt.includes('كاميرا QR') && txt.includes('فحص الآن'));
-        if (hasTitle && txt.length < bestLen) {
+        if (txt.length > 280) continue;
+        const hasTitle = txt.includes('فحص والتحقق من أي عقد رسمي') || txt.includes('كاميرا QR أو رقم العقد');
+        const hasBtn = txt.includes('فحص الآن');
+        if (hasTitle && hasBtn && txt.length < bestLen) {
           best = el;
           bestLen = txt.length;
         }
       }
-      return best;
+      if (best) return best;
+
+      // Pass 2: Fallback to closest card wrapper around the title
+      for (const el of candidates) {
+        if (el.id === 'app-main' || el.closest('.daman-modal')) continue;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (txt.length <= 200 && txt.includes('فحص والتحقق من أي عقد رسمي')) {
+          return el.closest('button, a, .glass-card, .rounded-2xl, .rounded-xl') || el;
+        }
+      }
+      return null;
     },
 
     syncHomeContractVerifyWiring() {
       const main = document.getElementById('app-main');
       if (!main) return;
 
-      // 1) Find and hide the top verify banner while preserving its exact trigger
       const topBanner = this.findTopVerifyBanner(main);
       if (topBanner) {
         const triggerBtn =
@@ -86,7 +107,6 @@
         topBanner.setAttribute('aria-hidden', 'true');
       }
 
-      // 2) Upgrade the bottom "فحص عقد رسمي" card text & mark it for unified rich modal
       const bottomTriggers = Array.from(main.querySelectorAll('button, a, div[onclick], .cursor-pointer'));
       for (const el of bottomTriggers) {
         if (el.closest('[data-daman-hidden-top-verify="1"]') || el.closest('.daman-modal')) continue;
@@ -94,7 +114,6 @@
         if (txt.length > 140) continue;
         if (txt.includes('فحص عقد رسمي') && !txt.includes('فحص والتحقق من أي عقد رسمي')) {
           el.dataset.damanBottomVerifyCard = '1';
-          // Upgrade subtitle to clearly reflect full capabilities (QR Camera + Contract Code + Direct Entry)
           el.querySelectorAll('div, span, p').forEach((sub) => {
             if (sub.children.length === 0) {
               const st = (sub.textContent || '').trim();
@@ -108,7 +127,6 @@
     },
 
     openUnifiedContractVerify() {
-      // Priority 1: Invoke the exact preserved trigger from security-verify-ban.js (keeps all listeners & full UI)
       if (this._topVerifyTriggerEl && document.body.contains(this._topVerifyTriggerEl)) {
         try {
           this._topVerifyTriggerEl.click();
@@ -116,7 +134,6 @@
         } catch (e) {}
       }
 
-      // Priority 2: Execute captured onclick handler from the top verify banner
       if (this._topVerifyOnclick) {
         try {
           new Function(this._topVerifyOnclick)();
@@ -124,7 +141,6 @@
         } catch (e) {}
       }
 
-      // Priority 3: Dynamically locate and call the rich verify modal method on DamanSecurityMod
       const secMod = window.DamanSecurityMod;
       if (secMod && typeof secMod === 'object') {
         const preferred = [
@@ -145,7 +161,6 @@
         }
       }
 
-      // Priority 4: Fallback to ShareQR / QR Scanner if SecurityMod isn't loaded
       if (window.DamanShareQR && typeof DamanShareQR.openVerifyModal === 'function') {
         DamanShareQR.openVerifyModal();
       } else if (window.DamanKycBdayQR && typeof DamanKycBdayQR.openQrScannerModal === 'function') {
@@ -154,18 +169,21 @@
     },
 
     // ==================== 2. REAL-TIME SYNC WITH FIRESTORE & ADMIN 6 TOGGLES ====================
-    startConfigListener() {
-      const app = window.DamanApp;
-      if (!app || !app.db) return;
-
-      // Seed initial values from existing appConfig if present
-      const ac = app.appConfig || {};
+    applyFlagsFromAppConfig(ac) {
+      if (!ac || typeof ac !== 'object') return;
       if (typeof ac.enableDepositCash === 'boolean') this.config.deposit.wallet = ac.enableDepositCash;
       if (typeof ac.enableDepositInstapay === 'boolean') this.config.deposit.instapay = ac.enableDepositInstapay;
       if (typeof ac.enableDepositBank === 'boolean') this.config.deposit.bank = ac.enableDepositBank;
       if (typeof ac.enableWithdrawCash === 'boolean') this.config.withdraw.wallet = ac.enableWithdrawCash;
       if (typeof ac.enableWithdrawInstapay === 'boolean') this.config.withdraw.instapay = ac.enableWithdrawInstapay;
       if (typeof ac.enableWithdrawBank === 'boolean') this.config.withdraw.bank = ac.enableWithdrawBank;
+    },
+
+    startConfigListener() {
+      const app = window.DamanApp;
+      if (!app || !app.db) return;
+
+      this.applyFlagsFromAppConfig(app.appConfig);
 
       if (this._unsubConfig) {
         try { this._unsubConfig(); } catch (e) {}
@@ -183,6 +201,14 @@
               if (d.withdraw) this.config.withdraw = Object.assign({}, this.config.withdraw, d.withdraw);
               this.syncAdminCheckboxesFromConfig();
               this.scanOpenModals();
+            } else {
+              // Fallback read from appConfig if paymentMethodsControl isn't created yet
+              app.db.collection('settings').doc('appConfig').get().then((cfgSnap) => {
+                if (cfgSnap && cfgSnap.exists && !this._hasSavedPmcDoc) {
+                  this.applyFlagsFromAppConfig(cfgSnap.data());
+                  this.scanOpenModals();
+                }
+              }).catch(() => {});
             }
           },
           () => {}
@@ -297,7 +323,7 @@
       main.querySelectorAll('h1, h2, h3, h4, div, span').forEach((el) => {
         if (el.children.length === 0) {
           const t = (el.textContent || '').trim();
-          if (t.includes('تشغيل / إيقاف وسائل الإيداع') && t.includes('(2)')) {
+          if (t.includes('تشغيل / إيقاف وسائل الإيداع') && (t.includes('(2)') || t.includes('(3)'))) {
             el.textContent = '🎛️ تشغيل / إيقاف وسائل الإيداع والسحب';
           }
         }
@@ -331,7 +357,6 @@
         });
       });
 
-      // Also hook the parent form submit in "محوّل الحسابات" to mirror all 6 toggles on Save
       const parentForm = (map.depWallet || map.wdBank)?.closest('form');
       if (parentForm && !parentForm.dataset.pmcFormSyncedV55) {
         parentForm.dataset.pmcFormSyncedV55 = '1';
@@ -399,7 +424,7 @@
             <span>🛡️ شرط أساسي للإيداع والسحب (نفس صاحب الحساب فقط)</span>
           </div>
           <p class="text-[10.5px] text-slate-100 leading-relaxed">
-            يُشترط أن يتم <b>الإيداع أو السحب</b> من وإلى محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب الحساب نفسه (${app.esc(holderName)})</b>. يُرفض أي تحويل من أو إلى رقم أو حساب يخص شخصاً آخر.
+            يُشترط أن يتم <b>الإيداع أو السحب</b> من وإلى محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب الحساب نفسه (${this.esc(holderName)})</b>. يُرفض أي تحويل من أو إلى رقم أو حساب يخص شخصاً آخر.
           </p>`;
 
         const slaBanner = document.getElementById('daman-wallet-sla-banner');
@@ -472,6 +497,19 @@
       });
     },
 
+    cleanModalTitle(modal) {
+      const header = modal.querySelector('h2, h3, h4');
+      if (!header) return;
+      const t = header.textContent || '';
+      if (/\(\s*\d+\s*وسائل\s*\)|\(\s*وسيلتين\s*\)/.test(t)) {
+        header.childNodes.forEach((node) => {
+          if (node.nodeType === 3) {
+            node.textContent = node.textContent.replace(/\s*\(\s*\d+\s*وسائل\s*\)|\s*\(\s*وسيلتين\s*\)/g, '');
+          }
+        });
+      }
+    },
+
     injectModalOwnershipNotice(form, kind) {
       const app = window.DamanApp;
       if (!app || !form) return;
@@ -488,15 +526,15 @@
           </div>
           <p class="text-[10.5px] text-slate-100">
             ${isDeposit
-              ? `يجب أن يتم التحويل من محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب هذا الحساب (${app.esc(holderName)})</b> فقط. يُرفض أي إيداع محوّل من حساب شخص آخر.`
-              : `يجب أن يكون رقم المحفظة أو حساب إنستا باي أو الحساب البنكي المستلم مسجّلاً <b>باسم صاحب هذا الحساب (${app.esc(holderName)})</b> فقط. لا يُسمح بالتحويل لحسابات أطراف أخرى.`}
+              ? `يجب أن يتم التحويل من محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب هذا الحساب (${this.esc(holderName)})</b> فقط. يُرفض أي إيداع محوّل من حساب شخص آخر.`
+              : `يجب أن يكون رقم المحفظة أو حساب إنستا باي أو الحساب البنكي المستلم مسجّلاً <b>باسم صاحب هذا الحساب (${this.esc(holderName)})</b> فقط. لا يُسمح بالتحويل لحسابات أطراف أخرى.`}
           </p>
           <label class="flex items-start gap-2 pt-1.5 border-t border-rose-500/35 text-[10.5px] font-black text-amber-200 cursor-pointer">
             <input type="checkbox" required class="accent-amber-500 mt-0.5 shrink-0" />
             <span>
               ${isDeposit
-                ? `أقرّ بأن التحويل تم من رقم أو حساب مسجّل باسمي الشخصي (${app.esc(holderName)}) وليس من حساب شخص آخر.`
-                : `أقرّ بأن الرقم أو الحساب البنكي المكتوب صحيح 100% ومسجّل باسمي الشخصي (${app.esc(holderName)}) وليس باسم شخص آخر.`}
+                ? `أقرّ بأن التحويل تم من رقم أو حساب مسجّل باسمي الشخصي (${this.esc(holderName)}) وليس من حساب شخص آخر.`
+                : `أقرّ بأن الرقم أو الحساب البنكي المكتوب صحيح 100% ومسجّل باسمي الشخصي (${this.esc(holderName)}) وليس باسم شخص آخر.`}
             </span>
           </label>`;
 
@@ -540,12 +578,12 @@
         <div>
           <label class="block text-[10px] text-slate-300 mb-1">اسم البنك *</label>
           <select id="daman-wd-bank-name" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold">
-            ${this.EGYPT_BANKS.map((b) => `<option value="${app.esc(b)}">${app.esc(b)}</option>`).join('')}
+            ${this.EGYPT_BANKS.map((b) => `<option value="${this.esc(b)}">${this.esc(b)}</option>`).join('')}
           </select>
         </div>
         <div>
           <label class="block text-[10px] text-slate-300 mb-1">اسم صاحب الحساب البنكي بالكامل (مطابق لاسمك في التطبيق) *</label>
-          <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${app.esc(holderName)}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
+          <input id="daman-wd-bank-holder" type="text" placeholder="الاسم ثلاثي أو رباعي" value="${this.esc(holderName)}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
         </div>
         <div>
           <label class="block text-[10px] text-slate-300 mb-1">رقم الحساب البنكي أو رقم الـ IBAN *</label>
@@ -626,12 +664,12 @@
       const form = modal.querySelector('form');
       if (!form) return;
 
+      this.cleanModalTitle(modal);
       this.injectModalOwnershipNotice(form, kind);
 
       const enabledMap = kind === 'deposit' ? this.config.deposit : this.config.withdraw;
       const sel = form.querySelector('select:not(#daman-wd-bank-name)');
 
-      // Case A: Original modal uses a <select> dropdown
       if (sel) {
         let accInp = null;
         let bankBox = null;
@@ -678,7 +716,6 @@
         }
       }
 
-      // Case B: Original modal uses method switcher buttons (e.g. Cash / InstaPay tabs)
       const methodBtns = Array.from(modal.querySelectorAll('button[type="button"]')).filter((btn) => {
         if (btn.closest('.daman-quick-amts') || btn.closest('#daman-wd-bank-fields')) return false;
         const txt = (btn.textContent || '').trim();
@@ -690,8 +727,8 @@
 
       if (methodBtns.length >= 2) {
         const btnParent = methodBtns[0].parentElement;
-        let accInp = kind === 'withdraw' ? this.findWithdrawAccountInput(form) : null;
-        let bankBox = accInp ? this.buildWithdrawBankFieldsBox(form, accInp) : null;
+        const accInp = kind === 'withdraw' ? this.findWithdrawAccountInput(form) : null;
+        const bankBox = accInp ? this.buildWithdrawBankFieldsBox(form, accInp) : null;
 
         if (kind === 'withdraw' && btnParent && !btnParent.querySelector('[data-method="bank"]') && !methodBtns.some((b) => this.classifyMethodText(b.dataset.method || b.getAttribute('onclick'), b.textContent) === 'bank')) {
           const bankBtn = document.createElement('button');
@@ -818,7 +855,6 @@
       this.startConfigListener();
       this.patchHealthDiagnostic();
 
-      // Intercept clicks on the bottom "فحص عقد رسمي" card to launch the rich verifier (QR + Contract Code + Entry)
       document.addEventListener('click', (ev) => {
         const target = ev.target;
         if (!target || typeof target.closest !== 'function') return;
