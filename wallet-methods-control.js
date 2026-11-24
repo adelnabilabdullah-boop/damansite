@@ -36,6 +36,13 @@
       'بنك أخرى'
     ],
 
+    isInvalidAccountValue(val) {
+      if (val === undefined || val === null) return true;
+      if (typeof val === 'boolean') return true;
+      const s = String(val).trim().toLowerCase();
+      return !s || s === 'true' || s === 'false' || s === 'undefined' || s === 'null';
+    },
+
     getHolderName(app) {
       const a = app || window.DamanApp;
       if (!a || !a.profile) return 'صاحب الحساب المسجّل';
@@ -103,7 +110,8 @@
 
       fields.forEach((el) => {
         const ctx = getContext(el);
-        const val = String(el.value !== undefined && el.value !== null ? el.value : '').trim();
+        const rawVal = el.value;
+        const val = !this.isInvalidAccountValue(rawVal) ? String(rawVal).trim() : '';
 
         if (ctx.includes('محفظ') || ctx.includes('wallet') || ctx.includes('كاش')) {
           if (!ctx.includes('احتياط')) sawAdminAccountsScreen = true;
@@ -155,8 +163,10 @@
         const val = obj[k];
         const path = prefix ? `${prefix}.${k}` : k;
         if (val !== null && val !== undefined && typeof val !== 'object') {
-          out[path] = val;
-          if (!(k in out) || out[k] === '') out[k] = val;
+          if (!this.isInvalidAccountValue(val)) {
+            out[path] = String(val).trim();
+            if (!(k in out) || out[k] === '') out[k] = String(val).trim();
+          }
         } else if (val && typeof val === 'object') {
           this.flattenObject(val, path, out);
         }
@@ -195,12 +205,11 @@
     findValueByKeyPatterns(flatObj, exactKeys, includeTokens, excludeTokens = []) {
       for (const k of exactKeys) {
         const v = flatObj[k];
-        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+        if (!this.isInvalidAccountValue(v)) return String(v).trim();
       }
       for (const [path, val] of Object.entries(flatObj)) {
-        if (val === undefined || val === null || typeof val === 'object') continue;
+        if (this.isInvalidAccountValue(val)) continue;
         const sVal = String(val).trim();
-        if (!sVal) continue;
         const lowPath = path.toLowerCase();
         if (excludeTokens.some((ex) => lowPath.includes(ex))) continue;
         if (includeTokens.every((inc) => lowPath.includes(inc))) return sVal;
@@ -214,7 +223,7 @@
       const snap = this.domSnapshot;
 
       if (method === 'wallet') {
-        let num = snap.walletNumber || this.findValueByKeyPatterns(
+        let num = !this.isInvalidAccountValue(snap.walletNumber) ? snap.walletNumber : this.findValueByKeyPatterns(
           flat,
           ['vodafoneCash', 'vodafoneNumber', 'walletNumber', 'cashNumber', 'depositWallet', 'etisalatCash', 'orangeCash', 'wePay', 'mobileWallet', 'walletPhone', 'receiveWallet', 'activeWallet'],
           ['wallet'],
@@ -228,25 +237,31 @@
             }
           }
         }
-        const name = snap.walletHolder
-          || this.findValueByKeyPatterns(flat, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'walletAccountName'], ['wallet', 'name'], [])
-          || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+        const name = !this.isInvalidAccountValue(snap.walletHolder)
+          ? snap.walletHolder
+          : (this.findValueByKeyPatterns(flat, ['walletHolderName', 'vodafoneName', 'walletName', 'walletOwner', 'walletAccountName'], ['wallet', 'name'], [])
+            || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []));
 
         return {
           title: '📱 بيانات المحفظة الإلكترونية المعتمدة للإيداع',
           rows: [
-            { label: 'اسم صاحب المحفظة', value: name, copy: !!name },
+            { label: 'اسم صاحب المحفظة', value: name, copy: false },
             { label: 'رقم المحفظة', value: num, copy: !!num }
           ]
         };
       }
 
       if (method === 'instapay') {
-        const hasSnapInsta = !!(snap.instapayAddress || snap.instapayLink || snap.instapayHolder || snap.instapayPhone);
-        const link = hasSnapInsta
+        const hasSnapInsta = !this.isInvalidAccountValue(snap.instapayAddress)
+          || !this.isInvalidAccountValue(snap.instapayLink)
+          || !this.isInvalidAccountValue(snap.instapayHolder)
+          || !this.isInvalidAccountValue(snap.instapayPhone);
+
+        const link = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayLink)
           ? snap.instapayLink
           : this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
-        const ipa = hasSnapInsta
+
+        let ipa = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayAddress)
           ? snap.instapayAddress
           : this.findValueByKeyPatterns(
               flat,
@@ -254,19 +269,30 @@
               ['insta'],
               ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max']
             );
-        const name = hasSnapInsta
+
+        if (!ipa) {
+          for (const v of Object.values(flat)) {
+            if (typeof v === 'string' && v.toLowerCase().includes('@instapay')) {
+              ipa = v.trim();
+              break;
+            }
+          }
+        }
+
+        const name = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayHolder)
           ? snap.instapayHolder
           : (this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
             || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []));
-        const phone = hasSnapInsta
+
+        const phone = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayPhone)
           ? snap.instapayPhone
           : this.findValueByKeyPatterns(flat, ['instapayPhone', 'instapayMobile'], ['insta', 'phone'], []);
 
         return {
-          title: '⚡ بيانات إنستا باي (InstaPay) المعتمدة للإيداع',
+          title: '⚡ بيانات حساب إنستا باي (InstaPay) المعتمد للإيداع',
           link,
           rows: [
-            { label: 'اسم صاحب الحساب', value: name, copy: !!name },
+            { label: 'اسم صاحب الحساب', value: name, copy: false },
             { label: 'عنوان إنستا باي (IPA)', value: ipa, copy: !!ipa },
             { label: 'رابط التحويل المباشر', value: link, copy: !!link },
             { label: 'رقم الموبايل المربوط', value: phone, copy: !!phone }
@@ -274,9 +300,15 @@
         };
       }
 
-      const bankName = snap.bankName || this.findValueByKeyPatterns(flat, ['bankName', 'depositBankName', 'activeBankName'], ['bank', 'name'], ['holder', 'owner', 'user']);
-      let bankAcc = snap.bankAccount || this.findValueByKeyPatterns(flat, ['bankAccount', 'bankAccountNumber', 'accountNumber', 'depositBank', 'bankAcc', 'activeBankAccount'], ['bank', 'acc'], ['name', 'holder', 'owner', 'enable']);
-      const iban = snap.bankIban || this.findValueByKeyPatterns(flat, ['bankIban', 'iban', 'ibanNumber'], ['iban'], []);
+      const bankName = !this.isInvalidAccountValue(snap.bankName)
+        ? snap.bankName
+        : this.findValueByKeyPatterns(flat, ['bankName', 'depositBankName', 'activeBankName'], ['bank', 'name'], ['holder', 'owner', 'user']);
+      let bankAcc = !this.isInvalidAccountValue(snap.bankAccount)
+        ? snap.bankAccount
+        : this.findValueByKeyPatterns(flat, ['bankAccount', 'bankAccountNumber', 'accountNumber', 'depositBank', 'bankAcc', 'activeBankAccount'], ['bank', 'acc'], ['name', 'holder', 'owner', 'enable']);
+      const iban = !this.isInvalidAccountValue(snap.bankIban)
+        ? snap.bankIban
+        : this.findValueByKeyPatterns(flat, ['bankIban', 'iban', 'ibanNumber'], ['iban'], []);
       if (!bankAcc && !iban) {
         for (const v of Object.values(flat)) {
           if (typeof v === 'string' && (/^EG\d{20,}/i.test(v.replace(/\s+/g, '')) || /^\d{12,24}$/.test(v.replace(/\s+/g, '')))) {
@@ -285,15 +317,16 @@
           }
         }
       }
-      const bankHolder = snap.bankHolder
-        || this.findValueByKeyPatterns(flat, ['bankHolderName', 'bankHolder', 'bankAccountName', 'bankOwner', 'companyLegalName'], ['bank', 'holder'], [])
-        || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+      const bankHolder = !this.isInvalidAccountValue(snap.bankHolder)
+        ? snap.bankHolder
+        : (this.findValueByKeyPatterns(flat, ['bankHolderName', 'bankHolder', 'bankAccountName', 'bankOwner', 'companyLegalName'], ['bank', 'holder'], [])
+          || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []));
 
       return {
         title: '🏦 بيانات الحساب البنكي المعتمد للإيداع',
         rows: [
-          { label: 'اسم صاحب الحساب البنكي', value: bankHolder, copy: !!bankHolder },
-          { label: 'اسم البنك', value: bankName, copy: !!bankName },
+          { label: 'اسم صاحب الحساب البنكي', value: bankHolder, copy: false },
+          { label: 'اسم البنك', value: bankName, copy: false },
           { label: 'رقم الحساب البنكي', value: bankAcc, copy: !!bankAcc },
           { label: 'رقم الـ IBAN', value: iban, copy: !!iban }
         ]
@@ -352,7 +385,7 @@
       if (!box || !app) return;
 
       const info = this.getReceivingAccountDetails(method);
-      const validRows = info.rows.filter((r) => r.value !== undefined && r.value !== null && String(r.value).trim() !== '');
+      const validRows = info.rows.filter((r) => !this.isInvalidAccountValue(r.value));
 
       if (!validRows.length) {
         box.innerHTML = `
@@ -559,7 +592,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV49', async () => {
+      await app.withLock('submitDepositV50', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -801,7 +834,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV49', async () => {
+      await app.withLock('submitWithdrawV50', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
