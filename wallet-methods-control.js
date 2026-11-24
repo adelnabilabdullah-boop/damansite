@@ -1,4 +1,6 @@
 (function () {
+  const STORAGE_KEY = 'damansite_insta_backup_v52';
+
   const DepositWithdrawEngine = {
     _booted: false,
     _receiptDataUrl: '',
@@ -36,13 +38,32 @@
       'بنك أخرى'
     ],
 
-    isInvalidAccountValue(val, allowZero = false) {
+    isInvalidAccountValue(val) {
       if (val === undefined || val === null) return true;
       if (typeof val === 'boolean') return true;
       const s = String(val).trim().toLowerCase();
-      if (!s || s === 'true' || s === 'false' || s === 'undefined' || s === 'null') return true;
-      if (!allowZero && (s === '0' || s === '0.0')) return true;
-      return false;
+      return !s || s === '0' || s === '0.0' || s === 'true' || s === 'false' || s === 'undefined' || s === 'null';
+    },
+
+    loadBackupFromStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          Object.keys(this.domSnapshot).forEach((k) => {
+            if (!this.isInvalidAccountValue(parsed[k])) {
+              this.domSnapshot[k] = String(parsed[k]).trim();
+            }
+          });
+        }
+      } catch (e) {}
+    },
+
+    saveBackupToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.domSnapshot));
+      } catch (e) {}
     },
 
     getHolderName(app) {
@@ -81,6 +102,7 @@
     },
 
     harvestAccountsFromAdminDOM() {
+      this.loadBackupFromStorage();
       const main = document.getElementById('app-main');
       if (!main) return;
 
@@ -96,18 +118,7 @@
         return `${el.id || ''} ${el.name || ''} ${el.placeholder || ''} ${(lbl || prevLbl)?.textContent || ''} ${parentLbl} ${cardHead}`.toLowerCase();
       };
 
-      const freshSnap = {
-        walletNumber: '',
-        walletHolder: '',
-        instapayLink: '',
-        instapayAddress: '',
-        instapayHolder: '',
-        instapayPhone: '',
-        bankName: '',
-        bankAccount: '',
-        bankIban: '',
-        bankHolder: ''
-      };
+      const nextSnap = Object.assign({}, this.domSnapshot);
       let sawAdminAccountsScreen = false;
 
       fields.forEach((el) => {
@@ -119,39 +130,40 @@
           if (!ctx.includes('احتياط')) sawAdminAccountsScreen = true;
           if (!val || ctx.includes('احتياط')) return;
           if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
-            if (!freshSnap.walletHolder) freshSnap.walletHolder = val;
-          } else if (!freshSnap.walletNumber) {
-            freshSnap.walletNumber = val;
+            nextSnap.walletHolder = val;
+          } else {
+            nextSnap.walletNumber = val;
           }
         } else if (ctx.includes('إنستا') || ctx.includes('انستا') || ctx.includes('instapay') || ctx.includes('ipa')) {
           sawAdminAccountsScreen = true;
           if (!val) return;
           if (val.startsWith('http') || ctx.includes('رابط') || ctx.includes('لينك') || ctx.includes('link')) {
-            if (!freshSnap.instapayLink) freshSnap.instapayLink = val;
+            nextSnap.instapayLink = val;
           } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
-            if (!freshSnap.instapayHolder) freshSnap.instapayHolder = val;
+            nextSnap.instapayHolder = val;
           } else if (ctx.includes('موبايل') || ctx.includes('هاتف') || ctx.includes('phone')) {
-            if (!freshSnap.instapayPhone) freshSnap.instapayPhone = val;
-          } else if (ctx.includes('ipa') || ctx.includes('عنوان') || val.includes('@')) {
-            if (!freshSnap.instapayAddress) freshSnap.instapayAddress = val;
+            nextSnap.instapayPhone = val;
+          } else {
+            nextSnap.instapayAddress = val;
           }
         } else if (ctx.includes('بنك') || ctx.includes('bank') || ctx.includes('iban') || ctx.includes('حساب')) {
           sawAdminAccountsScreen = true;
           if (!val) return;
           if (ctx.includes('iban')) {
-            if (!freshSnap.bankIban) freshSnap.bankIban = val;
+            nextSnap.bankIban = val;
           } else if (ctx.includes('اسم البنك') || (ctx.includes('بنك') && !ctx.includes('صاحب') && !ctx.includes('رقم') && !ctx.includes('حساب'))) {
-            if (!freshSnap.bankName) freshSnap.bankName = val;
+            nextSnap.bankName = val;
           } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder')) {
-            if (!freshSnap.bankHolder) freshSnap.bankHolder = val;
-          } else if (!freshSnap.bankAccount) {
-            freshSnap.bankAccount = val;
+            nextSnap.bankHolder = val;
+          } else {
+            nextSnap.bankAccount = val;
           }
         }
       });
 
       if (sawAdminAccountsScreen) {
-        this.domSnapshot = freshSnap;
+        this.domSnapshot = nextSnap;
+        this.saveBackupToStorage();
       }
     },
 
@@ -167,7 +179,7 @@
         if (val !== null && val !== undefined && typeof val !== 'object') {
           if (!this.isInvalidAccountValue(val)) {
             out[path] = String(val).trim();
-            if (!(k in out) || out[k] === '') out[k] = String(val).trim();
+            if (!(k in out) || this.isInvalidAccountValue(out[k])) out[k] = String(val).trim();
           }
         } else if (val && typeof val === 'object') {
           this.flattenObject(val, path, out);
@@ -254,9 +266,17 @@
       }
 
       if (method === 'instapay') {
-        const link = !this.isInvalidAccountValue(snap.instapayLink)
+        let link = !this.isInvalidAccountValue(snap.instapayLink)
           ? snap.instapayLink
           : this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
+        if (!link) {
+          for (const v of Object.values(flat)) {
+            if (typeof v === 'string' && (v.includes('ipn.eg') || v.toLowerCase().includes('instapay.com'))) {
+              link = v.trim();
+              break;
+            }
+          }
+        }
 
         let ipa = !this.isInvalidAccountValue(snap.instapayAddress)
           ? snap.instapayAddress
@@ -589,7 +609,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV51', async () => {
+      await app.withLock('submitDepositV52', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -831,7 +851,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV51', async () => {
+      await app.withLock('submitWithdrawV52', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
@@ -928,6 +948,7 @@
       if (!app) return setTimeout(() => this.boot(), 250);
       this._booted = true;
 
+      this.loadBackupFromStorage();
       this.loadAllSettings();
 
       if (window.DamanWallet) {
