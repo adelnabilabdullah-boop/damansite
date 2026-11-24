@@ -96,29 +96,49 @@
       const app = window.DamanApp;
       if (!app || app.activeTab !== 'wallet') return;
       const main = document.getElementById('app-main');
-      if (!main || document.getElementById('daman-wallet-owner-rule-banner')) return;
+      if (!main) return;
 
-      const root = main.firstElementChild || main;
-      const holderName = this.getAccountHolderName(app);
+      if (!document.getElementById('daman-wallet-owner-rule-banner')) {
+        const root = main.firstElementChild || main;
+        const holderName = this.getAccountHolderName(app);
 
-      const card = document.createElement('div');
-      card.id = 'daman-wallet-owner-rule-banner';
-      card.className = 'mb-3 p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-xs space-y-1 shadow-lg';
-      card.innerHTML = `
-        <div class="font-black text-rose-300 flex items-center gap-1.5">
-          <i class="fa-solid fa-user-shield text-sm"></i>
-          <span>🛡️ شرط أساسي للإيداع والسحب (نفس صاحب الحساب فقط)</span>
-        </div>
-        <p class="text-[10.5px] text-slate-100 leading-relaxed">
-          يُشترط أن يتم <b>الإيداع أو السحب</b> من وإلى محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب الحساب نفسه (${app.esc(holderName)})</b>. يُرفض أي تحويل من أو إلى رقم أو حساب يخص شخصاً آخر.
-        </p>`;
+        const card = document.createElement('div');
+        card.id = 'daman-wallet-owner-rule-banner';
+        card.className = 'mb-3 p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-xs space-y-1 shadow-lg';
+        card.innerHTML = `
+          <div class="font-black text-rose-300 flex items-center gap-1.5">
+            <i class="fa-solid fa-user-shield text-sm"></i>
+            <span>🛡️ شرط أساسي للإيداع والسحب (نفس صاحب الحساب فقط)</span>
+          </div>
+          <p class="text-[10.5px] text-slate-100 leading-relaxed">
+            يُشترط أن يتم <b>الإيداع أو السحب</b> من وإلى محفظة إلكترونية أو حساب إنستا باي أو حساب بنكي مسجّل <b>باسم صاحب الحساب نفسه (${app.esc(holderName)})</b>. يُرفض أي تحويل من أو إلى رقم أو حساب يخص شخصاً آخر.
+          </p>`;
 
-      const slaBanner = document.getElementById('daman-wallet-sla-banner');
-      if (slaBanner && slaBanner.parentNode === root) {
-        root.insertBefore(card, slaBanner.nextSibling);
-      } else {
-        root.insertBefore(card, root.firstElementChild);
+        const slaBanner = document.getElementById('daman-wallet-sla-banner');
+        if (slaBanner && slaBanner.parentNode === root) {
+          root.insertBefore(card, slaBanner.nextSibling);
+        } else {
+          root.insertBefore(card, root.firstElementChild);
+        }
       }
+
+      this.fixBankLabelsInDOM(main);
+    },
+
+    fixBankLabelsInDOM(rootEl) {
+      if (!rootEl) return;
+      rootEl.querySelectorAll('.glass-card, .rounded-xl, .rounded-2xl').forEach((card) => {
+        if (card.dataset.bankLabelFixed) return;
+        const txt = card.textContent || '';
+        if (txt.includes('حساب/IBAN:') && txt.includes('إنستا باي')) {
+          card.dataset.bankLabelFixed = '1';
+          card.querySelectorAll('span, div, b').forEach((el) => {
+            if (el.children.length === 0 && el.textContent.trim() === 'إنستا باي') {
+              el.textContent = '🏦 حساب بنكي';
+            }
+          });
+        }
+      });
     },
 
     // ==================== 3. ADMIN CONTROL CARD INSIDE "💳 محوّل الحسابات" ====================
@@ -176,16 +196,29 @@
     },
 
     injectAdminAccountsControl(container, app) {
-      if (!app || !app.isAdmin()) return;
+      if (!app || !app.isAdmin() || !container) return;
+      this.fixBankLabelsInDOM(container);
       if (document.getElementById('daman-pmc-admin-box')) return;
 
+      const Adm = window.DamanAdmin;
+      if (Adm && (Adm._viewingCategoriesTab || Adm._viewingKycVaultTab || Adm._viewingBdayTab || Adm._viewingBroadcastTab || Adm._viewingBanTab)) {
+        return;
+      }
+
+      const tabBar = container.querySelector('.overflow-x-auto');
+      if (!tabBar) return;
+
+      const activeBtn = Array.from(tabBar.querySelectorAll('button')).find((b) =>
+        (b.className || '').includes('bg-amber-500') || (b.className || '').includes('bg-purple-600')
+      );
+      const activeTxt = activeBtn ? (activeBtn.textContent || '') : '';
       const isAccountsSubTab =
-        window.DamanAdmin?.subTab === 'accounts' ||
-        (container && (container.textContent || '').includes('محوّل الحسابات') && (container.querySelector('input[id*="instapay" i], input[id*="bank" i], input[id*="wallet" i]')));
+        Adm?.subTab === 'accounts' ||
+        activeTxt.includes('محوّل') ||
+        activeTxt.includes('الحسابات');
 
       if (!isAccountsSubTab) return;
-      const tabBar = container.querySelector('.overflow-x-auto');
-      if (tabBar && tabBar.nextElementSibling) {
+      if (tabBar.nextElementSibling) {
         tabBar.nextElementSibling.insertAdjacentHTML('afterbegin', this.renderAdminControlBox(app));
       }
     },
@@ -218,7 +251,6 @@
       const holderName = this.getAccountHolderName(app);
       const isDeposit = kind === 'deposit';
 
-      // Inject clear same-owner banner + mandatory declaration checkbox
       if (!form.querySelector('.daman-same-owner-box')) {
         const box = document.createElement('div');
         box.className = 'daman-same-owner-box p-3 rounded-2xl bg-rose-500/15 border-2 border-rose-500/60 text-[11px] leading-relaxed space-y-2';
@@ -252,7 +284,6 @@
         }
       }
 
-      // Remove duplicate checkbox inside SLA notice on withdraw so user ticks ONE clear unified checkbox
       if (!isDeposit) {
         const slaCheckboxRow = form.querySelector('.daman-modal-sla-notice label');
         if (slaCheckboxRow) slaCheckboxRow.remove();
