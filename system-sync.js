@@ -6,7 +6,7 @@
     _lastChatCount: -1,
     _soundEnabled: true,
 
-    // ==================== 1. SUBTLE WEB AUDIO CHIME (NO EXTERNAL MP3) ====================
+    // ==================== 1. SUBTLE WEB AUDIO CHIME ====================
     playChime(kind = 'notif') {
       if (!this._soundEnabled) return;
       try {
@@ -34,13 +34,14 @@
       } catch (e) {}
     },
 
-    // ==================== 2. FIX SHARE-QR CLICK HANDLERS (CRITICAL BUG FIX) ====================
+    // ==================== 2. FIX SHARE-QR CLICK HANDLERS & VERIFY MESSAGE ====================
     patchShareQR() {
       const QR = window.DamanShareQR;
-      if (!QR || QR._syncFixed) return;
-      QR._syncFixed = true;
+      const app = window.DamanApp;
+      if (!QR || !app || QR._syncFixedV38) return;
+      QR._syncFixedV38 = true;
 
-      QR.enhanceMarketCardsHtml = function (html, app) {
+      QR.enhanceMarketCardsHtml = function (html, a) {
         if (!html || !html.includes('toggleFavorite(')) return html;
         const wrap = document.createElement('div');
         wrap.innerHTML = html;
@@ -51,7 +52,7 @@
           if (!favBtn) return;
           const m = (favBtn.getAttribute('onclick') || '').match(/toggleFavorite\('([^']+)'\)/);
           if (!m || !m[1]) return;
-          const safePid = app.esc(m[1]).replace(/'/g, "\\'");
+          const safePid = (a || app).esc(m[1]).replace(/'/g, "\\'");
 
           const group = document.createElement('div');
           group.className = 'flex items-center gap-2 shrink-0';
@@ -71,14 +72,14 @@
         return wrap.innerHTML;
       };
 
-      QR.enhanceContractCardHtml = function (html, ag, app) {
+      QR.enhanceContractCardHtml = function (html, ag, a) {
         if (!html || !ag || !ag.id) return html;
         const wrap = document.createElement('div');
         wrap.innerHTML = html.trim();
         const card = wrap.firstElementChild;
         if (!card || card.querySelector('.daman-ct-qr-btn')) return html;
 
-        const safeAgId = app.esc(ag.id).replace(/'/g, "\\'");
+        const safeAgId = (a || app).esc(ag.id).replace(/'/g, "\\'");
         const topRow = card.firstElementChild;
         if (topRow) {
           const qrBtn = document.createElement('button');
@@ -101,27 +102,106 @@
 
         return wrap.innerHTML;
       };
+
+      // Fix misleading "requires login" message when user IS logged in but is not a party to the contract
+      const origVerify = QR.openContractVerifyModal.bind(QR);
+      QR.openContractVerifyModal = async function (ticketNumber) {
+        await origVerify(ticketNumber);
+        if (!app.user) return;
+        const modal = document.getElementById('daman-verify-ct-modal');
+        if (!modal) return;
+        const h3 = modal.querySelector('h3');
+        if (h3 && h3.textContent.includes('يتطلب تسجيل الدخول')) {
+          h3.textContent = `العقد ${String(ticketNumber || '').trim().toUpperCase()} خاص بأطرافه والإدارة فقط 🔒`;
+        }
+      };
     },
 
-    // ==================== 3. FIX ADMIN TAB CONFLICT + USER 360° KYC SHORTCUT + HEALTH BUTTON ====================
+    // ==================== 3. FIX COMPANY PANEL MODALS NOTIFICATIONS & COMPANY ID DETECTION ====================
+    patchCompanyEnhancements() {
+      const CE = window.DamanCompanyEnh;
+      const app = window.DamanApp;
+      if (!CE || !app || CE._syncFixedV38) return;
+      CE._syncFixedV38 = true;
+
+      // Track clicks & submits inside modals (.daman-modal) too, not just #app-main!
+      document.addEventListener('click', (ev) => {
+        if (window.DamanApp?.activeTab === 'company' && ev.target.closest('.daman-modal')) {
+          CE.lastActionAt = Date.now();
+        }
+      }, true);
+      document.addEventListener('submit', (ev) => {
+        if (window.DamanApp?.activeTab === 'company' && ev.target.closest('.daman-modal')) {
+          CE.lastActionAt = Date.now();
+        }
+      }, true);
+
+      // Smarter company ID resolution + Firestore fallback so employee notifications ALWAYS attach
+      const origResolve = CE.resolveActiveCompanyId.bind(CE);
+      CE.resolveActiveCompanyId = function () {
+        const direct = origResolve();
+        if (direct) return direct;
+        const comp = window.DamanCompany;
+        if (comp && typeof comp === 'object') {
+          if (comp.activeCompany?.id) return comp.activeCompany.id;
+          if (comp.myCompany?.id) return comp.myCompany.id;
+          if (Array.isArray(comp.companies) && comp.companies[0]?.id) return comp.companies[0].id;
+          for (const v of Object.values(comp)) {
+            if (v && typeof v === 'object' && !Array.isArray(v) && v.id && typeof v.code === 'string' && v.code.startsWith('CMP-')) {
+              return v.id;
+            }
+          }
+        }
+        return this._fallbackCompanyId || null;
+      };
+
+      const origUpdate = CE.onCompanyScreenUpdated.bind(CE);
+      CE.onCompanyScreenUpdated = function () {
+        origUpdate();
+        // Also inject (?) help icons inside any open Company modal
+        document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => {
+          try { this.injectHelpIcons(m); } catch (e) {}
+        });
+        // Fallback Firestore lookup once if companyId wasn't found in memory
+        if (!this.activeCompanyId && !this._fallbackQueried && app.user && app.db) {
+          this._fallbackQueried = true;
+          app.db.collection('companyMembers').where('userId', '==', app.user.uid).limit(1).get().then((snap) => {
+            if (!snap.empty) {
+              const cid = snap.docs[0].data()?.companyId;
+              if (cid) {
+                this._fallbackCompanyId = cid;
+                this.attachCompanyWatchers(cid);
+              }
+            }
+          }).catch(() => {});
+        }
+      };
+
+      // Observe body for newly opened modals while on Company tab
+      if (typeof MutationObserver !== 'undefined') {
+        const bodyObs = new MutationObserver(() => {
+          if (window.DamanApp?.activeTab !== 'company') return;
+          document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => {
+            try { CE.injectHelpIcons(m); } catch (e) {}
+          });
+        });
+        bodyObs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+    },
+
+    // ==================== 4. FIX ADMIN TABS + USER 360° KYC + WATCH BROKEN IMAGES ====================
     patchAdminIntegration() {
       const Adm = window.DamanAdmin;
       const app = window.DamanApp;
-      if (!Adm || !app || Adm._syncPatched) return;
-      Adm._syncPatched = true;
+      if (!Adm || !app || Adm._syncPatchedV38) return;
+      Adm._syncPatchedV38 = true;
 
-      // Resolve conflict between Categories tab and KYC Vault tab
       if (typeof Adm.setSubTab === 'function') {
         const prevSetTab = Adm.setSubTab.bind(Adm);
         Adm.setSubTab = function (t) {
-          if (t === 'categories') {
-            this._viewingKycVaultTab = false;
-          } else if (t === 'kyc_vault') {
-            this._viewingCategoriesTab = false;
-          } else {
-            this._viewingCategoriesTab = false;
-            this._viewingKycVaultTab = false;
-          }
+          if (t === 'categories') this._viewingKycVaultTab = false;
+          else if (t === 'kyc_vault') this._viewingCategoriesTab = false;
+          else { this._viewingCategoriesTab = false; this._viewingKycVaultTab = false; }
           return prevSetTab(t);
         };
       }
@@ -134,7 +214,7 @@
         };
       }
 
-      // Inject "🪪 البطاقة والسجل التجاري" button inside User 360° Modal automatically
+      // Inject "🪪 عرض البطاقة والسجل التجاري" inside User 360° Modal
       if (typeof Adm.openUser360Modal === 'function') {
         const orig360 = Adm.openUser360Modal.bind(Adm);
         Adm.openUser360Modal = function (uid) {
@@ -167,7 +247,29 @@
         };
       }
 
-      // Inject "🩺 فحص الترابط" quick button in Admin panel tab bar
+      // Fix broken empty-src <img> inside Admin Chat Watch when image has mediaId without thumbBase64
+      if (typeof Adm._renderAdminWatchMsgs === 'function') {
+        const origWatchRender = Adm._renderAdminWatchMsgs.bind(Adm);
+        Adm._renderAdminWatchMsgs = function () {
+          origWatchRender();
+          const box = document.getElementById('adm-watch-msgs');
+          if (!box) return;
+          box.querySelectorAll('img').forEach((img) => {
+            const rawSrc = img.getAttribute('src') || '';
+            if (!rawSrc.trim()) {
+              const oc = img.getAttribute('onclick') || '';
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-300 font-black text-[11px]';
+              btn.setAttribute('onclick', oc);
+              btn.innerHTML = '<i class="fa-solid fa-image me-1"></i> فتح الصورة المرفقة';
+              img.parentNode.replaceChild(btn, img);
+            }
+          });
+        };
+      }
+
+      // Inject "🩺 فحص الترابط" button in Admin panel tab bar
       if (typeof Adm.render === 'function') {
         const origAdmRender = Adm.render.bind(Adm);
         Adm.render = function (container, a) {
@@ -188,44 +290,33 @@
       }
     },
 
-    // ==================== 4. FIX KYC VAULT LIGHTBOX INLINE BASE64 ====================
+    // ==================== 5. PERMANENT KYC VAULT LIGHTBOX FIX (WORKS EVEN ON SLOW 3G) ====================
     patchKycVaultLightbox() {
-      const Vault = window.DamanKycVault;
-      if (!Vault || Vault._syncLbFixed) return;
-      Vault._syncLbFixed = true;
+      if (this._kycClickDelegated) return;
+      this._kycClickDelegated = true;
 
-      const origOpen = Vault.openDocsModal.bind(Vault);
-      Vault.openDocsModal = async function (uid, isSelf) {
-        await origOpen(uid, isSelf);
-        // Cleanly bind zoom buttons to read from rendered <img> without giant inline Base64 onclick strings
-        setTimeout(() => {
-          const modal = document.getElementById('daman-kycv-modal');
-          if (!modal) return;
-          ['idFront', 'idBack', 'selfie', 'cr', 'tax'].forEach((k) => {
-            const stEl = document.getElementById('kycv-st-' + k);
-            const imgWrap = document.getElementById('kycv-img-' + k);
-            if (!stEl || !imgWrap) return;
-            const btn = stEl.querySelector('button');
-            if (btn) {
-              btn.removeAttribute('onclick');
-              btn.onclick = () => {
-                const img = imgWrap.querySelector('img');
-                if (img && img.src && window.DamanLightbox) {
-                  window.DamanLightbox.open(img.src, 'مستند التوثيق');
-                }
-              };
-            }
-          });
-        }, 1200);
-      };
+      // Intercept click on zoom button in capture phase BEFORE inline base64 onclick runs
+      document.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('#daman-kycv-modal [id^="kycv-st-"] button');
+        if (!btn) return;
+        const stSpan = btn.closest('[id^="kycv-st-"]');
+        const key = stSpan ? stSpan.id.replace('kycv-st-', '') : '';
+        const img = key ? document.querySelector(`#kycv-img-${key} img`) : null;
+        if (img && img.src && window.DamanLightbox) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          btn.removeAttribute('onclick');
+          window.DamanLightbox.open(img.src, 'مستند التوثيق');
+        }
+      }, true);
     },
 
-    // ==================== 5. MISSING ADMIN NOTIFICATIONS + HIDDEN CATEGORY LABELS ====================
-    patchProjectsNotificationsAndLabels() {
+    // ==================== 6. MISSING ADMIN NOTIFICATIONS, CATEGORY COUNT & UI FIXES ====================
+    patchProjectsAndUI() {
       const Proj = window.DamanProjects;
       const app = window.DamanApp;
-      if (!Proj || !app || Proj._syncNotifPatched) return;
-      Proj._syncNotifPatched = true;
+      if (!Proj || !app || Proj._syncNotifPatchedV38) return;
+      Proj._syncNotifPatchedV38 = true;
 
       // Fix hidden/custom category label lookup
       const origCatLabel = Proj.catLabel.bind(Proj);
@@ -237,7 +328,27 @@
         return origCatLabel(id);
       };
 
-      // Notify Admin when user pays Inspection 3x quote
+      // Update dynamic category count text inside Post Editor help tooltip (instead of hardcoded "17")
+      const origEditor = Proj.openPostEditorModal.bind(Proj);
+      Proj.openPostEditorModal = function (existing) {
+        origEditor(existing);
+        const hBox = document.getElementById('fh-pm-ct');
+        if (hBox && Array.isArray(app.CATEGORIES)) {
+          hBox.textContent = hBox.textContent.replace('17 تخصص', `${app.CATEGORIES.length} قسم`);
+        }
+      };
+
+      // Fix WhatsApp icon class conflict inside post-contact-guard warning modal
+      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function') {
+        const origExtReq = DamanPostContact.requestExternalContact.bind(DamanPostContact);
+        DamanPostContact.requestExternalContact = function (pid, mode) {
+          origExtReq(pid, mode);
+          const broken = document.querySelector('#daman-ext-contact-warn-modal i.fa-solid.fa-brands');
+          if (broken) broken.classList.remove('fa-solid');
+        };
+      }
+
+      // Notify Admin on Inspection 3x payment
       if (typeof Proj.payInspectionRequest === 'function') {
         const origPayIns = Proj.payInspectionRequest.bind(Proj);
         Proj.payInspectionRequest = async function (reqId) {
@@ -255,7 +366,7 @@
         };
       }
 
-      // Notify Admin when user funds VIP Labor quote
+      // Notify Admin on VIP Labor funding
       if (typeof Proj.fundVipLaborRequest === 'function') {
         const origFundVip = Proj.fundVipLaborRequest.bind(Proj);
         Proj.fundVipLaborRequest = async function (reqId) {
@@ -273,7 +384,7 @@
         };
       }
 
-      // Notify Admin when user cancels an Inspection or VIP Labor request
+      // Notify Admin on user cancellation
       if (typeof Proj.cancelUserRequest === 'function') {
         const origCancel = Proj.cancelUserRequest.bind(Proj);
         Proj.cancelUserRequest = async function (colName, reqId) {
@@ -291,7 +402,7 @@
         };
       }
 
-      // Notify Admin when user activates a paid Ad Boost package
+      // Notify Admin on paid Ad Boost
       if (typeof Proj.applyBoostPackage === 'function') {
         const origBoost = Proj.applyBoostPackage.bind(Proj);
         Proj.applyBoostPackage = async function (pid, pkgId) {
@@ -311,12 +422,11 @@
       }
     },
 
-    // ==================== 6. SYNC MARKET SEARCH LABEL & AUTO-STOP MIC ON TAB LEAVE ====================
+    // ==================== 7. SYNC MARKET SEARCH UI & AUTO-STOP MIC ON TAB LEAVE ====================
     patchGlobalSafeguards() {
       const app = window.DamanApp;
       if (!app) return;
 
-      // Auto-cancel active voice recording if user leaves Chat tab
       if (typeof app.switchTab === 'function' && !app._syncTabPatched) {
         app._syncTabPatched = true;
         const origSwitch = app.switchTab.bind(app);
@@ -328,9 +438,9 @@
         };
       }
 
-      // Keep "القسم الحالي" header synced when Market search switches to 'all'
-      if (window.DamanSearch && typeof DamanSearch.onMarketLiveInput === 'function' && !DamanSearch._syncLabelFixed) {
-        DamanSearch._syncLabelFixed = true;
+      // When Market search switches category to 'all', sync label + highlight pills + category ads banner without stealing input focus
+      if (window.DamanSearch && typeof DamanSearch.onMarketLiveInput === 'function' && !DamanSearch._syncLabelFixedV38) {
+        DamanSearch._syncLabelFixedV38 = true;
         const origInp = DamanSearch.onMarketLiveInput.bind(DamanSearch);
         DamanSearch.onMarketLiveInput = function (val) {
           const prevCat = window.DamanProjects?.selectedCategory;
@@ -338,12 +448,21 @@
           if (prevCat && prevCat !== 'all' && window.DamanProjects?.selectedCategory === 'all') {
             const lbl = document.querySelector('#daman-cats-enhanced-wrap .text-white');
             if (lbl) lbl.textContent = 'كل الأقسام';
+            if (window.DamanCatAds && typeof DamanCatAds._updateMarketCatsCardsOnly === 'function') {
+              DamanCatAds._updateMarketCatsCardsOnly();
+            }
+            const wrap = document.getElementById('daman-cats-enhanced-wrap');
+            if (wrap && wrap.children.length > 1 && window.DamanCatAds) {
+              while (wrap.children.length > 1) wrap.lastElementChild.remove();
+              const html = DamanCatAds.renderCategoryAdsBlock('all', app);
+              if (html) wrap.insertAdjacentHTML('beforeend', html);
+            }
           }
         };
       }
     },
 
-    // ==================== 7. LIVE BADGE WATCHER (SOUND + FOREGROUND ALERT) ====================
+    // ==================== 8. LIVE BADGE WATCHER (SOUND + FOREGROUND ALERT) ====================
     startLiveAlertWatcher() {
       if (this._badgeObsStarted || typeof MutationObserver === 'undefined') return;
       this._badgeObsStarted = true;
@@ -362,7 +481,6 @@
           if (kind === 'notif') this._lastNotifCount = cur;
           else this._lastChatCount = cur;
 
-          // Ignore initial load burst during first 4 seconds
           if (Date.now() - this._bootTimestamp < 4000) return;
           if (cur > prev && prev >= 0) {
             this.playChime(kind);
@@ -379,7 +497,7 @@
       watchBadge('daman-chat-unread-badge', 'chat');
     },
 
-    // ==================== 8. SYSTEM HEALTH DIAGNOSTIC MODAL ====================
+    // ==================== 9. SYSTEM HEALTH DIAGNOSTIC MODAL ====================
     openHealthReportModal() {
       const app = window.DamanApp;
       if (!app) return;
@@ -391,7 +509,7 @@
         ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
         ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
         ['لوحة الشركات (company-panel)', !!window.DamanCompany],
-        ['إشعارات الشركات وعلامات (؟) (company-enhancements)', !!window.DamanCompanyEnh],
+        ['إشعارات الشركات وعلامات (؟) للمودال (v38)', !!(window.DamanCompanyEnh && DamanCompanyEnh._syncFixedV38)],
         ['لوحة الإدارة 360° (admin + ext + ext2)', !!(window.DamanAdmin && DamanAdmin._ext1Ready)],
         ['صوت وملفات مراقبة الشات (admin-chat-media)', !!(window.DamanAdmin && DamanAdmin._watchMediaPatched)],
         ['الأقسام الديناميكية وإعلاناتها (categories-ads)', !!window.DamanCatAds],
@@ -399,8 +517,8 @@
         ['البحث الشامل (global-search)', !!window.DamanSearch],
         ['رقم المنشور وتحذير الأمان (post-contact-guard)', !!window.DamanPostContact],
         ['أرشيف البطاقات والسجلات (kyc-vault)', !!window.DamanKycVault],
-        ['المشاركة وQR العقد والصفحة (share-qr)', !!(window.DamanShareQR && DamanShareQR._syncFixed)],
-        ['ربط الإشعارات والصوت والتكامل (system-sync)', !!this._booted],
+        ['المشاركة وQR العقد والصفحة (share-qr)', !!(window.DamanShareQR && DamanShareQR._syncFixedV38)],
+        ['ربط الإشعارات والصوت والتكامل (system-sync v38)', !!this._booted],
         ['مكتبة رسم الـ QRCode', typeof window.QRCode !== 'undefined'],
         ['اتصال Firebase Firestore', !!(app.db && app.auth)]
       ];
@@ -420,7 +538,7 @@
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة (${passed}/${checks.length})</h3>
+            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة v38 (${passed}/${checks.length})</h3>
             <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] flex items-center justify-between">
@@ -446,20 +564,21 @@
       this._booted = true;
 
       this.patchShareQR();
+      this.patchCompanyEnhancements();
       this.patchAdminIntegration();
       this.patchKycVaultLightbox();
-      this.patchProjectsNotificationsAndLabels();
+      this.patchProjectsAndUI();
       this.patchGlobalSafeguards();
       this.startLiveAlertWatcher();
 
-      // Re-verify late-booting plugins after 600ms
       setTimeout(() => {
         this.patchShareQR();
+        this.patchCompanyEnhancements();
         this.patchAdminIntegration();
-        this.patchKycVaultLightbox();
+        this.patchProjectsAndUI();
         this.patchGlobalSafeguards();
-        if (['projects', 'chat', 'admin'].includes(app.activeTab)) app.renderCurrentTab();
-      }, 600);
+        if (['projects', 'chat', 'admin', 'company'].includes(app.activeTab)) app.renderCurrentTab();
+      }, 650);
     }
   };
 
