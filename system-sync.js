@@ -103,7 +103,6 @@
         return wrap.innerHTML;
       };
 
-      // Fix misleading "requires login" message when user IS logged in but is not a party to the contract
       const origVerify = QR.openContractVerifyModal.bind(QR);
       QR.openContractVerifyModal = async function (ticketNumber) {
         await origVerify(ticketNumber);
@@ -124,7 +123,6 @@
       if (!CE || !app || CE._syncFixedV38) return;
       CE._syncFixedV38 = true;
 
-      // Track clicks & submits inside modals (.daman-modal) too, not just #app-main!
       document.addEventListener('click', (ev) => {
         if (window.DamanApp?.activeTab === 'company' && ev.target.closest('.daman-modal')) {
           CE.lastActionAt = Date.now();
@@ -136,7 +134,6 @@
         }
       }, true);
 
-      // Smarter company ID resolution + Firestore fallback so employee notifications ALWAYS attach
       const origResolve = CE.resolveActiveCompanyId.bind(CE);
       CE.resolveActiveCompanyId = function () {
         const direct = origResolve();
@@ -158,11 +155,9 @@
       const origUpdate = CE.onCompanyScreenUpdated.bind(CE);
       CE.onCompanyScreenUpdated = function () {
         origUpdate();
-        // Also inject (?) help icons inside any open Company modal
         document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => {
           try { this.injectHelpIcons(m); } catch (e) {}
         });
-        // Fallback Firestore lookup once if companyId wasn't found in memory
         if (!this.activeCompanyId && !this._fallbackQueried && app.user && app.db) {
           this._fallbackQueried = true;
           app.db.collection('companyMembers').where('userId', '==', app.user.uid).limit(1).get().then((snap) => {
@@ -177,7 +172,6 @@
         }
       };
 
-      // Observe body for newly opened modals while on Company tab
       if (typeof MutationObserver !== 'undefined') {
         const bodyObs = new MutationObserver(() => {
           if (window.DamanApp?.activeTab !== 'company') return;
@@ -214,7 +208,6 @@
         };
       }
 
-      // Inject "🪪 عرض البطاقة والسجل التجاري" inside User 360° Modal
       if (typeof Adm.openUser360Modal === 'function') {
         const orig360 = Adm.openUser360Modal.bind(Adm);
         Adm.openUser360Modal = function (uid) {
@@ -247,7 +240,6 @@
         };
       }
 
-      // Fix broken empty-src <img> inside Admin Chat Watch when image has mediaId without thumbBase64
       if (typeof Adm._renderAdminWatchMsgs === 'function') {
         const origWatchRender = Adm._renderAdminWatchMsgs.bind(Adm);
         Adm._renderAdminWatchMsgs = function () {
@@ -269,7 +261,6 @@
         };
       }
 
-      // Inject "🩺 فحص الترابط" button in Admin panel tab bar
       if (typeof Adm.render === 'function') {
         const origAdmRender = Adm.render.bind(Adm);
         Adm.render = function (container, a) {
@@ -290,12 +281,11 @@
       }
     },
 
-    // ==================== 5. PERMANENT KYC VAULT LIGHTBOX FIX (WORKS EVEN ON SLOW 3G) ====================
+    // ==================== 5. PERMANENT KYC VAULT LIGHTBOX FIX ====================
     patchKycVaultLightbox() {
       if (this._kycClickDelegated) return;
       this._kycClickDelegated = true;
 
-      // Intercept click on zoom button in capture phase BEFORE inline base64 onclick runs
       document.addEventListener('click', (ev) => {
         const btn = ev.target.closest('#daman-kycv-modal [id^="kycv-st-"] button');
         if (!btn) return;
@@ -318,7 +308,6 @@
       if (!Proj || !app || Proj._syncNotifPatchedV38) return;
       Proj._syncNotifPatchedV38 = true;
 
-      // Fix hidden/custom category label lookup
       const origCatLabel = Proj.catLabel.bind(Proj);
       Proj.catLabel = function (id) {
         if (window.DamanCatAds && typeof DamanCatAds.getCatById === 'function') {
@@ -328,7 +317,6 @@
         return origCatLabel(id);
       };
 
-      // Update dynamic category count text inside Post Editor help tooltip (instead of hardcoded "17")
       const origEditor = Proj.openPostEditorModal.bind(Proj);
       Proj.openPostEditorModal = function (existing) {
         origEditor(existing);
@@ -338,7 +326,6 @@
         }
       };
 
-      // Fix WhatsApp icon class conflict inside post-contact-guard warning modal
       if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function') {
         const origExtReq = DamanPostContact.requestExternalContact.bind(DamanPostContact);
         DamanPostContact.requestExternalContact = function (pid, mode) {
@@ -348,7 +335,6 @@
         };
       }
 
-      // Notify Admin on Inspection 3x payment
       if (typeof Proj.payInspectionRequest === 'function') {
         const origPayIns = Proj.payInspectionRequest.bind(Proj);
         Proj.payInspectionRequest = async function (reqId) {
@@ -366,7 +352,6 @@
         };
       }
 
-      // Notify Admin on VIP Labor funding
       if (typeof Proj.fundVipLaborRequest === 'function') {
         const origFundVip = Proj.fundVipLaborRequest.bind(Proj);
         Proj.fundVipLaborRequest = async function (reqId) {
@@ -384,7 +369,6 @@
         };
       }
 
-      // Notify Admin on user cancellation
       if (typeof Proj.cancelUserRequest === 'function') {
         const origCancel = Proj.cancelUserRequest.bind(Proj);
         Proj.cancelUserRequest = async function (colName, reqId) {
@@ -402,7 +386,6 @@
         };
       }
 
-      // Notify Admin on paid Ad Boost
       if (typeof Proj.applyBoostPackage === 'function') {
         const origBoost = Proj.applyBoostPackage.bind(Proj);
         Proj.applyBoostPackage = async function (pid, pkgId) {
@@ -438,7 +421,6 @@
         };
       }
 
-      // When Market search switches category to 'all', sync label + highlight pills + category ads banner without stealing input focus
       if (window.DamanSearch && typeof DamanSearch.onMarketLiveInput === 'function' && !DamanSearch._syncLabelFixedV38) {
         DamanSearch._syncLabelFixedV38 = true;
         const origInp = DamanSearch.onMarketLiveInput.bind(DamanSearch);
@@ -462,7 +444,192 @@
       }
     },
 
-    // ==================== 8. LIVE BADGE WATCHER (SOUND + FOREGROUND ALERT) ====================
+    // ==================== 8. CLICKABLE NOTIFICATIONS DEEP-LINK ROUTER (v56) ====================
+    clickMatchingButtonInMain(keywords, attempt = 0) {
+      if (!Array.isArray(keywords) || !keywords.length) return;
+      const main = document.getElementById('app-main');
+      if (!main) return;
+      const btns = Array.from(main.querySelectorAll('button'));
+      const found = btns.find((b) => {
+        const t = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        return keywords.some((kw) => t.includes(kw));
+      });
+      if (found) {
+        try { found.click(); } catch (e) {}
+      } else if (attempt < 5) {
+        setTimeout(() => this.clickMatchingButtonInMain(keywords, attempt + 1), 160);
+      }
+    },
+
+    navigateFromNotificationText(rawText) {
+      const app = window.DamanApp;
+      if (!app) return;
+      const txt = String(rawText || '').replace(/\s+/g, ' ').trim();
+      const low = txt.toLowerCase();
+      const isAdm = typeof app.isAdmin === 'function' && app.isAdmin();
+
+      // Close any open notifications modal first
+      document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => {
+        const h = (m.querySelector('h2, h3, h4')?.textContent || '');
+        if ((m.id || '').toLowerCase().includes('notif') || h.includes('الإشعارات') || h.includes('التنبيهات')) {
+          m.classList.add('hidden');
+        }
+      });
+
+      // 1) Admin-targeted wallet deposit/withdraw requests
+      if (isAdm && (txt.includes('طلب شحن') || txt.includes('طلب إيداع') || txt.includes('طلب سحب') || txt.includes('مرجعي مكرر'))) {
+        app.switchTab('admin');
+        setTimeout(() => this.clickMatchingButtonInMain(['الشحن والسحب', 'طلبات الشحن', 'السحب']), 140);
+        return;
+      }
+
+      // 2) Admin-targeted KYC verification requests
+      if (isAdm && (txt.includes('طلب توثيق') || txt.includes('مراجعة التوثيق') || txt.includes('بطاقة جديدة') || txt.includes('سجل تجاري'))) {
+        app.switchTab('admin');
+        setTimeout(() => this.clickMatchingButtonInMain(['التوثيق', 'توثيق']), 140);
+        return;
+      }
+
+      // 3) Admin-targeted disputes / reports / support
+      if (isAdm && (txt.includes('نزاع') || txt.includes('بلاغ') || txt.includes('شكوى') || txt.includes('تذكرة دعم'))) {
+        app.switchTab('admin');
+        setTimeout(() => this.clickMatchingButtonInMain(['النزاعات', 'البلاغات', 'الدعم', 'مراقبة']), 140);
+        return;
+      }
+
+      // 4) Admin-targeted 3x / VIP Labor / Boost requests
+      if (isAdm && (txt.includes('استلام هندسي') || txt.includes('3x') || txt.includes('عمالة vip') || txt.includes('عمالة VIP') || txt.includes('تمييز إعلان') || txt.includes('إلغاء طلب من العميل'))) {
+        app.switchTab('admin');
+        setTimeout(() => this.clickMatchingButtonInMain(['3x', 'VIP', 'الطلبات', 'المشاريع', 'تمييز']), 140);
+        return;
+      }
+
+      // 5) Wallet (deposit, withdraw, balance, payout, gift, refund)
+      if (txt.includes('إيداع') || txt.includes('شحن') || txt.includes('سحب') || txt.includes('رصيد') || txt.includes('محفظ') || txt.includes('هدية') || txt.includes('تحويل') || txt.includes('مستحق')) {
+        app.switchTab('wallet');
+        if (txt.includes('طلب')) {
+          setTimeout(() => this.clickMatchingButtonInMain(['الطلبات']), 180);
+        }
+        return;
+      }
+
+      // 6) KYC for regular user
+      if (txt.includes('توثيق') || txt.includes('البطاقة') || txt.includes('الهوية') || low.includes('kyc')) {
+        app.switchTab('wallet');
+        if (txt.includes('رفض') || txt.includes('إعادة') || txt.includes('استكمال')) {
+          setTimeout(() => window.DamanWallet?.openKycModal?.(false), 260);
+        }
+        return;
+      }
+
+      // 7) Company / employees / payroll / custody / site attendance
+      if (txt.includes('شركة') || txt.includes('موظف') || txt.includes('حضور') || txt.includes('انصراف') || txt.includes('عهدة') || txt.includes('مرتب') || txt.includes('راتب') || txt.includes('موقع العمل')) {
+        app.switchTab('company');
+        return;
+      }
+
+      // 8) Chat / messages / calls / contracts / escrow milestones
+      if (txt.includes('رسالة') || txt.includes('شات') || txt.includes('دردش') || txt.includes('مكالمة') || txt.includes('عقد') || txt.includes('ضمان') || txt.includes('مستخلص') || txt.includes('دفعة') || txt.includes('مخالصة') || txt.includes('توقيع')) {
+        app.switchTab('chat');
+        return;
+      }
+
+      // 9) Market / projects / ads / 3x / VIP labor
+      if (txt.includes('استلام') || txt.includes('3x') || low.includes('vip') || txt.includes('إعلان') || txt.includes('منشور') || txt.includes('مشروع') || txt.includes('السوق') || txt.includes('قسم') || txt.includes('عرض')) {
+        app.switchTab('projects');
+        if (txt.includes('3x') || txt.includes('استلام')) {
+          setTimeout(() => this.clickMatchingButtonInMain(['3x', 'استلام']), 180);
+        } else if (low.includes('vip') || txt.includes('عمالة')) {
+          setTimeout(() => this.clickMatchingButtonInMain(['VIP', 'عمالة']), 180);
+        }
+        return;
+      }
+
+      // 10) Profile / rating / account / birthday
+      if (txt.includes('تقييم') || txt.includes('ملفك') || txt.includes('صفحتك') || txt.includes('عيد ميلاد') || txt.includes('حسابك')) {
+        app.switchTab('profile');
+        return;
+      }
+
+      app.switchTab('home');
+    },
+
+    enhanceNotificationsModal(modal) {
+      if (!modal || modal.classList.contains('hidden')) return;
+      const id = (modal.id || '').toLowerCase();
+      const head = (modal.querySelector('h2, h3, h4')?.textContent || '').trim();
+      const isNotifModal = id.includes('notif') || head.includes('الإشعارات') || head.includes('التنبيهات') || head.toLowerCase().includes('notification');
+      if (!isNotifModal) return;
+
+      const candidates = Array.from(modal.querySelectorAll('.rounded-2xl, .rounded-xl, .glass-card, li')).filter((el) => {
+        if (el === modal || el === modal.firstElementChild) return false;
+        if (el.tagName === 'BUTTON' || el.closest('button')) return false;
+        if (el.querySelector('form, input, textarea, select')) return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (txt.length < 10 || txt.includes('لا توجد إشعارات')) return false;
+        // Skip wrapper containers that enclose other notification cards
+        if (el.querySelector('.rounded-xl, .rounded-2xl, .glass-card')) return false;
+        return true;
+      });
+
+      candidates.forEach((card) => {
+        if (card.dataset.damanNotifLinkedV56) return;
+        card.dataset.damanNotifLinkedV56 = '1';
+        card.classList.add('cursor-pointer', 'hover:border-amber-400/70', 'transition');
+
+        const hint = document.createElement('div');
+        hint.className = 'mt-1.5 pt-1 border-t border-slate-800/80 text-[9.5px] font-black text-amber-400 flex items-center justify-end gap-1';
+        hint.innerHTML = '<span>اضغط للانتقال مباشرة</span><i class="fa-solid fa-chevron-left text-[8px]"></i>';
+        card.appendChild(hint);
+
+        card.addEventListener('click', (ev) => {
+          if (ev.target && ev.target.closest('button, a')) return;
+          this.navigateFromNotificationText(card.textContent || '');
+        });
+      });
+    },
+
+    patchNotificationDeepLinks() {
+      const app = window.DamanApp;
+      if (!app || this._notifLinksPatchedV56) return;
+      this._notifLinksPatchedV56 = true;
+
+      if (typeof app.openNotificationsModal === 'function') {
+        const origOpen = app.openNotificationsModal.bind(app);
+        app.openNotificationsModal = function () {
+          const res = origOpen.apply(this, arguments);
+          setTimeout(() => {
+            document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => SystemSync.enhanceNotificationsModal(m));
+          }, 90);
+          setTimeout(() => {
+            document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => SystemSync.enhanceNotificationsModal(m));
+          }, 350);
+          return res;
+        };
+      }
+
+      if (typeof MutationObserver !== 'undefined') {
+        const notifObs = new MutationObserver(() => {
+          document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => this.enhanceNotificationsModal(m));
+        });
+        notifObs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+    },
+
+    // ==================== 9. LIVE BADGE WATCHER (SOUND + CLICKABLE FOREGROUND ALERT) ====================
+    makeLatestToastClickable(onTap) {
+      setTimeout(() => {
+        const box = document.getElementById('daman-toast-container');
+        if (!box || !box.lastElementChild) return;
+        const toastEl = box.lastElementChild;
+        toastEl.classList.add('pointer-events-auto', 'cursor-pointer');
+        toastEl.addEventListener('click', () => {
+          try { toastEl.remove(); } catch (e) {}
+          if (typeof onTap === 'function') onTap();
+        });
+      }, 30);
+    },
+
     startLiveAlertWatcher() {
       if (this._badgeObsStarted || typeof MutationObserver === 'undefined') return;
       this._badgeObsStarted = true;
@@ -485,8 +652,13 @@
           if (cur > prev && prev >= 0) {
             this.playChime(kind);
             if (window.DamanApp && typeof DamanApp.toast === 'function') {
-              if (kind === 'notif') DamanApp.toast('🔔 وصلك إشعار جديد — اضغط على الجرس للمراجعة', 'info');
-              else if (DamanApp.activeTab !== 'chat') DamanApp.toast('💬 لديك رسالة جديدة في الشات', 'info');
+              if (kind === 'notif') {
+                DamanApp.toast('🔔 وصلك إشعار جديد — اضغط هنا للمراجعة فوراً', 'info');
+                this.makeLatestToastClickable(() => DamanApp.openNotificationsModal?.());
+              } else if (DamanApp.activeTab !== 'chat') {
+                DamanApp.toast('💬 لديك رسالة جديدة في الشات — اضغط هنا للفتح', 'info');
+                this.makeLatestToastClickable(() => DamanApp.switchTab('chat'));
+              }
             }
           }
         });
@@ -497,28 +669,28 @@
       watchBadge('daman-chat-unread-badge', 'chat');
     },
 
-    // ==================== 9. SYSTEM HEALTH DIAGNOSTIC MODAL ====================
+    // ==================== 10. SYSTEM HEALTH DIAGNOSTIC MODAL ====================
     openHealthReportModal() {
       const app = window.DamanApp;
       if (!app) return;
 
       const checks = [
         ['النواة الأساسية (app-core)', !!window.DamanApp],
-        ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
+        ['المحفظة والتوثيق (wallet-kyc + ops v56)', !!window.DamanWallet],
         ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
         ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
         ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
         ['لوحة الشركات (company-panel)', !!window.DamanCompany],
-        ['إشعارات الشركات وعلامات (؟) للمودال (v38)', !!(window.DamanCompanyEnh && DamanCompanyEnh._syncFixedV38)],
+        ['إشعارات الشركات وعلامات (؟) للمودال', !!(window.DamanCompanyEnh && DamanCompanyEnh._syncFixedV38)],
         ['لوحة الإدارة 360° (admin + ext + ext2)', !!(window.DamanAdmin && DamanAdmin._ext1Ready)],
         ['صوت وملفات مراقبة الشات (admin-chat-media)', !!(window.DamanAdmin && DamanAdmin._watchMediaPatched)],
         ['الأقسام الديناميكية وإعلاناتها (categories-ads)', !!window.DamanCatAds],
-        ['باقة الـ 60 قسم الشاملة (categories-pack)', !!(window.DamanCatAds && DamanCatAds._packV33Attached)],
+        ['باقة الـ 62 قسم الشاملة (categories-pack)', !!(window.DamanCatAds && DamanCatAds._packV33Attached)],
         ['البحث الشامل (global-search)', !!window.DamanSearch],
         ['رقم المنشور وتحذير الأمان (post-contact-guard)', !!window.DamanPostContact],
         ['أرشيف البطاقات والسجلات (kyc-vault)', !!window.DamanKycVault],
         ['المشاركة وQR العقد والصفحة (share-qr)', !!(window.DamanShareQR && DamanShareQR._syncFixedV38)],
-        ['ربط الإشعارات والصوت والتكامل (system-sync v38)', !!this._booted],
+        ['توجيه الإشعارات بالضغط والصوت (system-sync v56)', !!(this._booted && this._notifLinksPatchedV56)],
         ['مكتبة رسم الـ QRCode', typeof window.QRCode !== 'undefined'],
         ['اتصال Firebase Firestore', !!(app.db && app.auth)]
       ];
@@ -538,7 +710,7 @@
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة v38 (${passed}/${checks.length})</h3>
+            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة v56 (${passed}/${checks.length})</h3>
             <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] flex items-center justify-between">
@@ -569,6 +741,7 @@
       this.patchKycVaultLightbox();
       this.patchProjectsAndUI();
       this.patchGlobalSafeguards();
+      this.patchNotificationDeepLinks();
       this.startLiveAlertWatcher();
 
       setTimeout(() => {
@@ -577,6 +750,7 @@
         this.patchAdminIntegration();
         this.patchProjectsAndUI();
         this.patchGlobalSafeguards();
+        this.patchNotificationDeepLinks();
         if (['projects', 'chat', 'admin', 'company'].includes(app.activeTab)) app.renderCurrentTab();
       }, 650);
     }
