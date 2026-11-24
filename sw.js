@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v33';
+const CACHE_NAME = 'damansite-v34';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -17,7 +17,8 @@ const CORE_ASSETS = [
   './admin-ext.js?v=28',
   './admin-ext2.js?v=28',
   './categories-ads.js?v=30',
-  './categories-pack.js?v=33'
+  './categories-pack.js?v=33',
+  './global-search.js?v=34'
 ];
 
 self.addEventListener('install', (event) => {
