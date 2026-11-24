@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v54';
+const CACHE_NAME = 'damansite-v55';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -29,7 +29,7 @@ const CORE_ASSETS = [
   './admin-growth-ops.js?v=40',
   './wallet-sla.js?v=42',
   './security-verify-ban.js?v=43',
-  './wallet-methods-control.js?v=54'
+  './wallet-methods-control.js?v=55'
 ];
 
 self.addEventListener('install', (event) => {
