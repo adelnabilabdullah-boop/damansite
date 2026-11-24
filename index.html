@@ -194,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=30').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=33').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -241,6 +241,6 @@
   <script src="admin.js?v=28"></script>
   <script src="admin-ext.js?v=28"></script>
   <script src="admin-ext2.js?v=28"></script>
-  <script src="categories-ads.js?v=30"></script>
+  <script src="categories-ads.js?v=33"></script>
 </body>
 </html>
