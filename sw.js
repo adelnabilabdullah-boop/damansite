@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v55';
+const CACHE_NAME = 'damansite-v56';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,7 @@ const CORE_ASSETS = [
   './manifest.json?v=28',
   './app-core.js?v=28',
   './wallet-kyc.js?v=28',
-  './wallet-ops.js?v=28',
+  './wallet-ops.js?v=56',
   './chat-support.js?v=28',
   './chat-extras.js?v=28',
   './chat-media.js?v=29',
@@ -24,12 +24,12 @@ const CORE_ASSETS = [
   './post-contact-guard.js?v=36',
   './kyc-vault.js?v=36',
   './share-qr.js?v=36',
-  './system-sync.js?v=38',
+  './system-sync.js?v=56',
   './kyc-bday-qr.js?v=39',
   './admin-growth-ops.js?v=40',
   './wallet-sla.js?v=42',
   './security-verify-ban.js?v=43',
-  './wallet-methods-control.js?v=55'
+  './wallet-methods-control.js?v=56'
 ];
 
 self.addEventListener('install', (event) => {
