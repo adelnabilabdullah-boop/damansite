@@ -15,6 +15,7 @@
       instapayLink: '',
       instapayAddress: '',
       instapayHolder: '',
+      instapayPhone: '',
       bankName: '',
       bankAccount: '',
       bankIban: '',
@@ -75,51 +76,74 @@
       const main = document.getElementById('app-main');
       if (!main) return;
 
-      const fields = Array.from(main.querySelectorAll('input[type="text"], input[type="tel"], input[type="url"], input:not([type]), textarea'));
+      const fields = Array.from(main.querySelectorAll('input[type="text"], input[type="tel"], input[type="url"], input[type="number"], input:not([type]), textarea'));
       if (!fields.length) return;
 
       const getContext = (el) => {
         const lbl = el.id ? main.querySelector(`label[for="${el.id}"]`) : null;
         const prevLbl = el.previousElementSibling && el.previousElementSibling.tagName === 'LABEL' ? el.previousElementSibling : null;
+        const parentLbl = el.parentElement ? (el.parentElement.querySelector('label')?.textContent || '') : '';
         const card = el.closest('.glass-card, .rounded-2xl, .rounded-xl, div');
         const cardHead = card ? (card.querySelector('h1,h2,h3,h4,.font-black')?.textContent || '') : '';
-        return `${el.id || ''} ${el.name || ''} ${el.placeholder || ''} ${(lbl || prevLbl)?.textContent || ''} ${cardHead}`.toLowerCase();
+        return `${el.id || ''} ${el.name || ''} ${el.placeholder || ''} ${(lbl || prevLbl)?.textContent || ''} ${parentLbl} ${cardHead}`.toLowerCase();
       };
 
-      const snap = Object.assign({}, this.domSnapshot);
-      fields.forEach((el) => {
-        const val = (el.value || '').trim();
-        if (!val) return;
-        const ctx = getContext(el);
+      const freshSnap = {
+        walletNumber: '',
+        walletHolder: '',
+        instapayLink: '',
+        instapayAddress: '',
+        instapayHolder: '',
+        instapayPhone: '',
+        bankName: '',
+        bankAccount: '',
+        bankIban: '',
+        bankHolder: ''
+      };
+      let sawAdminAccountsScreen = false;
 
-        if ((ctx.includes('محفظ') || ctx.includes('wallet') || ctx.includes('كاش')) && !ctx.includes('احتياط')) {
+      fields.forEach((el) => {
+        const ctx = getContext(el);
+        const val = String(el.value !== undefined && el.value !== null ? el.value : '').trim();
+
+        if (ctx.includes('محفظ') || ctx.includes('wallet') || ctx.includes('كاش')) {
+          if (!ctx.includes('احتياط')) sawAdminAccountsScreen = true;
+          if (!val || ctx.includes('احتياط')) return;
           if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
-            if (!snap.walletHolder) snap.walletHolder = val;
-          } else if (!snap.walletNumber) {
-            snap.walletNumber = val;
+            if (!freshSnap.walletHolder) freshSnap.walletHolder = val;
+          } else if (!freshSnap.walletNumber) {
+            freshSnap.walletNumber = val;
           }
         } else if (ctx.includes('إنستا') || ctx.includes('انستا') || ctx.includes('instapay') || ctx.includes('ipa')) {
+          sawAdminAccountsScreen = true;
+          if (!val) return;
           if (val.startsWith('http') || ctx.includes('رابط') || ctx.includes('لينك') || ctx.includes('link')) {
-            if (!snap.instapayLink) snap.instapayLink = val;
+            if (!freshSnap.instapayLink) freshSnap.instapayLink = val;
           } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder') || ctx.includes('name')) {
-            if (!snap.instapayHolder) snap.instapayHolder = val;
-          } else if (!snap.instapayAddress) {
-            snap.instapayAddress = val;
+            if (!freshSnap.instapayHolder) freshSnap.instapayHolder = val;
+          } else if (ctx.includes('موبايل') || ctx.includes('هاتف') || ctx.includes('phone')) {
+            if (!freshSnap.instapayPhone) freshSnap.instapayPhone = val;
+          } else if (!freshSnap.instapayAddress) {
+            freshSnap.instapayAddress = val;
           }
         } else if (ctx.includes('بنك') || ctx.includes('bank') || ctx.includes('iban') || ctx.includes('حساب')) {
+          sawAdminAccountsScreen = true;
+          if (!val) return;
           if (ctx.includes('iban')) {
-            if (!snap.bankIban) snap.bankIban = val;
+            if (!freshSnap.bankIban) freshSnap.bankIban = val;
           } else if (ctx.includes('اسم البنك') || (ctx.includes('بنك') && !ctx.includes('صاحب') && !ctx.includes('رقم') && !ctx.includes('حساب'))) {
-            if (!snap.bankName) snap.bankName = val;
+            if (!freshSnap.bankName) freshSnap.bankName = val;
           } else if (ctx.includes('اسم') || ctx.includes('صاحب') || ctx.includes('holder')) {
-            if (!snap.bankHolder) snap.bankHolder = val;
-          } else if (!snap.bankAccount) {
-            snap.bankAccount = val;
+            if (!freshSnap.bankHolder) freshSnap.bankHolder = val;
+          } else if (!freshSnap.bankAccount) {
+            freshSnap.bankAccount = val;
           }
         }
       });
 
-      this.domSnapshot = snap;
+      if (sawAdminAccountsScreen) {
+        this.domSnapshot = freshSnap;
+      }
     },
 
     flattenObject(obj, prefix = '', out = {}) {
@@ -172,11 +196,10 @@
     findValueByKeyPatterns(flatObj, exactKeys, includeTokens, excludeTokens = []) {
       for (const k of exactKeys) {
         const v = flatObj[k];
-        if (typeof v === 'string' && v.trim()) return v.trim();
-        if (typeof v === 'number' && v > 0) return String(v);
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
       }
       for (const [path, val] of Object.entries(flatObj)) {
-        if (typeof val !== 'string' && typeof val !== 'number') continue;
+        if (val === undefined || val === null || typeof val === 'object') continue;
         const sVal = String(val).trim();
         if (!sVal) continue;
         const lowPath = path.toLowerCase();
@@ -213,39 +236,42 @@
         return {
           title: '📱 بيانات المحفظة الإلكترونية المعتمدة للإيداع',
           rows: [
-            { label: 'اسم صاحب المحفظة', value: name, copy: false },
+            { label: 'اسم صاحب المحفظة', value: name, copy: !!name },
             { label: 'رقم المحفظة', value: num, copy: !!num }
           ]
         };
       }
 
       if (method === 'instapay') {
-        const link = snap.instapayLink || this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
-        let ipa = snap.instapayAddress || this.findValueByKeyPatterns(
-          flat,
-          ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
-          ['insta'],
-          ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max']
-        );
-        if (!ipa) {
-          for (const v of Object.values(flat)) {
-            if (typeof v === 'string' && v.toLowerCase().includes('@instapay')) {
-              ipa = v.trim();
-              break;
-            }
-          }
-        }
-        const name = snap.instapayHolder
-          || this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
-          || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []);
+        // Strictly preserve exact value (even if short or numeric like "10" or an IPA)
+        const hasSnapInsta = !!(snap.instapayAddress || snap.instapayLink || snap.instapayHolder || snap.instapayPhone);
+        const link = hasSnapInsta
+          ? snap.instapayLink
+          : this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
+        const ipa = hasSnapInsta
+          ? snap.instapayAddress
+          : this.findValueByKeyPatterns(
+              flat,
+              ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
+              ['insta'],
+              ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max']
+            );
+        const name = hasSnapInsta
+          ? snap.instapayHolder
+          : (this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
+            || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []));
+        const phone = hasSnapInsta
+          ? snap.instapayPhone
+          : this.findValueByKeyPatterns(flat, ['instapayPhone', 'instapayMobile'], ['insta', 'phone'], []);
 
         return {
-          title: '⚡ بيانات حساب إنستا باي (InstaPay) المعتمد للإيداع',
+          title: '⚡ بيانات إنستا باي (InstaPay) المعتمدة للإيداع',
           link,
           rows: [
-            { label: 'اسم صاحب الحساب', value: name, copy: false },
+            { label: 'اسم صاحب الحساب', value: name, copy: !!name },
             { label: 'عنوان إنستا باي (IPA)', value: ipa, copy: !!ipa },
-            { label: 'رابط التحويل المباشر', value: link, copy: !!link }
+            { label: 'رابط التحويل المباشر', value: link, copy: !!link },
+            { label: 'رقم الموبايل المربوط', value: phone, copy: !!phone }
           ]
         };
       }
@@ -268,8 +294,8 @@
       return {
         title: '🏦 بيانات الحساب البنكي المعتمد للإيداع',
         rows: [
-          { label: 'اسم صاحب الحساب البنكي', value: bankHolder, copy: false },
-          { label: 'اسم البنك', value: bankName, copy: false },
+          { label: 'اسم صاحب الحساب البنكي', value: bankHolder, copy: !!bankHolder },
+          { label: 'اسم البنك', value: bankName, copy: !!bankName },
           { label: 'رقم الحساب البنكي', value: bankAcc, copy: !!bankAcc },
           { label: 'رقم الـ IBAN', value: iban, copy: !!iban }
         ]
@@ -328,7 +354,7 @@
       if (!box || !app) return;
 
       const info = this.getReceivingAccountDetails(method);
-      const validRows = info.rows.filter((r) => r.value && String(r.value).trim());
+      const validRows = info.rows.filter((r) => r.value !== undefined && r.value !== null && String(r.value).trim() !== '');
 
       if (!validRows.length) {
         box.innerHTML = `
@@ -348,10 +374,10 @@
             <div class="flex items-center justify-between gap-2 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-slate-800">
               <div class="min-w-0">
                 <div class="text-[9.5px] text-slate-400">${app.esc(r.label)}:</div>
-                <div class="text-xs font-black text-white select-all break-all" ${r.copy ? 'dir="ltr"' : ''}>${app.esc(r.value)}</div>
+                <div class="text-xs font-black text-white select-all break-all" ${r.copy ? 'dir="ltr"' : ''}>${app.esc(String(r.value))}</div>
               </div>
               ${r.copy ? `
-                <button type="button" onclick="navigator.clipboard.writeText('${app.esc(r.value).replace(/'/g, "\\'")}'); DamanApp.toast('تم النسخ بنجاح ✅','success')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">
+                <button type="button" onclick="navigator.clipboard.writeText('${app.esc(String(r.value)).replace(/'/g, "\\'")}'); DamanApp.toast('تم النسخ بنجاح ✅','success')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">
                   <i class="fa-regular fa-copy me-1"></i> نسخ
                 </button>` : ''}
             </div>`).join('')}
@@ -535,7 +561,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV48', async () => {
+      await app.withLock('submitDepositV49', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -777,7 +803,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV48', async () => {
+      await app.withLock('submitWithdrawV49', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
