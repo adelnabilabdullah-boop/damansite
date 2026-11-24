@@ -146,8 +146,8 @@
         return {
           title: '📱 بيانات المحفظة الإلكترونية المعتمدة للإيداع',
           rows: [
+            { label: 'اسم الحساب / المستلم', value: name, copy: false },
             { label: 'رقم المحفظة', value: num, copy: !!num },
-            { label: 'اسم صاحب المحفظة', value: name, copy: false },
             { label: 'نوع المحفظة', value: provider || 'فودافون كاش / اتصالات / أورنج / وي', copy: false }
           ]
         };
@@ -175,8 +175,8 @@
         return {
           title: '⚡ بيانات حساب إنستا باي (InstaPay) المعتمد للإيداع',
           rows: [
+            { label: 'اسم الحساب / المستلم', value: name, copy: false },
             { label: 'عنوان / حساب إنستا باي', value: ipa, copy: !!ipa },
-            { label: 'اسم صاحب الحساب', value: name, copy: false },
             { label: 'رقم الموبايل المربوط', value: phone, copy: !!phone }
           ]
         };
@@ -199,8 +199,8 @@
       return {
         title: '🏦 بيانات الحساب البنكي المعتمد للإيداع',
         rows: [
+          { label: 'اسم الحساب / المستلم', value: bankHolder, copy: false },
           { label: 'اسم البنك', value: bankName, copy: false },
-          { label: 'اسم صاحب الحساب', value: bankHolder, copy: false },
           { label: 'رقم الحساب البنكي', value: bankAcc, copy: !!bankAcc },
           { label: 'رقم الـ IBAN', value: iban, copy: !!iban }
         ]
@@ -242,7 +242,7 @@
 
         if (this._depositSecondsLeft <= 0) {
           this.closeDepositModal();
-          window.DamanApp?.toast('⏳ انتهت مدة جلسة الإيداع (10 دقائق) — أعد فتح نافذة الإيداع للمتابعة.', 'warning');
+          window.DamanApp?.toast('⏳ انتهت مدة الـ 10 دقائق — أعد فتح نافذة الإيداع للمتابعة.', 'warning');
           return;
         }
         this._depositSecondsLeft -= 1;
@@ -264,7 +264,7 @@
       if (!validRows.length) {
         box.innerHTML = `
           <div class="text-[10.5px] font-black text-amber-300">${app.esc(info.title)}</div>
-          <div class="text-[11px] font-bold text-rose-300 pt-1">⚠️ لم يتم حفظ بيانات هذه الوسيلة بعد — راجع الإدارة ← محوّل الحسابات.</div>`;
+          <div class="text-[11px] font-bold text-rose-300 pt-1">⚠️ لم يتم حفظ بيانات الحساب واسم المستلم بعد — راجع الإدارة ← محوّل الحسابات.</div>`;
         return;
       }
 
@@ -333,7 +333,7 @@
             </div>
 
             <div id="daman-dep-target-box" class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-1">
-              <div class="text-[10.5px] text-amber-300 font-bold">جارٍ تحميل بيانات الحساب...</div>
+              <div class="text-[10.5px] text-amber-300 font-bold">جارٍ تحميل بيانات الحساب واسم المستلم...</div>
             </div>
 
             <div>
@@ -460,7 +460,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV46', async () => {
+      await app.withLock('submitDepositV47', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -702,7 +702,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV46', async () => {
+      await app.withLock('submitWithdrawV47', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
