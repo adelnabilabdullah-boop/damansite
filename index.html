@@ -194,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=28').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=29').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -235,6 +235,7 @@
   <script src="wallet-ops.js?v=28"></script>
   <script src="chat-support.js?v=28"></script>
   <script src="chat-extras.js?v=28"></script>
+  <script src="chat-media.js?v=29"></script>
   <script src="projects-escrow.js?v=28"></script>
   <script src="company-panel.js?v=28"></script>
   <script src="admin.js?v=28"></script>
