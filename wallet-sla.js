@@ -48,7 +48,6 @@
       const main = document.getElementById('app-main');
       if (!main) return;
 
-      // Top SLA notice banner in Wallet tab
       if (!document.getElementById('daman-wallet-sla-banner')) {
         const root = main.firstElementChild || main;
         const box = document.createElement('div');
@@ -69,14 +68,14 @@
         else root.insertBefore(box, root.firstElementChild);
       }
 
-      // Add SLA tag next to pending deposit/withdraw rows in Wallet history
       const candidates = main.querySelectorAll('span, div');
       candidates.forEach((el) => {
         if (el.children.length > 0 || el.dataset.slaTagged) return;
         const txt = (el.textContent || '').trim();
-        if (txt === 'قيد المراجعة' || txt === 'معلّق' || txt === 'قيد التنفيذ' || txt === '⏳ قيد المراجعة') {
+        if (!txt || txt.length > 35) return;
+        if (txt.includes('قيد المراجعة') || txt === 'معلّق' || txt === 'قيد التنفيذ') {
           const parentCard = el.closest('.glass-card, .rounded-xl, .rounded-2xl');
-          if (!parentCard || parentCard.querySelector('.daman-pending-sla-chip')) return;
+          if (!parentCard || parentCard.id === 'daman-wallet-sla-banner' || parentCard.querySelector('.daman-pending-sla-chip')) return;
           el.dataset.slaTagged = '1';
           const chip = document.createElement('div');
           chip.className = 'daman-pending-sla-chip mt-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[10px] font-black inline-flex items-center gap-1';
@@ -93,7 +92,6 @@
       if (id.includes('deposit') || id.includes('topup') || id.includes('charge')) return 'deposit';
       if (id.includes('withdraw') || id.includes('payout')) return 'withdraw';
 
-      // Exclude non-wallet modals
       if (id.includes('kyc') || id.includes('post') || id.includes('admin') || id.includes('u360') || id.includes('calc') || id.includes('qr') || id.includes('bday')) {
         return '';
       }
@@ -143,26 +141,139 @@
           }
         }
 
-        // Bind confirmation toast after user submits deposit/withdraw form
+        // Wait up to 15s for modal to actually close after receipt upload finishes
         if (!form.dataset.slaSubmitBound) {
           form.dataset.slaSubmitBound = '1';
           form.addEventListener('submit', () => {
-            setTimeout(() => {
+            let checks = 0;
+            const t = setInterval(() => {
+              checks++;
+              if (checks > 35) return clearInterval(t);
               if (modal.classList.contains('hidden')) {
+                clearInterval(t);
                 app.toast(`⏱️ تم استلام طلبك — يتم المراجعة والتنفيذ خلال ${this.slaConfig.durationText} ✅`, 'info');
               }
-            }, 950);
+            }, 400);
           });
         }
       });
     },
 
-    // ==================== 3. FIX BROADCAST TAB RESET & COMPLETE 21/21 HEALTH DIAGNOSTIC ====================
+    // ==================== 3. FIX KYC EXPIRY SAVE TIMING & BIRTHDAY RULES RESILIENCE ====================
+    patchKycAndBirthdayReliability() {
+      const app = window.DamanApp;
+      if (!app) return;
+
+      // Fix 1: Save idExpiryDate AFTER #daman-kyc-modal closes (never overwritten by slow image uploads)
+      if (!this._kycExpiryReliableBound) {
+        this._kycExpiryReliableBound = true;
+        document.addEventListener('submit', (ev) => {
+          const modal = ev.target && ev.target.closest && ev.target.closest('#daman-kyc-modal');
+          if (!modal || ev.defaultPrevented) return;
+          const expVal = (document.getElementById('kyc-id-expiry')?.value || '').trim();
+          const uid = app.user?.uid;
+          if (!expVal || !uid || expVal <= app.todayLocal()) return;
+
+          let tries = 0;
+          const waitClose = setInterval(() => {
+            tries++;
+            if (tries > 75) return clearInterval(waitClose); // up to 30s for slow connections
+            if (modal.classList.contains('hidden')) {
+              clearInterval(waitClose);
+              setTimeout(async () => {
+                try {
+                  await Promise.all([
+                    app.db.collection('kycRequests').doc(uid).set({ idExpiryDate: expVal }, { merge: true }).catch(() => {}),
+                    app.db.collection('users').doc(uid).set({ idExpiryDate: expVal, idExpiryExpired: false }, { merge: true }).catch(() => {})
+                  ]);
+                } catch (e) {}
+              }, 350);
+            }
+          }, 400);
+        });
+      }
+
+      // Fix 2: Separate Birthday Greeting from Wallet Self-Credit (resilient against strict Firestore Rules)
+      if (window.DamanKycBdayQR && !DamanKycBdayQR._rulesResilientV41) {
+        DamanKycBdayQR._rulesResilientV41 = true;
+        DamanKycBdayQR.checkAndCelebrateUserBirthday = async function () {
+          if (!app.user || !app.profile || !app.db) return;
+          const uid = app.user.uid;
+          if (this._bdayCheckedForUid === uid) return;
+
+          let bdate = app.profile.birthDate || '';
+          if (!bdate) {
+            try {
+              const kSnap = await app.db.collection('kycRequests').doc(uid).get();
+              if (kSnap.exists && kSnap.data().birthDate) {
+                bdate = kSnap.data().birthDate;
+                await app.db.collection('users').doc(uid).set({ birthDate: bdate }, { merge: true }).catch(() => {});
+              }
+            } catch (e) {}
+          }
+          if (!bdate || bdate.length < 10) return;
+          this._bdayCheckedForUid = uid;
+
+          const today = app.todayLocal();
+          if (bdate.slice(5, 10) !== today.slice(5, 10)) return;
+
+          const yearStr = today.slice(0, 4);
+          const localKey = `daman_bday_celebrated_${uid}_${yearStr}`;
+          if (localStorage.getItem(localKey) || String(app.profile.lastBirthdayGiftYear || '') === yearStr) return;
+
+          await this.loadBirthdayConfig();
+          if (this.bdayConfig.enabled === false) return;
+
+          localStorage.setItem(localKey, '1');
+          const userName = app.profile.name || app.profile.companyName || 'شريكنا العزيز';
+          const msgBody = String(this.bdayConfig.message || '').replace(/\{name\}/g, userName);
+          const giftType = this.bdayConfig.giftType || 'none';
+          const giftVal = Number(this.bdayConfig.giftValue || 0);
+
+          let giftSummary = '';
+          if (giftType === 'wallet' && giftVal > 0) {
+            try {
+              await app.db.collection('users').doc(uid).set({
+                walletBalance: firebase.firestore.FieldValue.increment(giftVal),
+                lastBirthdayGiftYear: yearStr
+              }, { merge: true });
+              await app.db.collection('walletTransactions').add({
+                userId: uid, userName, type: 'gift', amount: giftVal, status: 'approved',
+                method: 'birthday_gift', note: `🎂 هدية عيد الميلاد (${yearStr})`, date: today,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              }).catch(() => {});
+              giftSummary = `🎁 هدية عيد ميلادك: تم إضافة ${app.fmtMoney(giftVal)} ج.م إلى محفظتك مجاناً!`;
+            } catch (err) {
+              // Firestore rules prevented self-credit -> notify Admin to grant in 1 click!
+              giftSummary = `🎁 هدية عيد ميلادك (${app.fmtMoney(giftVal)} ج.م) جاري تفعيلها فوراً من الإدارة!`;
+              await app.sendNotification('ADMIN', '🎂 عيد ميلاد عضو اليوم — يستحق هديته', `اليوم عيد ميلاد ${userName} — الهدية المقررة: ${app.fmtMoney(giftVal)} ج.م (من لوحة أعياد الميلاد والهدايا).`).catch(() => {});
+            }
+          } else if (giftType === 'vip_days' && giftVal > 0) {
+            try {
+              const baseTs = Math.max(Date.now(), Number(app.profile.vipUntil || 0));
+              await app.db.collection('users').doc(uid).set({
+                vipUntil: baseTs + giftVal * 86400000,
+                lastBirthdayGiftYear: yearStr
+              }, { merge: true });
+              giftSummary = `👑 هدية عيد ميلادك: تم تفعيل باقة VIP مجاناً لمدة ${giftVal} يوم!`;
+            } catch (err) {
+              giftSummary = `👑 هدية عيد ميلادك (${giftVal} يوم VIP) جاري تفعيلها فوراً من الإدارة!`;
+              await app.sendNotification('ADMIN', '🎂 عيد ميلاد عضو اليوم — يستحق هدية VIP', `اليوم عيد ميلاد ${userName} — الهدية المقررة: ${giftVal} يوم VIP.`).catch(() => {});
+            }
+          }
+
+          await app.db.collection('users').doc(uid).set({ lastBirthdayGiftYear: yearStr }, { merge: true }).catch(() => {});
+          await app.sendNotification(uid, '🎂 كل سنة وأنت طيب يا بطل!', `${msgBody}${giftSummary ? '\n' + giftSummary : ''}`).catch(() => {});
+          this.showBirthdayCelebrationModal(userName, msgBody, giftSummary);
+        };
+      }
+    },
+
+    // ==================== 4. FIX BROADCAST TAB RESET, HEALTH BUTTON STYLE & 21/21 DIAGNOSTIC ====================
     patchSystemIntegrations() {
       const app = window.DamanApp;
       if (!app) return;
 
-      // Fix _viewingBroadcastTab when jumping directly to Categories tab
       if (window.DamanCatAds && typeof DamanCatAds.openAdminCategoriesTab === 'function' && !DamanCatAds._bcastResetFixedV41) {
         DamanCatAds._bcastResetFixedV41 = true;
         const origOpenCat = DamanCatAds.openAdminCategoriesTab.bind(DamanCatAds);
@@ -176,14 +287,26 @@
         };
       }
 
-      // Upgrade DamanSync Health Diagnostic to inspect ALL 21 modules including v39-v41
+      // Preserve green badge styling on "🩺 فحص الترابط" across all dynamic admin tabs
+      if (window.DamanAdmin && typeof DamanAdmin.render === 'function' && !DamanAdmin._healthStylePreservedV41) {
+        DamanAdmin._healthStylePreservedV41 = true;
+        const origAdmRender = DamanAdmin.render.bind(DamanAdmin);
+        DamanAdmin.render = (container, a) => {
+          origAdmRender(container, a);
+          const hBtn = container.querySelector('[data-sync-health-btn]');
+          if (hBtn) {
+            hBtn.className = 'shrink-0 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/50 text-emerald-300 font-black';
+          }
+        };
+      }
+
       if (window.DamanSync && typeof DamanSync.openHealthReportModal === 'function' && !DamanSync._healthV41Patched) {
         DamanSync._healthV41Patched = true;
         DamanSync.openHealthReportModal = function () {
           const checks = [
             ['النواة الأساسية (app-core)', !!window.DamanApp],
             ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
-            ['تنبيه يوم عمل للإيداع والسحب (wallet-sla v41)', !!window.DamanWalletSLA],
+            ['تنبيه يوم عمل + حماية التوقيت (wallet-sla v41)', !!window.DamanWalletSLA],
             ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
             ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
             ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
@@ -197,7 +320,7 @@
             ['رقم المنشور وتحذير الأمان (post-contact-guard)', !!window.DamanPostContact],
             ['أرشيف البطاقات والسجلات (kyc-vault)', !!window.DamanKycVault],
             ['المشاركة وQR العقد والصفحة (share-qr)', !!(window.DamanShareQR && DamanShareQR._syncFixedV38)],
-            ['كاميرا QR + كاميرا التوثيق + أعياد الميلاد (kyc-bday-qr)', !!window.DamanKycBdayQR],
+            ['كاميرا QR + كاميرا التوثيق + أعياد الميلاد (kyc-bday-qr)', !!(window.DamanKycBdayQR && DamanKycBdayQR._rulesResilientV41)],
             ['الإشعارات الجماعية + الحاسبة + انتهاء البطاقات (admin-growth-ops)', !!window.DamanGrowthOps],
             ['ربط الإشعارات والصوت والتكامل (system-sync)', !!this._booted],
             ['مكتبة رسم الـ QRCode', typeof window.QRCode !== 'undefined'],
@@ -250,6 +373,7 @@
         if (app.activeTab === 'wallet') this.enhanceWalletTab();
       });
 
+      this.patchKycAndBirthdayReliability();
       this.patchSystemIntegrations();
 
       if (typeof MutationObserver !== 'undefined') {
@@ -273,6 +397,7 @@
       }
 
       setTimeout(() => {
+        this.patchKycAndBirthdayReliability();
         this.patchSystemIntegrations();
         if (app.activeTab === 'wallet') this.enhanceWalletTab();
         this.enhanceOpenWalletModals();
