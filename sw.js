@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v37';
+const CACHE_NAME = 'damansite-v42';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -24,7 +24,10 @@ const CORE_ASSETS = [
   './post-contact-guard.js?v=36',
   './kyc-vault.js?v=36',
   './share-qr.js?v=36',
-  './system-sync.js?v=37'
+  './system-sync.js?v=38',
+  './kyc-bday-qr.js?v=39',
+  './admin-growth-ops.js?v=40',
+  './wallet-sla.js?v=42'
 ];
 
 self.addEventListener('install', (event) => {
