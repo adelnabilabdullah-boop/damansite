@@ -61,7 +61,7 @@
   </div>
 
   <div id="daman-update-banner" class="hidden fixed inset-x-3 bottom-20 z-[115] max-w-md mx-auto bg-amber-500 text-slate-950 rounded-2xl px-3.5 py-2.5 shadow-2xl flex items-center justify-between gap-2">
-    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v34)</span>
+    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v35)</span>
     <button onclick="window.DamanApplyUpdate()" class="px-3 py-1 rounded-xl bg-slate-950 text-amber-400 text-[11px] font-black">تحديث الآن</button>
   </div>
 
@@ -194,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=34').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=35').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -244,5 +244,7 @@
   <script src="categories-ads.js?v=30"></script>
   <script src="categories-pack.js?v=33"></script>
   <script src="global-search.js?v=34"></script>
+  <script src="admin-chat-media.js?v=35"></script>
+  <script src="company-enhancements.js?v=35"></script>
 </body>
 </html>
