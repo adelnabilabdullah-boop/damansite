@@ -122,7 +122,7 @@
     },
 
     findDepositRefInput(form) {
-      const inputs = Array.from(form.querySelectorAll('input[type="text"], input:not([type])'));
+      const inputs = Array.from(form.querySelectorAll('input[type="text"], input[type="tel"], input[type="search"], input:not([type])'));
       for (const inp of inputs) {
         const id = (inp.id || '').toLowerCase();
         const name = (inp.name || '').toLowerCase();
@@ -153,12 +153,12 @@
       const { inp } = found;
       inp.dataset.optRefApplied = '1';
 
-      // 1. Remove HTML required constraint
       inp.removeAttribute('required');
+      inp.removeAttribute('minlength');
+      inp.removeAttribute('pattern');
       inp.required = false;
       inp.placeholder = 'الرقم المرجعي للتحويل (اختياري — يمكنك تركه فارغاً)';
 
-      // 2. Update label text cleanly to show (اختياري) instead of *
       let lbl = inp.id ? form.querySelector(`label[for="${inp.id}"]`) : null;
       if (!lbl && inp.previousElementSibling && inp.previousElementSibling.tagName === 'LABEL') lbl = inp.previousElementSibling;
       if (!lbl && inp.parentElement) lbl = inp.parentElement.querySelector('label');
@@ -166,7 +166,6 @@
         lbl.innerHTML = lbl.innerHTML.replace(/\s*\*/g, '') + ' <span class="text-emerald-400 font-bold">(اختياري)</span>';
       }
 
-      // 3. Clear auto-generated fallback if user focuses the field again
       inp.addEventListener('focus', () => {
         if (inp.dataset.autoFilledRef === '1' && inp.value.startsWith('بدون مرجع -')) {
           inp.value = '';
@@ -174,14 +173,12 @@
         }
       });
 
-      // 4. Capture-phase submit handler: if blank, inject unique fallback so any legacy JS validation or duplicate check passes seamlessly
       if (!form.dataset.optRefSubmitBound) {
         form.dataset.optRefSubmitBound = '1';
         form.addEventListener('submit', () => {
           if (!inp.value.trim()) {
             inp.value = `بدون مرجع - ${String(Date.now()).slice(-6)}`;
             inp.dataset.autoFilledRef = '1';
-            // If modal stays open (e.g., user forgot receipt image) and submit button isn't busy, clear it cleanly
             setTimeout(() => {
               const btn = form.querySelector('button[type="submit"]');
               if (!modal.classList.contains('hidden') && (!btn || !btn.disabled) && inp.dataset.autoFilledRef === '1') {
@@ -218,7 +215,6 @@
 
     injectQuickCopyForAccounts(modal) {
       if (modal.querySelector('.daman-dep-copy-bar')) return;
-      // Skip if the modal already has built-in copy buttons
       const existingCopy = Array.from(modal.querySelectorAll('button')).some((b) => (b.textContent || '').includes('نسخ'));
       if (existingCopy) return;
 
@@ -299,11 +295,49 @@
       });
     },
 
-    // ==================== 3. FIX KYC EXPIRY SAVE TIMING & BIRTHDAY RULES RESILIENCE ====================
+    // ==================== 3. STRICT LIVE CAMERA ON KYC + EXPIRY RELIABILITY + BIRTHDAY RESILIENCE ====================
     patchKycAndBirthdayReliability() {
       const app = window.DamanApp;
       if (!app) return;
 
+      // Strict Live Camera: tapping KYC file input directly opens in-app camera (blocks gallery picker)
+      if (!this._strictLiveCamBound) {
+        this._strictLiveCamBound = true;
+        document.addEventListener('click', (ev) => {
+          const inp = ev.target && ev.target.closest && ev.target.closest('#daman-kyc-modal input[type="file"]');
+          if (!inp || inp.dataset.allowNativeCapture === '1') return;
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.DamanKycBdayQR) return;
+
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (!inp.id) inp.id = 'kyc-live-auto-' + Date.now();
+          const lblText = (inp.parentElement?.textContent || '').trim();
+          const isSelfie = lblText.includes('سيلفي') || lblText.toLowerCase().includes('selfie');
+          const facing = isSelfie ? 'user' : 'environment';
+
+          // Safe fallback guard if getUserMedia fails (no infinite loop)
+          const origOpen = DamanKycBdayQR.openInAppCameraForInput.bind(DamanKycBdayQR);
+          if (!DamanKycBdayQR._nativeFallbackGuarded) {
+            DamanKycBdayQR._nativeFallbackGuarded = true;
+            DamanKycBdayQR.openInAppCameraForInput = async function (inputId, face, ttl) {
+              const tInp = document.getElementById(inputId);
+              try {
+                await origOpen(inputId, face, ttl);
+              } catch (e) {
+                if (tInp) {
+                  tInp.dataset.allowNativeCapture = '1';
+                  tInp.setAttribute('capture', face || 'environment');
+                  tInp.click();
+                  setTimeout(() => { delete tInp.dataset.allowNativeCapture; }, 2000);
+                }
+              }
+            };
+          }
+          DamanKycBdayQR.openInAppCameraForInput(inp.id, facing, lblText || 'تصوير مستند التوثيق');
+        }, true);
+      }
+
+      // Save idExpiryDate AFTER #daman-kyc-modal closes + clear expired banner immediately on renewal
       if (!this._kycExpiryReliableBound) {
         this._kycExpiryReliableBound = true;
         document.addEventListener('submit', (ev) => {
@@ -319,6 +353,8 @@
             if (tries > 75) return clearInterval(waitClose);
             if (modal.classList.contains('hidden')) {
               clearInterval(waitClose);
+              if (window.DamanKycBdayQR) DamanKycBdayQR._isCurrentUserIdExpired = false;
+              document.getElementById('daman-expired-id-alert')?.remove();
               setTimeout(async () => {
                 try {
                   await Promise.all([
@@ -332,6 +368,25 @@
         });
       }
 
+      // Add idExpiryDate into A4 KYC printout when printing from KYC Vault
+      if (window.DamanKycVault && typeof DamanKycVault.printKycRecordA4 === 'function' && !DamanKycVault._a4ExpPatched) {
+        DamanKycVault._a4ExpPatched = true;
+        const origPrint = DamanKycVault.printKycRecordA4.bind(DamanKycVault);
+        DamanKycVault.printKycRecordA4 = function () {
+          origPrint();
+          const bar = document.querySelector('#daman-kycv-modal .daman-kycv-exp-bar b');
+          const expTxt = bar ? bar.textContent.trim() : '';
+          const area = document.getElementById('daman-print-area');
+          const tbl = area && area.querySelector('table');
+          if (tbl && expTxt && expTxt !== 'غير مسجّل' && !area.innerHTML.includes('تاريخ انتهاء البطاقة')) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<th>تاريخ انتهاء البطاقة</th><td><b>${app.esc(expTxt)}</b></td>`;
+            tbl.appendChild(tr);
+          }
+        };
+      }
+
+      // Separate Birthday Greeting from Wallet Self-Credit (resilient against strict Firestore Rules)
       if (window.DamanKycBdayQR && !DamanKycBdayQR._rulesResilientV41) {
         DamanKycBdayQR._rulesResilientV41 = true;
         DamanKycBdayQR.checkAndCelebrateUserBirthday = async function () {
@@ -451,7 +506,7 @@
             ['لوحة الإدارة 360° (admin + ext + ext2)', !!(window.DamanAdmin && DamanAdmin._ext1Ready)],
             ['صوت وملفات مراقبة الشات (admin-chat-media)', !!(window.DamanAdmin && DamanAdmin._watchMediaPatched)],
             ['الأقسام الديناميكية وإعلاناتها (categories-ads)', !!window.DamanCatAds],
-            ['باقة الـ 60 قسم الشاملة (categories-pack)', !!(window.DamanCatAds && DamanCatAds._packV33Attached)],
+            ['باقة الـ 62 قسم الشاملة (categories-pack)', !!(window.DamanCatAds && DamanCatAds._packV33Attached)],
             ['البحث الشامل (global-search)', !!window.DamanSearch],
             ['رقم المنشور وتحذير الأمان (post-contact-guard)', !!window.DamanPostContact],
             ['أرشيف البطاقات والسجلات (kyc-vault)', !!window.DamanKycVault],
