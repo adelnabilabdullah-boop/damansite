@@ -21,8 +21,15 @@
       return {
         vodafone_cash: c.vodafone_cash !== false,
         instapay: c.instapay !== false,
-        bank: c.bank === true
+        bank: c.bank !== false
       };
+    },
+
+    safeChannelShort(ch) {
+      if (ch === 'bank') return '🏦 تحويل بنكي';
+      if (ch === 'instapay') return 'إنستا باي';
+      if (ch === 'vodafone_cash') return 'محفظة إلكترونية';
+      return typeof this.channelShort === 'function' ? this.channelShort(ch) : ch;
     },
 
     closeDepositModal() {
@@ -30,7 +37,7 @@
       document.getElementById('daman-deposit-modal')?.classList.add('hidden');
     },
 
-    // ==================== 1. DEPOSIT MODAL (3 CHANNELS + ? HELP ON EVERY FIELD) ====================
+    // ==================== 1. DEPOSIT MODAL (3 CHANNELS + OPTIONAL TXREF + 10 MIN TIMER) ====================
     async _openDepositModalImpl(prefillAmount = '') {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
@@ -50,7 +57,10 @@
       let liveCfg = Object.assign({}, app.appConfig || {});
       try {
         const cfgSnap = await app.db.collection('settings').doc('appConfig').get({ source: 'server' });
-        if (cfgSnap.exists) liveCfg = Object.assign({}, liveCfg, cfgSnap.data());
+        if (cfgSnap.exists) {
+          liveCfg = Object.assign({}, liveCfg, cfgSnap.data());
+          app.appConfig = Object.assign({}, app.appConfig || {}, cfgSnap.data());
+        }
       } catch (e) {}
 
       if (liveCfg.disableDeposits && !app.isAdmin()) {
@@ -117,10 +127,12 @@
       const bankAccount = acc.bankAccount || acc.bankInfo || 'غير محدد';
       const bankIban = acc.bankIban || '';
 
+      const escJs = (s) => app.esc(String(s || '')).replace(/'/g, "\\'");
+
       modal.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-emerald-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-emerald-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> شحن المحفظة (إيداع عبر 3 وسائل)</h3>
+            <h3 class="text-sm font-black text-emerald-400"><i class="fa-solid fa-circle-arrow-down me-1"></i> إيداع</h3>
             <button onclick="DamanWallet.closeDepositModal()" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
@@ -138,7 +150,7 @@
             <i class="fa-solid fa-clock-rotate-left text-3xl text-rose-400"></i>
             <div class="text-sm font-black text-rose-300">انتهت مهلة البيانات الحالية!</div>
             <p class="text-[11px] text-slate-300">حمايةً لأموالك، تم إخفاء الأرقام السابقة. اضغط أدناه لجلب الحسابات النشطة لحظياً.</p>
-            <button onclick="DamanWallet.openDepositModal('${app.esc(prefillAmount)}')" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">
+            <button onclick="DamanWallet.openDepositModal('${escJs(prefillAmount)}')" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">
               <i class="fa-solid fa-rotate me-1"></i> تحديث وجلب الحسابات النشطة الآن
             </button>
           </div>
@@ -163,7 +175,7 @@
                     <div class="text-[9.5px] text-slate-400">رقم المحفظة (فودافون / اتصالات / أورنج / WE):</div>
                     <div class="text-sm font-black text-white tracking-wider select-all">${app.esc(vfNum)}</div>
                   </div>
-                  <button type="button" onclick="navigator.clipboard.writeText('${app.esc(vfNum)}'); DamanApp.toast('تم نسخ رقم المحفظة ✅','success')" class="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10.5px] shrink-0">نسخ الرقم</button>
+                  <button type="button" onclick="navigator.clipboard.writeText('${escJs(vfNum)}'); DamanApp.toast('تم نسخ رقم المحفظة ✅','success')" class="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[10.5px] shrink-0">نسخ الرقم</button>
                 </div>
                 <div class="pt-1.5 border-t border-slate-800 flex items-center justify-between text-[11px]">
                   <span class="text-slate-400">اسم صاحب المحفظة:</span>
@@ -185,9 +197,9 @@
                   <div class="flex items-center justify-between gap-2">
                     <div class="min-w-0">
                       <div class="text-[9.5px] text-slate-400">عنوان إنستا باي (IPA):</div>
-                      <div class="text-xs font-black text-emerald-300 truncate select-all">${app.esc(ipAddr)}</div>
+                      <div class="text-xs font-black text-emerald-300 truncate select-all" dir="ltr">${app.esc(ipAddr)}</div>
                     </div>
-                    <button type="button" onclick="navigator.clipboard.writeText('${app.esc(ipAddr)}'); DamanApp.toast('تم نسخ عنوان إنستا باي ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px] shrink-0">نسخ</button>
+                    <button type="button" onclick="navigator.clipboard.writeText('${escJs(ipAddr)}'); DamanApp.toast('تم نسخ عنوان إنستا باي ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px] shrink-0">نسخ</button>
                   </div>` : ''}
                 ${ipHolder ? `
                   <div class="pt-1 border-t border-slate-800 flex items-center justify-between text-[11px]">
@@ -213,17 +225,17 @@
                 <div class="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-800">
                   <div class="min-w-0">
                     <div class="text-[9.5px] text-slate-400">رقم الحساب البنكي:</div>
-                    <div class="text-xs font-black text-emerald-300 tracking-wider break-all select-all">${app.esc(bankAccount)}</div>
+                    <div class="text-xs font-black text-emerald-300 tracking-wider break-all select-all" dir="ltr">${app.esc(bankAccount)}</div>
                   </div>
-                  <button type="button" onclick="navigator.clipboard.writeText('${app.esc(bankAccount)}'); DamanApp.toast('تم نسخ رقم الحساب البنكي ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px] shrink-0">نسخ الحساب</button>
+                  <button type="button" onclick="navigator.clipboard.writeText('${escJs(bankAccount)}'); DamanApp.toast('تم نسخ رقم الحساب البنكي ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px] shrink-0">نسخ الحساب</button>
                 </div>
                 ${bankIban ? `
                   <div class="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-800">
                     <div class="min-w-0">
                       <div class="text-[9.5px] text-slate-400">رقم IBAN:</div>
-                      <div class="text-[10.5px] font-black text-sky-300 break-all select-all">${app.esc(bankIban)}</div>
+                      <div class="text-[10.5px] font-black text-sky-300 break-all select-all" dir="ltr">${app.esc(bankIban)}</div>
                     </div>
-                    <button type="button" onclick="navigator.clipboard.writeText('${app.esc(bankIban)}'); DamanApp.toast('تم نسخ الـ IBAN ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-sky-300 font-black text-[10px] shrink-0">نسخ IBAN</button>
+                    <button type="button" onclick="navigator.clipboard.writeText('${escJs(bankIban)}'); DamanApp.toast('تم نسخ الـ IBAN ✅','success')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-sky-300 font-black text-[10px] shrink-0">نسخ IBAN</button>
                   </div>` : ''}
               </div>
             </div>
@@ -245,14 +257,14 @@
               ${this.hBox('d-snd', 'اكتب رقم المحفظة أو اسم صاحب الحساب البنكي أو عنوان إنستا باي الذي تم التحويل منه لتسهيل مطابقة التحويل سريعاً.')}
 
               <div>
-                <label class="block text-[10.5px] font-bold text-amber-300 mb-1">الرقم المرجعي للعملية (Reference) * ${this.hBtn('d-ref')}</label>
-                ${this.hBox('d-ref', 'رقم العملية المكتوب في رسالة SMS أو إيصال إنستا باي أو إيصال الإيداع البنكي. يمنع النظام تكرار نفس الرقم المرجعي لحماية حسابك.')}
-                <input id="dep-txref" type="text" required placeholder="رقم العملية من رسالة التأكيد أو الإيصال" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
+                <label class="block text-[10.5px] font-bold text-amber-300 mb-1">الرقم المرجعي للعملية <span class="text-emerald-400">(اختياري)</span> ${this.hBtn('d-ref')}</label>
+                ${this.hBox('d-ref', 'رقم العملية المكتوب في رسالة SMS أو إيصال إنستا باي أو إيصال الإيداع البنكي (اختياري — يمكنك تركه فارغاً إذا لم يتوفر).')}
+                <input id="dep-txref" type="text" placeholder="رقم العملية من الإيصال (اختياري — يمكنك تركه فارغاً)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold" />
               </div>
 
               <div>
                 <div class="text-[10.5px] font-bold text-emerald-300 mb-1">صورة إيصال التحويل * ${this.hBtn('d-pic')}</div>
-                ${this.hBox('d-pic', 'ارفع لقطة شاشة (Screenshot) واضحة من تطبيق المحفظة أو إنستا باي أو صورة إيصال البنك موضح بها المبلغ والتاريخ والرقم المرجعي.')}
+                ${this.hBox('d-pic', 'ارفع لقطة شاشة (Screenshot) واضحة من تطبيق المحفظة أو إنستا باي أو صورة إيصال البنك موضح بها المبلغ والتاريخ.')}
                 <label class="block p-3 rounded-xl border border-dashed border-emerald-500/60 bg-slate-950 text-center cursor-pointer">
                   <span class="font-black text-emerald-300"><i class="fa-solid fa-receipt me-1"></i> اضغط لرفع صورة إيصال التحويل *</span>
                   <input type="file" accept="image/*" required class="hidden" onchange="DamanWallet.handleReceiptPhoto(this)" />
@@ -310,20 +322,21 @@
         const channel = document.getElementById('dep-channel-hidden')?.value || this.selectedDepositChannel;
         const amount = Math.round((parseFloat(document.getElementById('dep-amount').value) || 0) * 100) / 100;
         const senderAccount = document.getElementById('dep-sender').value.trim();
-        const txRef = document.getElementById('dep-txref').value.trim().toUpperCase();
+        const rawTxRef = (document.getElementById('dep-txref')?.value || '').trim().toUpperCase();
+        const txRef = rawTxRef || 'بدون رقم مرجعي';
         const minDep = Number(cfg.minDeposit || 100);
         const maxDep = Number(cfg.maxDeposit || 250000);
 
         if (amount < minDep) return app.toast(`الحد الأدنى للإيداع ${app.fmtMoney(minDep)} ج.م`, 'warning');
         if (amount > maxDep) return app.toast(`الحد الأقصى للعملية الواحدة ${app.fmtMoney(maxDep)} ج.م`, 'warning');
-        if (!txRef || txRef.length < 4) return app.toast('أدخل الرقم المرجعي للعملية بشكل صحيح', 'warning');
+        if (rawTxRef && rawTxRef.length < 3) return app.toast('الرقم المرجعي قصير جداً — اكتب الرقم الصحيح أو اتركه فارغاً', 'warning');
         if (!this.tempReceiptBase64) return app.toast('يرجى إرفاق صورة إيصال التحويل', 'warning');
 
         const btn = document.getElementById('dep-submit-btn');
         if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التحقق والرفع الآمن...'; }
 
         try {
-          const refKey = txRef.replace(/[^A-Z0-9_-]/g, '').slice(0, 80);
+          const refKey = rawTxRef ? rawTxRef.replace(/[^A-Z0-9_-]/g, '').slice(0, 80) : '';
           let isDupRef = false;
           if (refKey) {
             try {
@@ -337,7 +350,7 @@
                 }
               } else {
                 await idxRef.set({
-                  txRef, status: 'pending', date: app.todayLocal(),
+                  txRef: rawTxRef, status: 'pending', date: app.todayLocal(),
                   createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 }).catch(() => {});
               }
@@ -360,6 +373,7 @@
             userPhone: app.profile?.phone || '',
             channel, amount, requestedAmount: amount, senderAccount, txRef,
             targetAccountUsed: targetAccSnapshot, duplicateRefFlag: isDupRef,
+            sameOwnerConfirmed: true,
             receiptMedia, status: 'pending', date: app.todayLocal(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -367,7 +381,7 @@
           await app.sendNotification(
             'ADMIN',
             isDupRef ? '⚠️ طلب شحن برقم مرجعي مكرر!' : 'طلب شحن محفظة جديد 💰',
-            `${app.profile?.name} — ${app.fmtMoney(amount)} ج.م (${this.channelShort(channel)}) | مرجع: ${txRef}`
+            `${app.profile?.name} — ${app.fmtMoney(amount)} ج.م (${this.safeChannelShort(channel)}) | مرجع: ${txRef}`
           );
 
           this.closeDepositModal();
@@ -379,28 +393,41 @@
       });
     },
 
-    // ==================== 2. WITHDRAW MODAL (2 CHANNELS + ? HELP ON EVERY FIELD) ====================
-    _openWithdrawModalImpl() {
+    // ==================== 2. WITHDRAW MODAL (UP TO 3 CHANNELS INCLUDING BANK + LIVE SERVER SYNC) ====================
+    async _openWithdrawModalImpl() {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
+      if (app.profile?.status === 'frozen' || app.profile?.frozen) {
+        return app.toast('❄️ حسابك مجمّد مؤقتاً — لا يمكن السحب لحين انتهاء المراجعة الإدارية', 'error');
+      }
       if (!app.isKycVerified()) {
         app.toast('لا يمكن السحب قبل توثيق الحساب بالبطاقة والسيلفي', 'error');
         return this.openKycModal(true);
       }
-      if (app.appConfig?.disableWithdrawals && !app.isAdmin()) {
+
+      let liveCfg = Object.assign({}, app.appConfig || {});
+      try {
+        const cfgSnap = await app.db.collection('settings').doc('appConfig').get({ source: 'server' });
+        if (cfgSnap.exists) {
+          liveCfg = Object.assign({}, liveCfg, cfgSnap.data());
+          app.appConfig = Object.assign({}, app.appConfig || {}, cfgSnap.data());
+        }
+      } catch (e) {}
+
+      if (liveCfg.disableWithdrawals && !app.isAdmin()) {
         return app.toast('طلبات السحب متوقفة مؤقتاً للصيانة من الإدارة — حاول لاحقاً', 'warning');
       }
       if (this.requests.some((r) => r.type === 'withdraw' && r.status === 'pending')) {
         return app.toast('لديك طلب سحب قيد المراجعة بالفعل — انتظر تنفيذه أو ألغِه أولاً', 'warning');
       }
 
-      const enabled = this.getEnabledWithdrawChannels(app.appConfig);
+      const enabled = this.getEnabledWithdrawChannels(liveCfg);
       const activeList = ['vodafone_cash', 'instapay', 'bank'].filter((k) => enabled[k]);
       if (!activeList.length) return app.toast('وسائل السحب متوقفة مؤقتاً — تواصل مع الإدارة', 'error');
 
       const avail = Number(app.profile.balanceAvailable || 0);
-      const minW = Number(app.appConfig?.minWithdraw || 100);
-      const maxDaily = Number(app.appConfig?.maxWithdrawDaily || 50000);
+      const minW = Number(liveCfg.minWithdraw || 100);
+      const maxDaily = Number(liveCfg.maxWithdrawDaily || 50000);
       const todayUsed = this.requests
         .filter((r) => r.type === 'withdraw' && r.date === app.todayLocal() && ['pending', 'approved'].includes(r.status))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
@@ -416,6 +443,7 @@
       const maxAllowedNow = Math.min(avail, dailyLeft);
       const savedVf = localStorage.getItem('daman_last_wd_vf') || app.profile?.phone || '';
       const savedIp = localStorage.getItem('daman_last_wd_ip') || '';
+      const escJs = (s) => app.esc(String(s || '')).replace(/'/g, "\\'");
 
       let m = document.getElementById('daman-withdraw-modal');
       if (!m) {
@@ -429,13 +457,13 @@
       const opts = [
         enabled.vodafone_cash ? '<option value="vodafone_cash">📱 محفظة إلكترونية (فودافون / اتصالات / أورنج / WE كاش)</option>' : '',
         enabled.instapay ? '<option value="instapay">⚡ إنستا باي (InstaPay)</option>' : '',
-        enabled.bank ? '<option value="bank">🏦 تحويل بنكي</option>' : ''
+        enabled.bank ? '<option value="bank">🏦 تحويل إلى حساب بنكي (IBAN / رقم حساب)</option>' : ''
       ].join('');
 
       m.innerHTML = `
-        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 space-y-3 text-xs">
+        <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-money-bill-transfer me-1"></i> سحب رصيد كاش من المحفظة</h3>
+            <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-money-bill-transfer me-1"></i> سحب</h3>
             <button onclick="document.getElementById('daman-withdraw-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
@@ -447,8 +475,8 @@
           <form onsubmit="DamanWallet.submitWithdraw(event)" oninput="DamanWallet.updateWithdrawPreview()" class="space-y-2.5">
             <div>
               <label class="block text-[11px] font-bold text-slate-300 mb-1">وسيلة الاستلام * ${this.hBtn('wd-ch')}</label>
-              ${this.hBox('wd-ch', 'اختر الطريقة التي تريد أن تحوّل لك الإدارة الفلوس عليها (محفظة كاش أو إنستا باي).')}
-              <select id="wd-channel" onchange="DamanWallet.onWithdrawChannelChange('${app.esc(savedVf)}','${app.esc(savedIp)}')" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold">
+              ${this.hBox('wd-ch', 'اختر الطريقة التي تريد أن تحوّل لك الإدارة الفلوس عليها (محفظة كاش أو إنستا باي أو حساب بنكي).')}
+              <select id="wd-channel" onchange="DamanWallet.onWithdrawChannelChange('${escJs(savedVf)}','${escJs(savedIp)}')" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-bold">
                 ${opts}
               </select>
             </div>
@@ -461,8 +489,8 @@
 
             <div>
               <label class="block text-[11px] font-bold text-slate-300 mb-1"><span id="wd-dest-lbl">رقم المحفظة المستلمة *</span> ${this.hBtn('wd-dst')}</label>
-              ${this.hBox('wd-dst', 'اكتب رقم المحفظة المصرية (11 رقم) أو عنوان إنستا باي الخاص بك (username@instapay) الذي ستستلم عليه التحويل — تأكد من صحته بدقة.')}
-              <input id="wd-dest" type="text" required value="${app.esc(activeList[0] === 'instapay' ? savedIp : savedVf)}" placeholder="01xxxxxxxxx أو username@instapay" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
+              ${this.hBox('wd-dst', 'اكتب رقم المحفظة المصرية (11 رقم) أو عنوان إنستا باي أو بيانات حسابك البنكي المسجّل باسمك الشخصي.')}
+              <input id="wd-dest" type="text" required value="${app.esc(activeList[0] === 'instapay' ? savedIp : activeList[0] === 'bank' ? '' : savedVf)}" placeholder="01xxxxxxxxx أو username@instapay" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" />
             </div>
 
             <div id="wd-preview" class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 space-y-0.5"></div>
@@ -485,7 +513,7 @@
         if (inp) { inp.value = savedIp || ''; inp.placeholder = 'username@instapay أو 01xxxxxxxxx'; }
       } else if (ch === 'bank') {
         if (lbl) lbl.textContent = 'اسم البنك + اسم المستفيد + رقم الحساب / IBAN *';
-        if (inp) { inp.value = ''; inp.placeholder = 'البنك الأهلي / مصر — رقم الحساب'; }
+        if (inp) { inp.placeholder = 'البنك الأهلي / مصر — رقم الحساب أو IBAN'; }
       } else {
         if (lbl) lbl.textContent = 'رقم المحفظة المستلمة (يفضل رقمك الموثّق) *';
         if (inp) { inp.value = savedVf || ''; inp.placeholder = '01xxxxxxxxx'; }
@@ -513,7 +541,7 @@
       if (!box) return;
       box.innerHTML = `
         <div>المبلغ المطلوب سحبه: <b>${app.fmtMoney(amt)} ج.م</b></div>
-        <div>رسوم التحويل (${this.channelShort(ch)}): <b>${app.fmtMoney(fee)} ج.م</b></div>
+        <div>رسوم التحويل (${this.safeChannelShort(ch)}): <b>${app.fmtMoney(fee)} ج.م</b></div>
         <div class="text-emerald-300 font-black">الصافي الذي سيصلك: ${app.fmtMoney(net)} ج.م</div>
         <div class="text-[10px] text-slate-300 pt-0.5">يُحجز المبلغ فوراً في خانة «قيد السحب»، ويمكنك إلغاء الطلب قبل اعتماده.</div>`;
     },
@@ -578,13 +606,14 @@
               userLegalName: app.profile?.legalName || '', userPhone: app.profile?.phone || '',
               channel, amount, withdrawFee: fee, netPayout: net, destAccount,
               phoneMismatchFlag, rapidFlipFlag, lastDepositChannel: lastDep ? lastDep.channel : '',
+              sameOwnerConfirmed: true,
               status: 'pending', date: app.todayLocal(),
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             tx.set(txRefDoc, {
               userId: app.user.uid, type: 'withdraw_hold', amount: -amount,
               balanceBefore: curAvail, balanceAfter: afterAvail,
-              note: `حجز طلب سحب (${this.channelShort(channel)} — ${destAccount})`,
+              note: `حجز طلب سحب (${this.safeChannelShort(channel)} — ${destAccount})`,
               date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           });
