@@ -71,7 +71,6 @@
       });
     },
 
-    // Capture live values from Admin "محوّل الحسابات" inputs/textareas in DOM
     harvestAccountsFromAdminDOM() {
       const main = document.getElementById('app-main');
       if (!main) return;
@@ -243,7 +242,6 @@
       }
 
       if (method === 'instapay') {
-        // Strictly preserve exact value (even if short or numeric like "10" or an IPA)
         const hasSnapInsta = !!(snap.instapayAddress || snap.instapayLink || snap.instapayHolder || snap.instapayPhone);
         const link = hasSnapInsta
           ? snap.instapayLink
