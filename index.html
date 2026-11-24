@@ -61,7 +61,7 @@
   </div>
 
   <div id="daman-update-banner" class="hidden fixed inset-x-3 bottom-20 z-[115] max-w-md mx-auto bg-amber-500 text-slate-950 rounded-2xl px-3.5 py-2.5 shadow-2xl flex items-center justify-between gap-2">
-    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v37)</span>
+    <span class="text-xs font-black"><i class="fa-solid fa-sparkles me-1"></i> يوجد تحديث جديد للتطبيق (v42)</span>
     <button onclick="window.DamanApplyUpdate()" class="px-3 py-1 rounded-xl bg-slate-950 text-amber-400 text-[11px] font-black">تحديث الآن</button>
   </div>
 
@@ -194,7 +194,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=37').then((reg) => {
+        navigator.serviceWorker.register('sw.js?v=42').then((reg) => {
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
             if (!nw) return;
@@ -213,6 +213,12 @@
     window.addEventListener('popstate', () => {
       const lb = document.getElementById('daman-lightbox');
       if (lb && !lb.classList.contains('hidden')) { lb.classList.add('hidden'); return; }
+      if (window.DamanKycBdayQR) {
+        const lcam = document.getElementById('daman-kyc-livecam-modal');
+        if (lcam && !lcam.classList.contains('hidden')) { DamanKycBdayQR.closeInAppCamera(); return; }
+        const qscan = document.getElementById('daman-qr-scanner-modal');
+        if (qscan && !qscan.classList.contains('hidden')) { DamanKycBdayQR.closeQrScannerModal(); return; }
+      }
       const watch = document.getElementById('daman-adm-chat-watch');
       if (watch && !watch.classList.contains('hidden') && window.DamanAdmin && DamanAdmin.closeAdminChatWatch) {
         DamanAdmin.closeAdminChatWatch();
@@ -249,6 +255,33 @@
   <script src="post-contact-guard.js?v=36"></script>
   <script src="kyc-vault.js?v=36"></script>
   <script src="share-qr.js?v=36"></script>
-  <script src="system-sync.js?v=37"></script>
+  <script src="system-sync.js?v=38"></script>
+  <script src="kyc-bday-qr.js?v=39"></script>
+  <script src="admin-growth-ops.js?v=40"></script>
+  <script src="wallet-sla.js?v=42"></script>
+  <script>
+    (function () {
+      const K = window.DamanKycBdayQR;
+      if (!K || K._camLoopSafe) return;
+      K._camLoopSafe = true;
+      K._nativeFallbackGuarded = true;
+      const orig = K.openInAppCameraForInput.bind(K);
+      let busy = false;
+      K.openInAppCameraForInput = async function (inputId, face, ttl) {
+        const tInp = document.getElementById(inputId);
+        if (busy) {
+          if (tInp) {
+            tInp.dataset.allowNativeCapture = '1';
+            tInp.setAttribute('capture', face || 'environment');
+            tInp.click();
+            setTimeout(() => { delete tInp.dataset.allowNativeCapture; }, 1500);
+          }
+          return;
+        }
+        busy = true;
+        try { await orig(inputId, face, ttl); } finally { busy = false; }
+      };
+    })();
+  </script>
 </body>
 </html>
