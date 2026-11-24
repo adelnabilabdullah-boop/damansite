@@ -36,11 +36,13 @@
       'بنك أخرى'
     ],
 
-    isInvalidAccountValue(val) {
+    isInvalidAccountValue(val, allowZero = false) {
       if (val === undefined || val === null) return true;
       if (typeof val === 'boolean') return true;
       const s = String(val).trim().toLowerCase();
-      return !s || s === 'true' || s === 'false' || s === 'undefined' || s === 'null';
+      if (!s || s === 'true' || s === 'false' || s === 'undefined' || s === 'null') return true;
+      if (!allowZero && (s === '0' || s === '0.0')) return true;
+      return false;
     },
 
     getHolderName(app) {
@@ -130,8 +132,8 @@
             if (!freshSnap.instapayHolder) freshSnap.instapayHolder = val;
           } else if (ctx.includes('موبايل') || ctx.includes('هاتف') || ctx.includes('phone')) {
             if (!freshSnap.instapayPhone) freshSnap.instapayPhone = val;
-          } else if (!freshSnap.instapayAddress) {
-            freshSnap.instapayAddress = val;
+          } else if (ctx.includes('ipa') || ctx.includes('عنوان') || val.includes('@')) {
+            if (!freshSnap.instapayAddress) freshSnap.instapayAddress = val;
           }
         } else if (ctx.includes('بنك') || ctx.includes('bank') || ctx.includes('iban') || ctx.includes('حساب')) {
           sawAdminAccountsScreen = true;
@@ -252,22 +254,17 @@
       }
 
       if (method === 'instapay') {
-        const hasSnapInsta = !this.isInvalidAccountValue(snap.instapayAddress)
-          || !this.isInvalidAccountValue(snap.instapayLink)
-          || !this.isInvalidAccountValue(snap.instapayHolder)
-          || !this.isInvalidAccountValue(snap.instapayPhone);
-
-        const link = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayLink)
+        const link = !this.isInvalidAccountValue(snap.instapayLink)
           ? snap.instapayLink
           : this.findValueByKeyPatterns(flat, ['instapayLink', 'instapayUrl', 'ipnLink'], ['insta', 'link'], []);
 
-        let ipa = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayAddress)
+        let ipa = !this.isInvalidAccountValue(snap.instapayAddress)
           ? snap.instapayAddress
           : this.findValueByKeyPatterns(
               flat,
-              ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'depositInstapay', 'ipa', 'ipaAddress', 'instapayPhone', 'activeInstapay'],
+              ['instapayAddress', 'instapay', 'instapayId', 'instapayUser', 'depositInstapay', 'ipa', 'ipaAddress', 'activeInstapay'],
               ['insta'],
-              ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max']
+              ['name', 'holder', 'owner', 'link', 'url', 'enable', 'active', 'min', 'max', 'phone', 'mobile']
             );
 
         if (!ipa) {
@@ -279,12 +276,12 @@
           }
         }
 
-        const name = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayHolder)
+        const name = !this.isInvalidAccountValue(snap.instapayHolder)
           ? snap.instapayHolder
           : (this.findValueByKeyPatterns(flat, ['instapayName', 'instapayHolder', 'instapayOwner', 'instapayAccountName'], ['insta', 'name'], [])
             || this.findValueByKeyPatterns(flat, ['receiverName', 'accountHolderName'], ['holder'], []));
 
-        const phone = hasSnapInsta && !this.isInvalidAccountValue(snap.instapayPhone)
+        const phone = !this.isInvalidAccountValue(snap.instapayPhone)
           ? snap.instapayPhone
           : this.findValueByKeyPatterns(flat, ['instapayPhone', 'instapayMobile'], ['insta', 'phone'], []);
 
@@ -592,7 +589,7 @@
       if (!sender || sender.length < 4) return app.toast('يرجى إدخال الرقم أو الحساب المحوّل منه', 'error');
       if (!this._receiptDataUrl) return app.toast('يرجى إرفاق صورة إيصال التحويل أولاً', 'error');
 
-      await app.withLock('submitDepositV50', async () => {
+      await app.withLock('submitDepositV51', async () => {
         try {
           const cleanRef = rawRef ? rawRef.toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
           if (cleanRef) {
@@ -834,7 +831,7 @@
         if (targetAccount.length < 5) return app.toast('يرجى كتابة رقم المحفظة أو حساب إنستا باي بشكل صحيح', 'error');
       }
 
-      await app.withLock('submitWithdrawV50', async () => {
+      await app.withLock('submitWithdrawV51', async () => {
         try {
           const holderName = this.getHolderName(app);
           const today = app.todayLocal();
