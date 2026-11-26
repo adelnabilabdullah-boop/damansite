@@ -5,6 +5,9 @@
     _booted: false,
     _obs: null,
     _timer: null,
+    _runningPass: false,
+    _lastToastAt: 0,
+    _lastToastAction: '',
     _tesseractPromise: null,
     _docType: 'national_id', // 'national_id' | 'passport'
     _photos: { front: '', back: '', selfie: '', cr: '', tax: '' },
@@ -51,23 +54,38 @@
       return false;
     },
 
+    notifyOnce(msg, type = 'warning') {
+      const app = window.DamanApp;
+      if (!app || typeof app.toast !== 'function') return;
+      const now = Date.now();
+      if (this._lastToastAction === msg && now - this._lastToastAt < 1800) return;
+      this._lastToastAction = msg;
+      this._lastToastAt = now;
+      app.toast(msg, type);
+    },
+
     requireVerifiedForAction(actionLabel) {
       const app = window.DamanApp;
       if (!app) return false;
+
       if (!app.user || !app.profile) {
-        app.toast(`سجّل الدخول ثم وثّق حسابك لـ${actionLabel}`, 'warning');
-        app.openAuthModal?.('login');
+        this.notifyOnce(`سجّل الدخول أولاً لإتمام ${actionLabel}`, 'warning');
+        setTimeout(() => app.openAuthModal?.('login'), 20);
         return false;
       }
+
       if (this.isVerifiedOrAdmin()) return true;
 
       if (app.profile?.kycStatus === 'pending') {
-        app.toast(`⏳ مستندات التوثيق قيد المراجعة حالياً — سيتاح لك ${actionLabel} فور الاعتماد`, 'info');
+        this.notifyOnce(`⏳ مستندات التوثيق قيد المراجعة — سيتاح لك ${actionLabel} فور الاعتماد`, 'info');
         return false;
       }
 
-      app.toast(`🪪 التصفح والتواصل مع الدعم متاح بحرية — وثّق حسابك (بطاقة أو جواز سفر) لـ${actionLabel}`, 'warning');
-      this.openKycModal();
+      this.notifyOnce(`🪪 وثّق حسابك (بطاقة أو جواز سفر) لـ${actionLabel}`, 'warning');
+      const modalEl = document.getElementById('daman-kyc-modal');
+      if (!modalEl || modalEl.classList.contains('hidden')) {
+        setTimeout(() => this.openKycModal(), 30);
+      }
       return false;
     },
 
@@ -112,7 +130,8 @@
     injectSoftBrowseBanner() {
       const app = window.DamanApp;
       if (!app || !app.user || this.isVerifiedOrAdmin()) {
-        document.getElementById('daman-kyc-browse-banner')?.remove();
+        const existing = document.getElementById('daman-kyc-browse-banner');
+        if (existing) existing.remove();
         return;
       }
       const main = document.getElementById('app-main');
@@ -127,7 +146,7 @@
       }`;
       bar.innerHTML = isPending
         ? `<span class="font-bold">⏳ مستندات التوثيق قيد المراجعة — يمكنك التصفّح والتواصل مع الدعم بحرية لحين الاعتماد.</span>`
-        : `<span class="font-bold">👀 تتصفّح التطبيق بحرية — وثّق بالبطاقة أو جواز السفر عند الإيداع أو السحب أو النشر أو التواصل مع الأعضاء.</span>
+        : `<span class="font-bold">👀 تتصفّح التطبيق بحرية — وثّق بالبطاقة أو جواز السفر عند الإيداع أو السحب أو النشر أو الشراء أو التواصل.</span>
            <button type="button" onclick="DamanKycGate.openKycModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">وثّق الآن</button>`;
 
       const root = main.firstElementChild || main;
@@ -138,9 +157,9 @@
       const app = window.DamanApp;
       if (!app) return;
 
-      // 1) Wallet Deposit / Withdraw / KYC modal override
-      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV59) {
-        DamanWallet._kycOcrOverriddenV59 = true;
+      // 1) Wallet Deposit / Withdraw / Buy Package / KYC modal override
+      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV61) {
+        DamanWallet._kycOcrOverriddenV61 = true;
 
         if (typeof DamanWallet.openDepositModal === 'function') {
           const origDep = DamanWallet.openDepositModal.bind(DamanWallet);
@@ -158,15 +177,25 @@
           };
         }
 
+        if (typeof DamanWallet.buyPackage === 'function') {
+          const origBuyPkg = DamanWallet.buyPackage.bind(DamanWallet);
+          DamanWallet.buyPackage = (...args) => {
+            if (!this.requireVerifiedForAction('شراء الباقات')) return;
+            return origBuyPkg(...args);
+          };
+        }
+
         DamanWallet.openKycModal = (forced = false) => {
-          if (forced) return;
+          if (forced && !this.isVerifiedOrAdmin()) {
+            return this.requireVerifiedForAction('إتمام العملية');
+          }
           this.openKycModal();
         };
       }
 
       // 2) Chat direct open, messages & calls gate (Admin & Support & AI ALWAYS allowed!)
-      if (window.DamanChat && !DamanChat._kycGatePatchedV59) {
-        DamanChat._kycGatePatchedV59 = true;
+      if (window.DamanChat && !DamanChat._kycGatePatchedV61) {
+        DamanChat._kycGatePatchedV61 = true;
 
         if (typeof DamanChat.openDirectChat === 'function') {
           const origOpenChat = DamanChat.openDirectChat.bind(DamanChat);
@@ -197,8 +226,8 @@
       }
 
       // 3) External contact / phone reveal gate on ads & profiles
-      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV59) {
-        DamanPostContact._kycGatePatchedV59 = true;
+      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV61) {
+        DamanPostContact._kycGatePatchedV61 = true;
         const origExt = DamanPostContact.requestExternalContact.bind(DamanPostContact);
         DamanPostContact.requestExternalContact = (...args) => {
           if (!this.requireVerifiedForAction('إظهار رقم المعلن والتواصل معه')) return;
@@ -206,33 +235,55 @@
         };
       }
 
-      // 4) Projects / Market actions gate (Post, 3x Inspection, VIP Labor)
-      if (window.DamanProjects && !DamanProjects._kycGatePatchedV59) {
-        DamanProjects._kycGatePatchedV59 = true;
+      // 4) Projects / Market actions gate (Post, Boost/Purchase, 3x Inspection, VIP Labor)
+      if (window.DamanProjects && !DamanProjects._kycGatePatchedV61) {
+        DamanProjects._kycGatePatchedV61 = true;
 
-        const origPost = DamanProjects.openPostModal.bind(DamanProjects);
-        DamanProjects.openPostModal = (...args) => {
-          if (!this.requireVerifiedForAction('نشر إعلان في السوق')) return;
-          return origPost(...args);
-        };
+        if (typeof DamanProjects.openPostModal === 'function') {
+          const origPost = DamanProjects.openPostModal.bind(DamanProjects);
+          DamanProjects.openPostModal = (...args) => {
+            if (!this.requireVerifiedForAction('نشر إعلان في السوق')) return;
+            return origPost(...args);
+          };
+        }
 
-        const origInsp = DamanProjects.submitInspectionRequest.bind(DamanProjects);
-        DamanProjects.submitInspectionRequest = (e) => {
-          if (!this.isVerifiedOrAdmin()) {
-            e?.preventDefault?.();
-            return this.requireVerifiedForAction('طلب استلام هندسي 3x');
-          }
-          return origInsp(e);
-        };
+        if (typeof DamanProjects.openBoostModal === 'function') {
+          const origBoostModal = DamanProjects.openBoostModal.bind(DamanProjects);
+          DamanProjects.openBoostModal = (...args) => {
+            if (!this.requireVerifiedForAction('شراء وتمييز الإعلان')) return;
+            return origBoostModal(...args);
+          };
+        }
 
-        const origVip = DamanProjects.submitVipLaborRequest.bind(DamanProjects);
-        DamanProjects.submitVipLaborRequest = (e) => {
-          if (!this.isVerifiedOrAdmin()) {
-            e?.preventDefault?.();
-            return this.requireVerifiedForAction('طلب عمالة VIP');
-          }
-          return origVip(e);
-        };
+        if (typeof DamanProjects.applyBoostPackage === 'function') {
+          const origApplyBoost = DamanProjects.applyBoostPackage.bind(DamanProjects);
+          DamanProjects.applyBoostPackage = (...args) => {
+            if (!this.requireVerifiedForAction('شراء باقة التمييز')) return;
+            return origApplyBoost(...args);
+          };
+        }
+
+        if (typeof DamanProjects.submitInspectionRequest === 'function') {
+          const origInsp = DamanProjects.submitInspectionRequest.bind(DamanProjects);
+          DamanProjects.submitInspectionRequest = (e) => {
+            if (!this.isVerifiedOrAdmin()) {
+              e?.preventDefault?.();
+              return this.requireVerifiedForAction('طلب استلام هندسي 3x');
+            }
+            return origInsp(e);
+          };
+        }
+
+        if (typeof DamanProjects.submitVipLaborRequest === 'function') {
+          const origVip = DamanProjects.submitVipLaborRequest.bind(DamanProjects);
+          DamanProjects.submitVipLaborRequest = (e) => {
+            if (!this.isVerifiedOrAdmin()) {
+              e?.preventDefault?.();
+              return this.requireVerifiedForAction('طلب عمالة VIP');
+            }
+            return origVip(e);
+          };
+        }
       }
     },
 
@@ -247,7 +298,8 @@
         const target = ev.target;
         if (!target || typeof target.closest !== 'function') return;
 
-        const kycBtn = target.closest('button[onclick*="openKycModal"]');
+        // Manual click on any "توثيق الحساب" button always opens our upgraded modal
+        const kycBtn = target.closest('button[onclick*="openKycModal"], button[onclick*="openKycSafe"]');
         if (kycBtn && !kycBtn.closest('#daman-kyc-modal')) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
@@ -257,6 +309,37 @@
 
         if (this.isVerifiedOrAdmin()) return;
         if (target.closest('#daman-kyc-modal') || target.closest('#daman-ai-support-modal')) return;
+
+        // Intercept action buttons (deposit / withdraw / buy / boost / post / chat) safely without loop
+        const actionBtn = target.closest('button');
+        if (actionBtn) {
+          const oc = (actionBtn.getAttribute('onclick') || '').toLowerCase();
+          const bTxt = (actionBtn.textContent || '').replace(/\s+/g, ' ').trim();
+          if (oc.includes('opendepositmodal')) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            this.requireVerifiedForAction('الإيداع في المحفظة');
+            return;
+          }
+          if (oc.includes('openwithdrawmodal')) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            this.requireVerifiedForAction('السحب من المحفظة');
+            return;
+          }
+          if (oc.includes('buypackage') || oc.includes('openboostmodal') || oc.includes('applyboostpackage') || bTxt.includes('اشتراك / تجديد') || bTxt.includes('شراء')) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            this.requireVerifiedForAction('الشراء والاشتراك');
+            return;
+          }
+          if (oc.includes('openpostmodal') || bTxt.includes('نشر إعلان') || bTxt.includes('+ نشر')) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            this.requireVerifiedForAction('نشر إعلان في السوق');
+            return;
+          }
+        }
 
         // Block tel: and non-platform wa.me links inside ads/profiles (allow official support WhatsApp!)
         const link = target.closest('a[href]');
@@ -777,7 +860,7 @@
         }
       }
 
-      await app.withLock('submitKycV59', async () => {
+      await app.withLock('submitKycV61', async () => {
         const btn = document.getElementById('kyc-submit-v58-btn');
         const resetBtn = () => {
           if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> إرسال للتوثيق والمراجعة'; }
@@ -785,7 +868,6 @@
         if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التحقق الأمني والرفع...'; }
 
         try {
-          // 1) Blacklist check
           const bl = await app.checkBlacklist({
             email: app.profile?.email,
             phone: app.profile?.phone,
@@ -797,7 +879,6 @@
             return app.toast(`تعذر التوثيق: ${bl}`, 'error');
           }
 
-          // 2) Duplicate National ID / Passport Number check
           const [dupNidSnap, dupPassSnap, verifiedUsersSnap] = await Promise.all([
             app.db.collection('users').where('nationalId', '==', cleanDocNum).limit(2).get(),
             app.db.collection('users').where('passportNumber', '==', cleanDocNum).limit(2).get(),
@@ -814,7 +895,6 @@
             );
           }
 
-          // 3) Duplicate Full Legal Name check (prevents registering 2nd account with ID + Passport)
           const normSubmittedName = app.normalizeAr(legalName).replace(/\s+/g, ' ').trim();
           const hasDupLegalName = verifiedUsersSnap.docs.some((d) => {
             if (d.id === app.user.uid) return false;
@@ -886,11 +966,17 @@
       });
     },
 
-    // ==================== 4. BOOT ====================
+    // ==================== 4. LOOP-SAFE BOOT ====================
     runPass() {
-      this.patchModuleActionGates();
-      this.injectSoftBrowseBanner();
-      this.maskVisiblePhonesForUnverified();
+      if (this._runningPass) return;
+      this._runningPass = true;
+      try {
+        this.patchModuleActionGates();
+        this.injectSoftBrowseBanner();
+        this.maskVisiblePhonesForUnverified();
+      } finally {
+        setTimeout(() => { this._runningPass = false; }, 60);
+      }
     },
 
     boot() {
@@ -902,25 +988,35 @@
       this.attachClickAndLinkGate();
       this.patchModuleActionGates();
 
-      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV59) {
-        app._kycGateTabHookedV59 = true;
+      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV61) {
+        app._kycGateTabHookedV61 = true;
         const origRender = app.renderCurrentTab.bind(app);
         app.renderCurrentTab = () => {
           origRender();
-          setTimeout(() => this.runPass(), 90);
-          setTimeout(() => this.runPass(), 320);
+          setTimeout(() => this.runPass(), 120);
         };
       }
 
       if (typeof MutationObserver !== 'undefined') {
-        this._obs = new MutationObserver(() => {
+        this._obs = new MutationObserver((mutations) => {
+          if (this._runningPass) return;
+          const meaningful = mutations.some((m) => {
+            if (m.type === 'childList') {
+              return Array.from(m.addedNodes || []).some((n) => n.nodeType === 1 && n.id !== 'daman-toast-container' && n.id !== 'daman-kyc-browse-banner');
+            }
+            if (m.type === 'attributes' && m.target && m.target.classList && m.target.classList.contains('daman-modal')) {
+              return true;
+            }
+            return false;
+          });
+          if (!meaningful) return;
           clearTimeout(this._timer);
-          this._timer = setTimeout(() => this.runPass(), 100);
+          this._timer = setTimeout(() => this.runPass(), 220);
         });
         this._obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       }
 
-      setTimeout(() => this.runPass(), 600);
+      setTimeout(() => this.runPass(), 650);
     }
   };
 
