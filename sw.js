@@ -1,11 +1,11 @@
-const CACHE_NAME = 'damansite-v58';
+const CACHE_NAME = 'damansite-v59';
 const CORE_ASSETS = [
   './',
   './index.html',
   './icon-192.png',
   './icon-512.png',
   './manifest.json?v=28',
-  './app-core.js?v=28',
+  './app-core.js?v=59',
   './wallet-kyc.js?v=28',
   './wallet-ops.js?v=56',
   './chat-support.js?v=28',
@@ -31,7 +31,7 @@ const CORE_ASSETS = [
   './security-verify-ban.js?v=43',
   './wallet-methods-control.js?v=56',
   './daman-ai-i18n.js?v=57',
-  './kyc-ocr-passport-gate.js?v=58'
+  './kyc-ocr-passport-gate.js?v=59'
 ];
 
 self.addEventListener('install', (event) => {
