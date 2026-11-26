@@ -17,14 +17,14 @@
   db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
 
   const ADMIN_EMAIL = 'adelnabilabdullah@gmail.com';
-  const APP_VERSION = '26';
+  const APP_VERSION = '59';
 
   const MODULE_FILES = {
-    wallet: `wallet-kyc.js?v=${APP_VERSION}`,
-    chat: `chat-support.js?v=${APP_VERSION}`,
-    projects: `projects-escrow.js?v=${APP_VERSION}`,
-    company: `company-panel.js?v=${APP_VERSION}`,
-    admin: `admin.js?v=${APP_VERSION}`
+    wallet: `wallet-kyc.js?v=28`,
+    chat: `chat-support.js?v=28`,
+    projects: `projects-escrow.js?v=57`,
+    company: `company-panel.js?v=28`,
+    admin: `admin.js?v=58`
   };
 
   const OFFICIAL_HOME_BANNERS = [
@@ -123,7 +123,7 @@
     }
   };
 
-  const DEFAULT_PRIVACY = `1. التوثيق الإلزامي بالهوية: تُحفظ صور بطاقة الرقم القومي والسيلفي والسجل التجاري بسرية تامة داخل خزنة مشفّرة، وتُستخدم البيانات القانونية (الاسم الرباعي، الرقم القومي، العنوان) داخل العقود الرسمية فقط ولا تُعرض للعامة.
+  const DEFAULT_PRIVACY = `1. التوثيق بالهوية (بطاقة شخصية أو جواز سفر): التصفح متاح بحرية، ويُشترط التوثيق قبل الإيداع أو السحب أو النشر أو التواصل وإظهار الأرقام. تُحفظ المستندات بسرية تامة داخل خزنة مشفّرة، وتُستخدم البيانات القانونية داخل العقود الرسمية فقط ولا تُعرض للعامة.
 2. الضمان المالي 100%: لا يُعتمد أي عقد إلا بعد حجز 100% من قيمته + عمولة المنصة في المحفظة، وتوقيع العقد ورفع صورته لاعتماد الإدارة.
 3. تسجيل المكالمات: تُسجّل المكالمات الصوتية داخل التطبيق تلقائياً لحفظ الحقوق عند النزاعات، وتُحذف بعد 30 يوماً ما لم يتم تثبيتها لنزاع قائم.
 4. رصيد الهدايا والبرومو: يُستخدم في الباقات وتمييز الإعلانات والخدمات ولا يُسحب نقداً.
@@ -179,7 +179,7 @@
       },
       depositSessionMinutes: 10,
       depositChannels: { vodafone_cash: true, instapay: true, bank: true },
-      withdrawChannels: { vodafone_cash: true, instapay: true, bank: false },
+      withdrawChannels: { vodafone_cash: true, instapay: true, bank: true },
       openingBalances: { vodafone_cash: 0, instapay: 0, bank: 0 },
       backupAccounts: { vodafoneCash: [], instaPay: [], bank: [] },
       paymentAccounts: {
@@ -288,7 +288,8 @@
 
     maskNationalId(nid) {
       const s = String(nid || '').trim();
-      if (s.length < 8) return '—';
+      if (s.length < 6) return '—';
+      if (s.length <= 9) return s.slice(0, 2) + '****' + s.slice(-2);
       return s.slice(0, 3) + '********' + s.slice(-3);
     },
 
@@ -311,6 +312,18 @@
       if (mDiff < 0 || (mDiff === 0 && now.getDate() < day)) age--;
       if (age < 18) return { valid: false, error: 'السن القانوني للتعاقد على ضمان سايت 18 سنة على الأقل' };
       return { valid: true, nid, birthDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, age };
+    },
+
+    openKycSafe() {
+      if (!this.user) return this.openAuthModal('login');
+      if (window.DamanKycGate && typeof DamanKycGate.openKycModal === 'function') {
+        return DamanKycGate.openKycModal();
+      }
+      if (window.DamanWallet && typeof DamanWallet.openKycModal === 'function') {
+        return DamanWallet.openKycModal(false);
+      }
+      this.loadMissingModule('wallet');
+      this.toast('جارٍ فتح شاشة التوثيق...', 'info');
     },
 
     compressImage(file, maxW = 820, quality = 0.6) {
@@ -534,7 +547,7 @@
         this.loadingMods[tab] = false;
         if (tab === 'admin' && window.DamanAdmin && !window.DamanAdmin.renderMarketTab) {
           const ext = document.createElement('script');
-          ext.src = `admin-ext.js?v=${APP_VERSION}&t=` + Date.now();
+          ext.src = `admin-ext.js?v=57&t=` + Date.now();
           ext.onload = () => this.renderCurrentTab();
           document.body.appendChild(ext);
         }
@@ -643,7 +656,7 @@
                 avatarPhoto: u.photoURL || '',
                 accountType: 'individual',
                 authProvider: (u.providerData && u.providerData[0]?.providerId) || 'password',
-                needsOnboarding: !isAdm,
+                needsOnboarding: false,
                 referralCode: 'DMN-' + u.uid.slice(0, 6).toUpperCase(),
                 kycStatus: isAdm ? 'verified' : 'none',
                 status: 'active',
@@ -688,7 +701,11 @@
       const titleEl = document.getElementById('daman-header-brand');
       const subEl = document.getElementById('daman-header-sub');
       if (titleEl) {
-        titleEl.innerHTML = `${this.esc(br.appNameAr || 'ضمان سايت')} <span class="text-amber-400 text-[10px]">${this.esc(br.appNameEn || 'DamanSite')}</span>`;
+        if (this.lang === 'en') {
+          titleEl.textContent = br.appNameEn || 'DamanSite';
+        } else {
+          titleEl.innerHTML = `${this.esc(br.appNameAr || 'ضمان سايت')} <span class="hidden sm:inline daman-en-hide text-amber-400 text-[10px]">${this.esc(br.appNameEn || 'DamanSite')}</span>`;
+        }
       }
       if (subEl) {
         subEl.textContent = this.lang === 'ar' ? (br.taglineAr || 'الضمان المالي والمقاولات B2B') : (br.taglineEn || 'Escrow & B2B Contracting');
@@ -784,7 +801,7 @@
       document.documentElement.lang = this.lang;
       document.documentElement.dir = this.lang === 'ar' ? 'rtl' : 'ltr';
       const lb = document.getElementById('daman-lang-btn');
-      if (lb) lb.textContent = this.lang === 'ar' ? 'EN' : 'عربي';
+      if (lb) lb.textContent = this.lang === 'ar' ? 'EN' : 'AR';
       document.querySelectorAll('[data-i18n]').forEach((el) => {
         const k = el.getAttribute('data-i18n');
         if (k) el.textContent = this.t(k);
@@ -806,15 +823,15 @@
       if (adminBtn) {
         adminBtn.classList.toggle('hidden', !this.hasAdminAccess());
         adminBtn.innerHTML = this.isAdmin()
-          ? '<i class="fa-solid fa-crown me-1"></i> الإدارة'
-          : '<i class="fa-solid fa-user-shield me-1"></i> الإشراف';
+          ? '<i class="fa-solid fa-crown me-0.5"></i> الإدارة'
+          : '<i class="fa-solid fa-user-shield me-0.5"></i> الإشراف';
       }
       if (authBtn) {
         if (this.user) {
-          authBtn.className = 'px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-rose-400 text-[10px] font-black';
+          authBtn.className = 'px-2 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-rose-400 text-[10px] font-black';
           authBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket me-1"></i>' + this.t('logoutBtn');
         } else {
-          authBtn.className = 'px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[11px] font-black';
+          authBtn.className = 'px-2 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-[10.5px] font-black';
           authBtn.textContent = this.lang === 'ar' ? 'دخول' : 'Login';
         }
       }
@@ -886,7 +903,7 @@
       this.switchTab('projects');
     },
 
-    // ==================== MAIN RENDER ROUTER ====================
+    // ==================== MAIN RENDER ROUTER (FREE BROWSING — NO MANDATORY KYC WALL!) ====================
     renderCurrentTab() {
       const main = document.getElementById('app-main');
       if (!main) return;
@@ -898,11 +915,6 @@
 
       if (this.user && this.profile && this.profile.status === 'banned' && !this.isAdmin()) {
         main.innerHTML = `<div class="glass-card rounded-3xl p-7 text-center space-y-3 mt-10 border-rose-500/60"><i class="fa-solid fa-ban text-4xl text-rose-500"></i><h2 class="text-base font-black text-rose-400">تم إيقاف هذا الحساب من الإدارة</h2><p class="text-xs text-slate-300">${this.esc(this.profile.banReason || '')}</p><button onclick="DamanApp.handleHeaderAuthClick()" class="px-5 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-black">تسجيل الخروج</button></div>`;
-        return;
-      }
-
-      if (this.user && this.profile && !this.isKycVerified() && !this.viewingPublicUid) {
-        this.renderMandatoryKycWall(main);
         return;
       }
 
@@ -934,11 +946,10 @@
       }
     },
 
-    // ==================== GOOGLE ONBOARDING + MANDATORY KYC WALL ====================
+    // ==================== OPTIONAL GOOGLE ONBOARDING ====================
     async submitGoogleOnboarding(e) {
       e.preventDefault();
       await this.withLock('gOnboard', async () => {
-        const name = document.getElementById('go-name').value.trim();
         const accountType = document.getElementById('go-type').value;
         const phone = this.normalizePhone(document.getElementById('go-phone').value);
         const refCode = (document.getElementById('go-ref')?.value || '').trim().toUpperCase();
@@ -952,74 +963,21 @@
 
         try {
           await db.collection('users').doc(this.user.uid).update({
-            name, companyName: accountType !== 'individual' ? name : '',
             accountType, phone, referredBy: refCode, needsOnboarding: false, termsAcceptedAt: Date.now()
           });
-          this.toast('تم حفظ بياناتك! استكمل الآن خطوة التوثيق بالبطاقة 🪪', 'success');
+          document.getElementById('daman-google-onboard-modal')?.classList.add('hidden');
+          this.toast('تم حفظ بياناتك بنجاح ✅ يمكنك التصفح بحرية وتوثيق حسابك وقت التعامل.', 'success');
         } catch (err) { this.toast(err.message, 'error'); }
       });
     },
 
-    renderMandatoryKycWall(container) {
-      const p = this.profile || {};
-      const st = p.kycStatus || 'none';
-      const wa = this.appConfig?.supportWhatsapp || '201030374787';
-
-      if (!p.phone || p.needsOnboarding) {
-        const savedRef = localStorage.getItem('daman_ref_code') || '';
-        container.innerHTML = `
-          <div class="glass-card rounded-3xl p-5 space-y-3.5 mt-4 border-amber-500/50 text-xs">
-            <div class="text-center space-y-1">
-              <div class="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl"><i class="fa-brands fa-google"></i></div>
-              <h2 class="text-sm font-black text-white">خطوة 1 من 2: استكمال بيانات حسابك</h2>
-              <p class="text-[11px] text-slate-300">تم الدخول بحساب جوجل (${this.esc(p.email || '')}) — أدخل رقم موبايلك ونوع الحساب للانتقال للتوثيق بالبطاقة.</p>
-            </div>
-            <form onsubmit="DamanApp.submitGoogleOnboarding(event)" class="space-y-2.5">
-              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">اسم العرض / الشهرة أو اسم الشركة *</label><input id="go-name" type="text" required value="${this.esc(p.name || '')}" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold" /></div>
-              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">نوع الحساب *</label><select id="go-type" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-300 font-bold"><option value="individual">فرد / مقاول / فني / عميل</option><option value="company">شركة مقاولات / مكتب هندسي</option><option value="supplier">مورّد خامات ومواد بناء (B2B)</option></select></div>
-              <div><label class="block text-[10.5px] font-bold text-slate-300 mb-1">رقم الموبايل المصري (11 رقم) *</label><input id="go-phone" type="tel" required placeholder="01xxxxxxxxx" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-white font-bold" /></div>
-              <div><label class="block text-[10.5px] font-bold text-slate-400 mb-1">كود دعوة صديق (اختياري)</label><input id="go-ref" type="text" value="${this.esc(savedRef)}" placeholder="DMN-XXXXXX" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white uppercase" /></div>
-              <label class="flex items-start gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer"><input type="checkbox" required class="mt-0.5 accent-amber-500" /><span class="text-[10.5px] text-slate-300">أوافق على <button type="button" onclick="DamanApp.openPrivacyModal()" class="text-amber-400 underline font-bold">الشروط وسياسة الخصوصية</button> وتسجيل المكالمات لمدة 30 يوماً.</span></label>
-              <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">حفظ والمتابعة للتوثيق بالبطاقة</button>
-            </form>
-            <div class="text-center"><button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button></div>
-          </div>`;
-        return;
-      }
-
-      const isCompany = p.accountType === 'company' || p.accountType === 'supplier';
-      if (st === 'pending') {
-        container.innerHTML = `
-          <div class="glass-card rounded-3xl p-6 text-center space-y-4 mt-4 border-amber-500/50">
-            <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-3xl"><i class="fa-solid fa-hourglass-half animate-pulse"></i></div>
-            <h2 class="text-base font-black text-amber-400">حسابك قيد مراجعة التوثيق الإجباري</h2>
-            <p class="text-xs text-slate-300 leading-relaxed">تم استلام مستندات التوثيق بنجاح وتقوم إدارة <b>${this.esc(this.t('appName'))}</b> حالياً بمطابقة البطاقة والسيلفي لفتح المحفظة والسوق والعقود.</p>
-            <div class="grid grid-cols-2 gap-2 pt-1">
-              <button onclick="window.location.reload()" class="py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">تحديث الحالة</button>
-              <a href="https://wa.me/${wa}?text=${encodeURIComponent('مرحباً إدارة ضمان سايت، قمت برفع مستندات التوثيق لحسابي: ' + (p.phone || p.email || ''))}" target="_blank" class="py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center"><i class="fa-brands fa-whatsapp me-1"></i> واتساب</a>
-            </div>
-            <button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button>
-          </div>`;
-        return;
-      }
-
-      container.innerHTML = `
-        <div class="glass-card rounded-3xl p-6 text-center space-y-4 mt-4 border-rose-500/50">
-          <div class="w-16 h-16 mx-auto rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-3xl"><i class="fa-solid fa-id-card-clip"></i></div>
-          <h2 class="text-base font-black text-white">خطوة 2 من 2: توثيق الهوية الإجباري</h2>
-          ${st === 'rejected' ? `<div class="p-3 rounded-xl bg-rose-500/15 border border-rose-500/50 text-xs text-rose-200 font-bold">❌ سبب الرفض: ${this.esc(p.kycRejectionReason || 'الصور غير واضحة')}</div>` : ''}
-          <p class="text-xs text-slate-300 leading-relaxed">${isCompany ? 'مطلوب للشركات والموردين: صورة السجل التجاري + البطاقة الضريبية + بطاقة المسؤول (وش وضهر) + سيلفي.' : 'مطلوب للأفراد والمقاولين: بطاقة الرقم القومي (وش وضهر) + صورة سيلفي واضحة. تُستخدم البيانات تلقائياً في العقود الرسمية فقط.'}</p>
-          <button onclick="if(window.DamanWallet){ DamanWallet.openKycModal(true); } else { DamanApp.loadMissingModule('wallet'); DamanApp.toast('جارٍ تحميل شاشة التوثيق...','info'); }" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm">ابدأ رفع البطاقة والسيلفي الآن</button>
-          <button onclick="DamanApp.handleHeaderAuthClick()" class="text-[11px] text-rose-400 font-bold underline">تسجيل الخروج</button>
-        </div>`;
-    },
-
-    // ==================== HOME TAB (100% ADMIN-CONTROLLED TEXTS, CARDS & MULTI-TIER FEATURED ADS) ====================
+    // ==================== HOME TAB ====================
     renderHomeTab(container) {
       const p = this.profile;
       const br = this.appConfig?.branding || {};
       const hc = br.homeCards || {};
       const isBday = p && this.isBirthdayToday(p);
+      const isVerified = this.isKycVerified();
       const avail = Number(p?.balanceAvailable || 0);
       const esc = Number(p?.balanceEscrow || 0);
       const exp = Number(p?.subscriptionExpiresAt || 0);
@@ -1039,6 +997,14 @@
       const featuredPosts = window.DamanProjects && typeof DamanProjects.getFeaturedPosts === 'function'
         ? DamanProjects.getFeaturedPosts(6)
         : [];
+
+      const statusBadge = !p
+        ? ''
+        : isVerified
+        ? `<span class="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black shrink-0">موثّق ✅</span>`
+        : p.kycStatus === 'pending'
+        ? `<span class="px-2.5 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black shrink-0">قيد المراجعة ⏳</span>`
+        : `<button type="button" onclick="DamanApp.openKycSafe()" class="px-2.5 py-1 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black shrink-0">وثّق حسابك 🪪</button>`;
 
       container.innerHTML = `
         <div class="space-y-4">
@@ -1063,11 +1029,11 @@
 
           <div class="glass-card rounded-3xl p-4 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-amber-500/30 space-y-3">
             <div class="flex items-center justify-between gap-2">
-              <div>
+              <div class="min-w-0">
                 <div class="text-[11px] text-amber-400 font-extrabold">${this.esc(br.heroWelcome || 'أهلاً بك في ضمان سايت 🏗️')}</div>
-                <h1 class="text-base font-black text-white">${p ? this.esc(p.companyName || p.name) : this.esc(br.heroGuestTitle || 'أقوى منصة مقاولات وضمان مالي في مصر')}</h1>
+                <h1 class="text-base font-black text-white truncate">${p ? this.esc(p.companyName || p.name) : this.esc(br.heroGuestTitle || 'أقوى منصة مقاولات وضمان مالي في مصر')}</h1>
               </div>
-              ${p ? `<span class="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black">موثّق ✅</span>` : ''}
+              ${statusBadge}
             </div>
 
             ${p ? `
@@ -1173,7 +1139,7 @@
             </div>` : ''}
 
           <div class="space-y-2">
-            <div class="px-1 text-xs font-black text-slate-200"><i class="fa-solid fa-layer-group text-amber-400 me-1"></i> تصفح السوق حسب التخصص (17 قسم)</div>
+            <div class="px-1 text-xs font-black text-slate-200"><i class="fa-solid fa-layer-group text-amber-400 me-1"></i> تصفح السوق حسب التخصص (${this.CATEGORIES.length} قسم)</div>
             <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5">
               ${this.CATEGORIES.map((c) => `<button onclick="DamanApp.openCategoryFromHome('${c.id}')" class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-[10.5px] font-bold text-slate-200">${this.esc(c.ar)}</button>`).join('')}
             </div>
@@ -1245,7 +1211,7 @@
         await uRef.set({
           name: u.displayName || (isAdm ? 'إدارة ضمان سايت' : 'مستخدم ضمان سايت'),
           email, phone: '', avatarPhoto: u.photoURL || '',
-          accountType: 'individual', authProvider: 'google', needsOnboarding: !isAdm,
+          accountType: 'individual', authProvider: 'google', needsOnboarding: false,
           referralCode: 'DMN-' + u.uid.slice(0, 6).toUpperCase(),
           kycStatus: isAdm ? 'verified' : 'none', status: 'active',
           balanceAvailable: 0, balanceEscrow: 0, balancePendingWithdraw: 0,
@@ -1255,7 +1221,7 @@
         });
       }
       document.getElementById('daman-auth-modal')?.classList.add('hidden');
-      this.toast('تم تسجيل الدخول بحساب Google بنجاح ✅', 'success');
+      this.toast('تم تسجيل الدخول بحساب Google بنجاح ✅ يمكنك التصفح بحرية الآن!', 'success');
     },
 
     togglePassVisibility(inputId, btnEl) {
@@ -1300,8 +1266,8 @@
               <input id="rg-email" type="email" placeholder="البريد الإلكتروني (مُفضل لاستعادة كلمة المرور)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
               <div class="relative"><input id="rg-pass" type="password" minlength="6" required placeholder="كلمة المرور (6 أحرف على الأقل) *" class="w-full px-3 py-2.5 pe-10 rounded-xl bg-slate-950 border border-slate-700 text-white" /><button type="button" onclick="DamanApp.togglePassVisibility('rg-pass',this)" class="absolute top-2.5 end-3 text-slate-400"><i class="fa-solid fa-eye"></i></button></div>
               <input id="rg-ref" type="text" value="${this.esc(savedRef)}" placeholder="كود دعوة صديق (اختياري)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white uppercase" />
-              <label class="flex items-start gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer"><input id="rg-terms" type="checkbox" required class="mt-0.5 accent-amber-500" /><span class="text-[10.5px] text-slate-300">أوافق على <button type="button" onclick="DamanApp.openPrivacyModal()" class="text-amber-400 underline font-bold">الشروط وسياسة الخصوصية</button> والتوثيق الإلزامي بالبطاقة.</span></label>
-              <button type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إنشاء الحساب والمتابعة للتوثيق</button>
+              <label class="flex items-start gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer"><input id="rg-terms" type="checkbox" required class="mt-0.5 accent-amber-500" /><span class="text-[10.5px] text-slate-300">أوافق على <button type="button" onclick="DamanApp.openPrivacyModal()" class="text-amber-400 underline font-bold">الشروط وسياسة الخصوصية</button>. يمكنك التصفح بحرية، والتوثيق مطلوب فقط للتعاملات والتواصل.</span></label>
+              <button type="submit" class="w-full py-3 rounded-xl bg-amber-500 text-slate-950 font-black">إنشاء الحساب الآن</button>
             </form>` : `
             <form onsubmit="DamanApp.submitLogin(event)" class="space-y-2.5">
               <input id="lg-id" type="text" required placeholder="البريد الإلكتروني أو رقم الموبايل" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white" />
@@ -1345,7 +1311,7 @@
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           document.getElementById('daman-auth-modal').classList.add('hidden');
-          this.toast('تم إنشاء الحساب! استكمل التوثيق بالبطاقة والسيلفي الآن 🪪', 'success');
+          this.toast('تم إنشاء الحساب بنجاح ✅ يمكنك تصفح التطبيق الآن وتوثيق حسابك عند التعامل.', 'success');
         } catch (err) { this.toast(err.message, 'error'); }
       });
     },
@@ -1399,7 +1365,7 @@
       this.toast('تم استلام طلب حذف الحساب', 'info');
     },
 
-    // ==================== FACEBOOK-STYLE PUBLIC & OWN PROFILE (WITH VIEWS COUNTER 👁️) ====================
+    // ==================== FACEBOOK-STYLE PUBLIC & OWN PROFILE ====================
     async openPublicProfile(uid) {
       if (!uid) return;
       this.viewingPublicUid = uid;
@@ -1464,11 +1430,22 @@
       let m = document.getElementById('daman-edit-prof-modal');
       if (!m) { m = document.createElement('div'); m.id = 'daman-edit-prof-modal'; m.className = 'daman-modal fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4'; document.body.appendChild(m); }
       m.classList.remove('hidden');
+      const isAdm = this.isAdmin();
+
       m.innerHTML = `
         <div class="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-4 space-y-3 text-xs max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">تعديل بيانات صفحتك</h3><button onclick="document.getElementById('daman-edit-prof-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
           <form onsubmit="DamanApp.saveProfileEdit(event)" class="space-y-2.5">
-            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">اسم العرض / الشهرة</label><input id="ep-name" type="text" required value="${this.esc(p.companyName || p.name || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">الاسم الظاهر بالتطبيق</label>
+              ${isAdm
+                ? `<input id="ep-name" type="text" required value="${this.esc(p.companyName || p.name || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" />`
+                : `<div class="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950 border border-sky-500/40">
+                    <b class="text-white truncate">${this.esc(p.name || '—')}</b>
+                    <button type="button" onclick="document.getElementById('daman-edit-prof-modal').classList.add('hidden'); if(window.DamanAiI18n) DamanAiI18n.openNameChangeModal()" class="px-2.5 py-1 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px] shrink-0">طلب تعديل الاسم</button>
+                  </div>`}
+            </div>
+            <div><label class="block text-[11px] font-bold text-slate-300 mb-1">رقم الموبايل</label><input id="ep-phone" type="tel" value="${this.esc(p.phone || '')}" placeholder="01xxxxxxxxx" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <div><label class="block text-[11px] font-bold text-slate-300 mb-1">التخصص الرئيسي</label><input id="ep-spec" type="text" value="${this.esc(p.specialty || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <div><label class="block text-[11px] font-bold text-slate-300 mb-1">المحافظة / نطاق العمل</label><input id="ep-city" type="text" value="${this.esc(p.city || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
             <div><label class="block text-[11px] font-bold text-slate-300 mb-1">رابط صفحتك على فيسبوك (اختياري)</label><input id="ep-fb" type="url" value="${this.esc(p.facebookUrl || '')}" placeholder="https://facebook.com/..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white" /></div>
@@ -1481,12 +1458,32 @@
     async saveProfileEdit(e) {
       e.preventDefault();
       if (!this.user) return;
-      const nameVal = document.getElementById('ep-name').value.trim();
-      const patch = { name: nameVal, specialty: document.getElementById('ep-spec').value.trim(), city: document.getElementById('ep-city').value.trim(), facebookUrl: document.getElementById('ep-fb').value.trim(), bio: document.getElementById('ep-bio').value.trim() };
-      if (this.profile?.accountType === 'company' || this.profile?.accountType === 'supplier') patch.companyName = nameVal;
-      await db.collection('users').doc(this.user.uid).update(patch);
-      document.getElementById('daman-edit-prof-modal').classList.add('hidden');
-      this.toast('تم تحديث بيانات صفحتك ✅', 'success');
+      const patch = {
+        specialty: document.getElementById('ep-spec').value.trim(),
+        city: document.getElementById('ep-city').value.trim(),
+        facebookUrl: document.getElementById('ep-fb').value.trim(),
+        bio: document.getElementById('ep-bio').value.trim()
+      };
+      const rawPhone = (document.getElementById('ep-phone')?.value || '').trim();
+      if (rawPhone) {
+        const cleanPhone = this.normalizePhone(rawPhone);
+        if (!/^01[0125]\d{8}$/.test(cleanPhone)) return this.toast('أدخل رقم موبايل مصري صحيح (11 رقم)', 'error');
+        patch.phone = cleanPhone;
+      }
+      if (this.isAdmin()) {
+        const nameVal = document.getElementById('ep-name')?.value.trim();
+        if (nameVal) {
+          patch.name = nameVal;
+          if (this.profile?.accountType === 'company' || this.profile?.accountType === 'supplier') patch.companyName = nameVal;
+        }
+      }
+      try {
+        await db.collection('users').doc(this.user.uid).update(patch);
+        document.getElementById('daman-edit-prof-modal').classList.add('hidden');
+        this.toast('تم تحديث بيانات صفحتك ✅', 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
     },
 
     openAddPortfolioModal() {
@@ -1556,6 +1553,7 @@
       const iFollow = !!(this.user && followers.includes(this.user.uid));
       const isSub = this.isSubscriptionActive(p);
       const totalViews = this.profilePosts.reduce((s, po) => s + Number(po.views || 0), 0);
+      const isPass = p.kycDocType === 'passport';
 
       container.innerHTML = `
         <div class="space-y-3">
@@ -1581,7 +1579,7 @@
               <div>
                 <div class="flex items-center flex-wrap gap-1.5">
                   <h2 class="text-base font-black text-white">${this.esc(displayName)}</h2>
-                  ${p.kycStatus === 'verified' ? `<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[9.5px] font-black">موثّق ✅</span>` : ''}
+                  ${p.kycStatus === 'verified' ? `<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[9.5px] font-black">موثّق ✅</span>` : isOwn ? `<button onclick="DamanApp.openKycSafe()" class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9.5px] font-black">${p.kycStatus === 'pending' ? 'قيد المراجعة ⏳' : 'وثّق حسابك 🪪'}</button>` : ''}
                   ${isSub ? `<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 text-[9.5px] font-black">★ VIP</span>` : ''}
                 </div>
                 <div class="text-[11px] text-amber-300 font-bold mt-0.5">${accLabels[p.accountType] || accLabels.individual}${p.specialty ? ' • ' + this.esc(p.specialty) : ''}</div>
@@ -1621,19 +1619,22 @@
                 <span class="px-2 py-0.5 rounded-lg bg-sky-500/15 text-sky-300 text-[10px] font-black shrink-0"><i class="fa-regular fa-eye me-1"></i>${Number(po.views || 0)} مشاهدة</span>
               </div>
               <p class="text-[11px] text-slate-300">${this.esc(po.description || '')}</p>
-              ${isOwn ? `<div class="flex gap-1.5 pt-1"><button onclick="if(window.DamanProjects) DamanProjects.openEditPostModal('${po.id}')" class="flex-1 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10px]">تعديل</button><button onclick="if(window.DamanProjects) DamanProjects.openBoostModal('${po.id}')" class="flex-1 py-1.5 rounded-lg bg-purple-500/25 text-purple-200 font-black text-[10px]">★ تمييز الإعلان</button></div>` : ''}
+              ${isOwn ? `<div class="flex gap-1.5 pt-1"><button onclick="if(window.DamanProjects) DamanProjects.openEditPostModal('${po.id}')" class="flex-1 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-[10px]">تعديل</button><button onclick="if(window.DamanProjects) DamanProjects.openBoostModal('${po.id}')" class="flex-1 py-1.5 rounded-lg bg-purple-500/25 text-purple-200 font-black text-[10px]">★ تمييز</button><button onclick="if(window.DamanProjects && DamanProjects.deletePost) DamanProjects.deletePost('${po.id}')" class="px-3 py-1.5 rounded-lg bg-rose-500/25 text-rose-300 font-black text-[10px]">حذف</button></div>` : ''}
             </div>`).join('')}</div>` : ''}
           ${this.profileSubTab === 'portfolio' ? `<div class="grid grid-cols-2 gap-2.5">${!this.profilePortfolio.length ? `<div class="col-span-2 glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد صور في معرض الأعمال بعد.</div>` : this.profilePortfolio.map((item) => `<div class="glass-card rounded-2xl overflow-hidden space-y-1.5 pb-2"><img src="${item.imageBase64}" onclick="DamanApp.openMediaLightbox('${item.imageBase64}','${this.esc(item.title)}')" class="w-full h-32 object-cover cursor-pointer" /><div class="px-2.5"><div class="text-[11px] font-black text-white truncate">${this.esc(item.title)}</div>${isOwn ? `<button onclick="DamanApp.deletePortfolioItem('${item.id}')" class="text-[10px] text-rose-400 font-bold">حذف</button>` : ''}</div></div>`).join('')}</div>` : ''}
           ${this.profileSubTab === 'reviews' ? `<div class="space-y-2">${!this.profileReviews.length ? `<div class="glass-card rounded-2xl p-6 text-center text-xs text-slate-400">لا توجد تقييمات بعد.</div>` : this.profileReviews.map((rv) => `<div class="glass-card rounded-2xl p-3 space-y-1"><div class="flex justify-between text-xs"><span class="font-black text-white">${this.esc(rv.fromName)}</span><span class="text-amber-400">${'★'.repeat(Number(rv.rating || 5))}</span></div><p class="text-[11px] text-slate-300">${this.esc(rv.comment || '')}</p></div>`).join('')}</div>` : ''}
 
           ${isOwn ? `
             <div class="glass-card rounded-2xl p-3.5 space-y-2.5 text-xs">
-              <div class="font-black text-amber-400"><i class="fa-solid fa-shield-halved me-1"></i> البيانات القانونية الموثّقة وإعدادات الأمان</div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-black text-amber-400"><i class="fa-solid fa-shield-halved me-1"></i> البيانات القانونية الموثّقة وإعدادات الأمان</span>
+                ${!this.isKycVerified() ? `<button onclick="DamanApp.openKycSafe()" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">توثيق الآن 🪪</button>` : ''}
+              </div>
               <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px]">
-                <div>الاسم بالبطاقة (للعقود): <b class="text-white">${this.esc(p.legalName || 'غير مثبت بعد')}</b></div>
-                <div>الرقم القومي: <b class="text-emerald-400">${this.maskNationalId(p.nationalId)}</b></div>
+                <div>الاسم القانوني (${isPass ? 'جواز السفر' : 'البطاقة'}): <b class="text-white">${this.esc(p.legalName || 'غير موثّق بعد')}</b></div>
+                <div>${isPass ? 'رقم جواز السفر:' : 'الرقم القومي:'} <b class="text-emerald-400">${this.maskNationalId(p.nationalId)}</b></div>
                 <div>تاريخ الميلاد: <b class="text-amber-300">${this.esc(p.birthDate || '—')}</b></div>
-                <div>العنوان بالبطاقة: <b class="text-slate-300">${this.esc(p.legalAddress || '—')}</b></div>
+                <div>العنوان القانوني: <b class="text-slate-300">${this.esc(p.legalAddress || '—')}</b></div>
                 ${p.referralCode ? `<div>كود الدعوة الخاص بك: <b class="text-sky-300 select-all">${this.esc(p.referralCode)}</b></div>` : ''}
               </div>
               <div class="grid grid-cols-2 gap-2">
