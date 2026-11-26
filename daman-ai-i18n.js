@@ -51,7 +51,6 @@
 
     buildAiKnowledge() {
       const f = this.getLiveFacts();
-      const en = this.isEn();
       return [
         {
           id: 'escalate',
@@ -333,7 +332,6 @@
       if (!app || !main) return;
       const en = this.isEn();
 
-      // 1) In Chat tab: inject a pinned AI Support banner at top (when not inside a chat room, OR helper bar inside admin chat)
       if (app.activeTab === 'chat') {
         const activeId = window.DamanChat?.activeChatId || '';
         const isInAdminChat = activeId && (activeId.includes('admin') || (main.textContent || '').includes('إدارة ضمان سايت'));
@@ -501,7 +499,6 @@
       const root = main.firstElementChild || main;
       root.insertBefore(card, root.firstElementChild);
 
-      // Guard any direct name input inside profile edit forms so non-admin edits go through Admin review
       main.querySelectorAll('form').forEach((form) => {
         if (form.dataset.damanNameGuardV57) return;
         const nameInp = Array.from(form.querySelectorAll('input[type="text"], input:not([type])')).find((inp) => {
@@ -570,7 +567,7 @@
 
         const field =
           (lbl.htmlFor ? document.getElementById(lbl.htmlFor) : null) ||
-          lbl.nextElementSibling?.matches?.('input, select, textarea') ? lbl.nextElementSibling : null ||
+          (lbl.nextElementSibling?.matches?.('input, select, textarea') ? lbl.nextElementSibling : null) ||
           lbl.parentElement?.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea');
 
         if (!field || field.closest('#daman-ai-support-modal')) {
@@ -773,12 +770,10 @@
       const trimmed = raw.trim();
       if (!trimmed || !/[\u0600-\u06FF]/.test(trimmed)) return raw;
 
-      // Exact dictionary hit
       if (this.EXACT_DICT[trimmed]) {
         return raw.replace(trimmed, this.EXACT_DICT[trimmed]);
       }
 
-      // Dynamic Category Arabic -> English lookup
       const cats = window.DamanApp?.CATEGORIES;
       if (Array.isArray(cats)) {
         const hitCat = cats.find((c) => c.ar && c.ar.trim() === trimmed && c.en);
@@ -834,7 +829,6 @@
           cur = walker.nextNode();
         }
 
-        // Translate placeholders & titles safely
         root.querySelectorAll('input[placeholder], textarea[placeholder]').forEach((el) => {
           if (en) {
             if (el.dataset.origPlaceholder === undefined) {
