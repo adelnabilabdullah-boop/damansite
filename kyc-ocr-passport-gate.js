@@ -32,6 +32,25 @@
       return typeof app.isKycVerified === 'function' ? app.isKycVerified() : app.profile?.kycStatus === 'verified';
     },
 
+    isAdminOrSupportChat(chatId) {
+      const cid = String(chatId || '').toLowerCase();
+      if (!cid) return false;
+      if (cid.includes('admin') || cid.includes('support')) return true;
+      const chats = window.DamanChat?.chats;
+      if (Array.isArray(chats)) {
+        const c = chats.find((x) => x.id === chatId);
+        if (c) {
+          if (c.isAdminChat || c.isSupport) return true;
+          const names = Object.values(c.participantNames || {}).join(' ');
+          if (names.includes('إدارة') || names.toLowerCase().includes('admin')) return true;
+          if (Array.isArray(c.participants) && c.participants.includes('admin')) return true;
+        }
+      }
+      const mainTxt = (document.getElementById('app-main')?.textContent || '');
+      if (mainTxt.includes('إدارة ضمان سايت') && window.DamanChat?.activeChatId === chatId) return true;
+      return false;
+    },
+
     requireVerifiedForAction(actionLabel) {
       const app = window.DamanApp;
       if (!app) return false;
@@ -47,12 +66,12 @@
         return false;
       }
 
-      app.toast(`🪪 التصفح متاح بحرية — وثّق حسابك (بطاقة أو جواز سفر) لـ${actionLabel}`, 'warning');
+      app.toast(`🪪 التصفح والتواصل مع الدعم متاح بحرية — وثّق حسابك (بطاقة أو جواز سفر) لـ${actionLabel}`, 'warning');
       this.openKycModal();
       return false;
     },
 
-    // ==================== 1. BROWSE-ONLY GATE (VIEW EVERYTHING, LOCK ACTIONS & PHONES) ====================
+    // ==================== 1. BROWSE-ONLY GATE (VIEW EVERYTHING & SUPPORT, LOCK ACTIONS & PHONES) ====================
     maskVisiblePhonesForUnverified() {
       const app = window.DamanApp;
       if (!app || this.isVerifiedOrAdmin()) return;
@@ -62,7 +81,7 @@
       const main = document.getElementById('app-main');
       if (!main) return;
       const myPhone = String(app.profile?.phone || '').replace(/\D/g, '');
-      const officialWa = String(app.appConfig?.whatsappNumber || app.appConfig?.supportPhone || '').replace(/\D/g, '');
+      const officialWa = String(app.appConfig?.supportWhatsapp || app.appConfig?.whatsappNumber || '').replace(/\D/g, '');
 
       const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
         acceptNode: (node) => {
@@ -107,8 +126,8 @@
         isPending ? 'bg-amber-500/15 border-amber-500/40 text-amber-200' : 'bg-sky-500/15 border-sky-500/40 text-sky-100'
       }`;
       bar.innerHTML = isPending
-        ? `<span class="font-bold">⏳ مستندات التوثيق قيد المراجعة — يمكنك تصفّح التطبيق بحرية لحين الاعتماد.</span>`
-        : `<span class="font-bold">👀 تتصفّح التطبيق بحرية — وثّق بالبطاقة أو جواز السفر عند الإيداع أو السحب أو النشر أو التواصل.</span>
+        ? `<span class="font-bold">⏳ مستندات التوثيق قيد المراجعة — يمكنك التصفّح والتواصل مع الدعم بحرية لحين الاعتماد.</span>`
+        : `<span class="font-bold">👀 تتصفّح التطبيق بحرية — وثّق بالبطاقة أو جواز السفر عند الإيداع أو السحب أو النشر أو التواصل مع الأعضاء.</span>
            <button type="button" onclick="DamanKycGate.openKycModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">وثّق الآن</button>`;
 
       const root = main.firstElementChild || main;
@@ -119,9 +138,9 @@
       const app = window.DamanApp;
       if (!app) return;
 
-      // 1) Wallet Deposit / Withdraw / KYC modal override (never force-popup on passive browsing or login)
-      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV58) {
-        DamanWallet._kycOcrOverriddenV58 = true;
+      // 1) Wallet Deposit / Withdraw / KYC modal override
+      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV59) {
+        DamanWallet._kycOcrOverriddenV59 = true;
 
         if (typeof DamanWallet.openDepositModal === 'function') {
           const origDep = DamanWallet.openDepositModal.bind(DamanWallet);
@@ -140,22 +159,23 @@
         }
 
         DamanWallet.openKycModal = (forced = false) => {
-          // Block involuntary auto-popups after login/browsing; manual calls (forced=false) always open
           if (forced) return;
           this.openKycModal();
         };
       }
 
-      // 2) Chat direct open, messages & calls gate (Admin & AI chat always allowed)
-      if (window.DamanChat && !DamanChat._kycGatePatchedV58) {
-        DamanChat._kycGatePatchedV58 = true;
+      // 2) Chat direct open, messages & calls gate (Admin & Support & AI ALWAYS allowed!)
+      if (window.DamanChat && !DamanChat._kycGatePatchedV59) {
+        DamanChat._kycGatePatchedV59 = true;
 
         if (typeof DamanChat.openDirectChat === 'function') {
           const origOpenChat = DamanChat.openDirectChat.bind(DamanChat);
-          DamanChat.openDirectChat = (targetUid, ...rest) => {
-            const isAdminTarget = String(targetUid || '').toLowerCase() === 'admin';
+          DamanChat.openDirectChat = (targetUid, targetName, ...rest) => {
+            const uidLow = String(targetUid || '').toLowerCase();
+            const nameStr = String(targetName || '');
+            const isAdminTarget = uidLow === 'admin' || uidLow === 'support' || nameStr.includes('إدارة');
             if (!isAdminTarget && !this.requireVerifiedForAction('المراسلة والتواصل مع الأعضاء')) return;
-            return origOpenChat(targetUid, ...rest);
+            return origOpenChat(targetUid, targetName, ...rest);
           };
         }
 
@@ -170,17 +190,15 @@
         if (typeof DamanChat.sendMessage === 'function') {
           const origSend = DamanChat.sendMessage.bind(DamanChat);
           DamanChat.sendMessage = (...args) => {
-            const cid = String(DamanChat.activeChatId || '').toLowerCase();
-            const isAdminChat = cid.includes('admin');
-            if (!isAdminChat && !this.requireVerifiedForAction('إرسال الرسائل في الشات')) return;
+            if (!this.isAdminOrSupportChat(DamanChat.activeChatId) && !this.requireVerifiedForAction('إرسال الرسائل للأعضاء')) return;
             return origSend(...args);
           };
         }
       }
 
       // 3) External contact / phone reveal gate on ads & profiles
-      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV58) {
-        DamanPostContact._kycGatePatchedV58 = true;
+      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV59) {
+        DamanPostContact._kycGatePatchedV59 = true;
         const origExt = DamanPostContact.requestExternalContact.bind(DamanPostContact);
         DamanPostContact.requestExternalContact = (...args) => {
           if (!this.requireVerifiedForAction('إظهار رقم المعلن والتواصل معه')) return;
@@ -189,8 +207,8 @@
       }
 
       // 4) Projects / Market actions gate (Post, 3x Inspection, VIP Labor)
-      if (window.DamanProjects && !DamanProjects._kycGatePatchedV58) {
-        DamanProjects._kycGatePatchedV58 = true;
+      if (window.DamanProjects && !DamanProjects._kycGatePatchedV59) {
+        DamanProjects._kycGatePatchedV59 = true;
 
         const origPost = DamanProjects.openPostModal.bind(DamanProjects);
         DamanProjects.openPostModal = (...args) => {
@@ -229,7 +247,6 @@
         const target = ev.target;
         if (!target || typeof target.closest !== 'function') return;
 
-        // Manual click on any "توثيق الحساب" button always opens our upgraded modal
         const kycBtn = target.closest('button[onclick*="openKycModal"]');
         if (kycBtn && !kycBtn.closest('#daman-kyc-modal')) {
           ev.preventDefault();
@@ -241,13 +258,13 @@
         if (this.isVerifiedOrAdmin()) return;
         if (target.closest('#daman-kyc-modal') || target.closest('#daman-ai-support-modal')) return;
 
-        // Block tel: and non-platform wa.me links inside ads/profiles for unverified users
+        // Block tel: and non-platform wa.me links inside ads/profiles (allow official support WhatsApp!)
         const link = target.closest('a[href]');
         if (link) {
           const href = (link.getAttribute('href') || '').toLowerCase();
-          const txt = (link.textContent || '').trim();
-          const isPlatformWa = app.activeTab === 'home' && txt.includes('واتساب') && !link.closest('.daman-modal');
-          if ((href.startsWith('tel:') || href.includes('wa.me') || href.includes('whatsapp.com')) && !isPlatformWa) {
+          const officialWa = String(app.appConfig?.supportWhatsapp || '201030374787').replace(/\D/g, '');
+          const isPlatformSupportWa = officialWa && href.includes(officialWa);
+          if ((href.startsWith('tel:') || href.includes('wa.me') || href.includes('whatsapp.com')) && !isPlatformSupportWa) {
             ev.preventDefault();
             ev.stopImmediatePropagation();
             this.requireVerifiedForAction('إظهار الرقم والتواصل الخارجي');
@@ -478,7 +495,6 @@
     },
 
     onFormInput() {
-      // Auto-fill birthDate if user manually enters a valid 14-digit Egyptian National ID
       if (this._docType === 'national_id') {
         const docInp = document.getElementById('kyc-f-docnum');
         const bdayInp = document.getElementById('kyc-f-bday');
@@ -534,7 +550,7 @@
       });
     },
 
-    // ==================== 3. UPGRADED KYC MODAL (NATIONAL ID OR PASSPORT + OCR) ====================
+    // ==================== 3. UPGRADED KYC MODAL (NATIONAL ID OR PASSPORT + OCR + ANTI-DUPLICATE) ====================
     switchDocType(type) {
       this._docType = type === 'passport' ? 'passport' : 'national_id';
       this._photos.front = '';
@@ -605,7 +621,7 @@
           <div class="flex items-center justify-between gap-2">
             <div>
               <h3 class="text-sm font-black text-amber-400"><i class="fa-solid fa-id-card me-1"></i> توثيق الحساب (بطاقة أو جواز سفر)</h3>
-              <div class="text-[10px] text-slate-400">التصفح متاح بحرية — التوثيق مطلوب فقط للتعاملات المالية والتواصل</div>
+              <div class="text-[10px] text-slate-400">التصفح والدعم متاح بحرية — التوثيق مطلوب فقط للتعاملات المالية والتواصل</div>
             </div>
             <button type="button" onclick="document.getElementById('daman-kyc-modal').classList.add('hidden')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 shrink-0"><i class="fa-solid fa-xmark"></i></button>
           </div>
@@ -733,9 +749,10 @@
       let birthDate = (document.getElementById('kyc-f-bday')?.value || '').trim();
       const expiryDate = (document.getElementById('kyc-f-exp')?.value || '').trim();
       const legalAddress = (document.getElementById('kyc-f-addr')?.value || '').trim();
+      const commercialReg = (document.getElementById('kyc-f-cr')?.value || app.profile?.commercialReg || '').trim();
 
-      if (legalName.split(/\s+/).length < 2) {
-        return app.toast('يرجى كتابة الاسم الكامل كما في المستند', 'warning');
+      if (legalName.split(/\s+/).length < (isPass ? 2 : 3)) {
+        return app.toast(isPass ? 'يرجى كتابة الاسم الكامل كما في جواز السفر' : 'يرجى كتابة الاسم الرباعي بالكامل كما في البطاقة', 'warning');
       }
       if (!this._photos.front) {
         return app.toast(isPass ? 'يرجى تصوير صفحة بيانات جواز السفر' : 'يرجى تصوير وش البطاقة الشخصية', 'warning');
@@ -760,11 +777,55 @@
         }
       }
 
-      await app.withLock('submitKycV58', async () => {
+      await app.withLock('submitKycV59', async () => {
         const btn = document.getElementById('kyc-submit-v58-btn');
-        if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الرفع الآمن للمستندات...'; }
+        const resetBtn = () => {
+          if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> إرسال للتوثيق والمراجعة'; }
+        };
+        if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التحقق الأمني والرفع...'; }
 
         try {
+          // 1) Blacklist check
+          const bl = await app.checkBlacklist({
+            email: app.profile?.email,
+            phone: app.profile?.phone,
+            nationalId: cleanDocNum,
+            commercialReg
+          });
+          if (bl) {
+            resetBtn();
+            return app.toast(`تعذر التوثيق: ${bl}`, 'error');
+          }
+
+          // 2) Duplicate National ID / Passport Number check
+          const [dupNidSnap, dupPassSnap, verifiedUsersSnap] = await Promise.all([
+            app.db.collection('users').where('nationalId', '==', cleanDocNum).limit(2).get(),
+            app.db.collection('users').where('passportNumber', '==', cleanDocNum).limit(2).get(),
+            app.db.collection('users').where('kycStatus', '==', 'verified').limit(300).get()
+          ]);
+
+          if (dupNidSnap.docs.some((d) => d.id !== app.user.uid) || dupPassSnap.docs.some((d) => d.id !== app.user.uid)) {
+            resetBtn();
+            return app.toast(
+              isPass
+                ? '⚠️ رقم جواز السفر هذا مسجّل وموثّق بالفعل لحساب آخر! لا يمكن إنشاء حسابين بنفس الهوية.'
+                : '⚠️ هذا الرقم القومي مسجّل وموثّق بالفعل لحساب آخر! لا يمكن إنشاء حسابين ببطاقة واحدة.',
+              'error'
+            );
+          }
+
+          // 3) Duplicate Full Legal Name check (prevents registering 2nd account with ID + Passport)
+          const normSubmittedName = app.normalizeAr(legalName).replace(/\s+/g, ' ').trim();
+          const hasDupLegalName = verifiedUsersSnap.docs.some((d) => {
+            if (d.id === app.user.uid) return false;
+            const existingNorm = app.normalizeAr(d.data()?.legalName || '').replace(/\s+/g, ' ').trim();
+            return existingNorm && existingNorm === normSubmittedName;
+          });
+          if (hasDupLegalName) {
+            resetBtn();
+            return app.toast('⚠️ هذا الاسم القانوني الكامل مسجّل وموثّق بالفعل على حساب آخر! تواصل مع الدعم الفني لو كان تشابه أسماء.', 'error');
+          }
+
           const [idFrontMedia, idBackMedia, selfieMedia, crMedia, taxMedia] = await Promise.all([
             app.saveMedia(this._photos.front, { kind: 'kyc_id_front' }),
             this._photos.back ? app.saveMedia(this._photos.back, { kind: 'kyc_id_back' }) : Promise.resolve(''),
@@ -788,7 +849,7 @@
             docExpiryDate: expiryDate,
             legalAddress,
             companyName: (document.getElementById('kyc-f-comp')?.value || app.profile?.companyName || '').trim(),
-            commercialReg: (document.getElementById('kyc-f-cr')?.value || app.profile?.commercialReg || '').trim(),
+            commercialReg,
             taxCard: (document.getElementById('kyc-f-tax')?.value || app.profile?.taxCard || '').trim(),
             idFrontMedia,
             idBackMedia,
@@ -819,7 +880,7 @@
           app.toast('تم إرسال مستندات التوثيق للمراجعة بنجاح ✅ يمكنك استكمال التصفح الآن.', 'success');
           if (app.activeTab) app.renderCurrentTab();
         } catch (err) {
-          if (btn) { btn.disabled = false; btn.textContent = 'إرسال للتوثيق والمراجعة'; }
+          resetBtn();
           app.toast('تعذر إرسال التوثيق: ' + err.message, 'error');
         }
       });
@@ -841,8 +902,8 @@
       this.attachClickAndLinkGate();
       this.patchModuleActionGates();
 
-      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV58) {
-        app._kycGateTabHookedV58 = true;
+      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV59) {
+        app._kycGateTabHookedV59 = true;
         const origRender = app.renderCurrentTab.bind(app);
         app.renderCurrentTab = () => {
           origRender();
