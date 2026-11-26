@@ -37,13 +37,17 @@
       document.getElementById('daman-deposit-modal')?.classList.add('hidden');
     },
 
-    // ==================== 1. DEPOSIT MODAL (3 CHANNELS + OPTIONAL TXREF + 10 MIN TIMER) ====================
+    // ==================== 1. DEPOSIT MODAL (3 CHANNELS + OPTIONAL TXREF + TIMER) ====================
     async _openDepositModalImpl(prefillAmount = '') {
       const app = window.DamanApp;
-      if (!app.user || !app.profile) return app.openAuthModal('login');
+      if (!app || !app.user || !app.profile) return app?.openAuthModal?.('login');
+
+      if (window.DamanKycGate && !DamanKycGate.isVerifiedOrAdmin()) {
+        return DamanKycGate.requireVerifiedForAction('الإيداع في المحفظة');
+      }
       if (!app.isKycVerified()) {
-        app.toast('لا يمكن الإيداع قبل توثيق الحساب بالبطاقة والسيلفي', 'error');
-        return this.openKycModal(true);
+        app.toast('لا يمكن الإيداع قبل توثيق الحساب بالبطاقة أو جواز السفر', 'warning');
+        return app.openKycSafe ? app.openKycSafe() : this.openKycModal(false);
       }
 
       if (app.appConfig?.disableDeposits && !app.isAdmin()) {
@@ -166,7 +170,6 @@
               </div>
             </div>
 
-            <!-- 1. E-WALLET: Wallet Number + Holder Name -->
             <div id="dep-card-vodafone_cash" class="${ch === 'vodafone_cash' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
               <div class="text-[10.5px] text-amber-300 font-black"><i class="fa-solid fa-mobile-screen-button me-1"></i> بيانات المحفظة الإلكترونية النشطة</div>
               <div class="p-2.5 rounded-xl bg-slate-900 space-y-1.5">
@@ -184,7 +187,6 @@
               </div>
             </div>
 
-            <!-- 2. INSTAPAY: Direct Clickable Link + IPA & Holder -->
             <div id="dep-card-instapay" class="${ch === 'instapay' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-purple-500/50 space-y-2">
               <div class="text-[10.5px] text-purple-300 font-black"><i class="fa-solid fa-bolt me-1"></i> التحويل المباشر عبر إنستا باي (InstaPay)</div>
               ${ipLink ? `
@@ -210,7 +212,6 @@
               </div>
             </div>
 
-            <!-- 3. BANK TRANSFER: Bank Name + Account Holder + Account Number + Optional IBAN -->
             <div id="dep-card-bank" class="${ch === 'bank' ? '' : 'hidden'} p-3 rounded-2xl bg-slate-950 border border-sky-500/40 space-y-2">
               <div class="text-[10.5px] text-sky-300 font-black"><i class="fa-solid fa-building-columns me-1"></i> بيانات الحساب البنكي النشط</div>
               <div class="p-2.5 rounded-xl bg-slate-900 space-y-2 text-[11px]">
@@ -393,16 +394,21 @@
       });
     },
 
-    // ==================== 2. WITHDRAW MODAL (UP TO 3 CHANNELS INCLUDING BANK + LIVE SERVER SYNC) ====================
+    // ==================== 2. WITHDRAW MODAL (ALWAYS SHOWS CHANNELS & INFO; LOCKS SUBMIT WHEN BALANCE IS ZERO) ====================
     async _openWithdrawModalImpl() {
       const app = window.DamanApp;
-      if (!app.user || !app.profile) return app.openAuthModal('login');
-      if (app.profile?.status === 'frozen' || app.profile?.frozen) {
-        return app.toast('❄️ حسابك مجمّد مؤقتاً — لا يمكن السحب لحين انتهاء المراجعة الإدارية', 'error');
+      if (!app || !app.user || !app.profile) return app?.openAuthModal?.('login');
+
+      if (window.DamanKycGate && !DamanKycGate.isVerifiedOrAdmin()) {
+        return DamanKycGate.requireVerifiedForAction('السحب من المحفظة');
       }
       if (!app.isKycVerified()) {
-        app.toast('لا يمكن السحب قبل توثيق الحساب بالبطاقة والسيلفي', 'error');
-        return this.openKycModal(true);
+        app.toast('لا يمكن السحب قبل توثيق الحساب بالبطاقة أو جواز السفر', 'warning');
+        return app.openKycSafe ? app.openKycSafe() : this.openKycModal(false);
+      }
+
+      if (app.profile?.status === 'frozen' || app.profile?.frozen) {
+        return app.toast('❄️ حسابك مجمّد مؤقتاً — لا يمكن السحب لحين انتهاء المراجعة الإدارية', 'error');
       }
 
       let liveCfg = Object.assign({}, app.appConfig || {});
@@ -425,22 +431,16 @@
       const activeList = ['vodafone_cash', 'instapay', 'bank'].filter((k) => enabled[k]);
       if (!activeList.length) return app.toast('وسائل السحب متوقفة مؤقتاً — تواصل مع الإدارة', 'error');
 
-      const avail = Number(app.profile.balanceAvailable || 0);
+      const avail = Math.max(0, Number(app.profile.balanceAvailable || 0));
       const minW = Number(liveCfg.minWithdraw || 100);
       const maxDaily = Number(liveCfg.maxWithdrawDaily || 50000);
       const todayUsed = this.requests
         .filter((r) => r.type === 'withdraw' && r.date === app.todayLocal() && ['pending', 'approved'].includes(r.status))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
       const dailyLeft = Math.max(0, Math.round((maxDaily - todayUsed) * 100) / 100);
+      const maxAllowedNow = Math.max(0, Math.min(avail, dailyLeft));
+      const hasZeroOrLowBalance = avail < minW || dailyLeft < minW;
 
-      if (avail < minW) {
-        return app.toast(`رصيدك الكاش المتاح (${app.fmtMoney(avail)} ج.م) أقل من الحد الأدنى للسحب (${app.fmtMoney(minW)} ج.م).`, 'warning');
-      }
-      if (dailyLeft < minW) {
-        return app.toast(`لقد وصلت للحد الأقصى للسحب اليومي (${app.fmtMoney(maxDaily)} ج.م). حاول غداً.`, 'warning');
-      }
-
-      const maxAllowedNow = Math.min(avail, dailyLeft);
       const savedVf = localStorage.getItem('daman_last_wd_vf') || app.profile?.phone || '';
       const savedIp = localStorage.getItem('daman_last_wd_ip') || '';
       const escJs = (s) => app.esc(String(s || '')).replace(/'/g, "\\'");
@@ -460,6 +460,12 @@
         enabled.bank ? '<option value="bank">🏦 تحويل إلى حساب بنكي (IBAN / رقم حساب)</option>' : ''
       ].join('');
 
+      const zeroBanner = avail <= 0
+        ? `<div class="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/60 text-[11px] text-rose-200 font-black text-center">⚠️ رصيدك المتاح حالياً <b>0 ج.م</b> — لا يمكنك إتمام السحب حتى يتوفر رصيد متاح.</div>`
+        : hasZeroOrLowBalance
+        ? `<div class="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/50 text-[10.5px] text-amber-200 font-bold text-center">ℹ️ رصيدك المتاح (${app.fmtMoney(avail)} ج.م) أو المتبقي من حد اليوم (${app.fmtMoney(dailyLeft)} ج.م) أقل من الحد الأدنى للسحب (${app.fmtMoney(minW)} ج.م).</div>`
+        : '';
+
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between">
@@ -467,8 +473,10 @@
             <button onclick="document.getElementById('daman-withdraw-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
+          ${zeroBanner}
+
           <div class="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-950 border border-emerald-500/30 text-[11px]">
-            <div>المتاح للسحب: <b class="text-emerald-400">${app.fmtMoney(avail)} ج.م</b></div>
+            <div>المتاح للسحب: <b class="${avail > 0 ? 'text-emerald-400' : 'text-rose-400'}">${app.fmtMoney(avail)} ج.م</b></div>
             <div>المتبقي من حد اليوم: <b class="text-sky-400">${app.fmtMoney(dailyLeft)} ج.م</b></div>
           </div>
 
@@ -482,9 +490,9 @@
             </div>
 
             <div>
-              <label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ المطلوب سحبه (${app.fmtMoney(minW)} – ${app.fmtMoney(maxAllowedNow)} ج.م) * ${this.hBtn('wd-amt')}</label>
+              <label class="block text-[11px] font-bold text-slate-300 mb-1">المبلغ المطلوب سحبه (الحد الأدنى ${app.fmtMoney(minW)} ج.م) * ${this.hBtn('wd-amt')}</label>
               ${this.hBox('wd-amt', 'أدخل المبلغ الذي تريد سحبه من رصيدك الكاش المتاح فقط (رصيد الهدايا لا يُسحب نقداً). يُحجز المبلغ فوراً حتى يتم التحويل.')}
-              <input id="wd-amount" type="number" min="${minW}" max="${maxAllowedNow}" step="any" required value="${Math.min(maxAllowedNow, Math.max(minW, 500))}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black" />
+              <input id="wd-amount" type="number" min="${minW}" max="${Math.max(minW, maxAllowedNow)}" step="any" required value="${hasZeroOrLowBalance ? 0 : Math.min(maxAllowedNow, Math.max(minW, 500))}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-white font-black" />
             </div>
 
             <div>
@@ -495,8 +503,8 @@
 
             <div id="wd-preview" class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-200 space-y-0.5"></div>
 
-            <button id="wd-submit-btn" type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">
-              تأكيد وحجز مبلغ السحب
+            <button id="wd-submit-btn" type="submit" ${hasZeroOrLowBalance ? 'disabled' : ''} class="w-full py-3 rounded-2xl ${hasZeroOrLowBalance ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-amber-500 text-slate-950'} font-black">
+              ${avail <= 0 ? 'رصيدك صفر — لا يوجد رصيد متاح للسحب' : 'تأكيد وحجز مبلغ السحب'}
             </button>
           </form>
         </div>`;
@@ -550,6 +558,11 @@
       e.preventDefault();
       const app = window.DamanApp;
       await app.withLock('submitWithdraw', async () => {
+        const availNow = Math.max(0, Number(app.profile?.balanceAvailable || 0));
+        if (availNow <= 0) {
+          return app.toast('رصيدك المتاح 0 ج.م — لا يوجد رصيد للسحب', 'warning');
+        }
+
         const channel = document.getElementById('wd-channel').value;
         const amount = Math.round((parseFloat(document.getElementById('wd-amount').value) || 0) * 100) / 100;
         const destAccount = document.getElementById('wd-dest').value.trim();
@@ -557,6 +570,7 @@
         const maxDaily = Number(app.appConfig?.maxWithdrawDaily || 50000);
 
         if (amount < minW) return app.toast(`الحد الأدنى للسحب ${app.fmtMoney(minW)} ج.م`, 'warning');
+        if (amount > availNow) return app.toast('المبلغ المطلوب أكبر من رصيدك المتاح', 'error');
         if (!destAccount) return app.toast('أدخل بيانات الحساب المستلم', 'warning');
 
         if (channel === 'vodafone_cash') {
