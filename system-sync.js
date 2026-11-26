@@ -405,7 +405,20 @@
       }
     },
 
-    // ==================== 7. SYNC MARKET SEARCH UI & AUTO-STOP MIC ON TAB LEAVE ====================
+    // ==================== 7. SYNC MARKET SEARCH UI, DEPOSIT GRID & AUTO-STOP MIC ====================
+    fixDepositChannelGrid() {
+      const depModal = document.getElementById('daman-deposit-modal');
+      if (!depModal || depModal.classList.contains('hidden')) return;
+      const tabBtn = depModal.querySelector('[id^="dep-tab-"]');
+      const grid = tabBtn ? tabBtn.parentElement : null;
+      if (!grid || !grid.classList.contains('grid')) return;
+      const count = Array.from(grid.children).filter((c) => !c.classList.contains('hidden')).length;
+      if (count >= 1 && count <= 3) {
+        grid.classList.remove('grid-cols-1', 'grid-cols-2', 'grid-cols-3');
+        grid.classList.add(`grid-cols-${count}`);
+      }
+    },
+
     patchGlobalSafeguards() {
       const app = window.DamanApp;
       if (!app) return;
@@ -444,7 +457,7 @@
       }
     },
 
-    // ==================== 8. CLICKABLE NOTIFICATIONS DEEP-LINK ROUTER (v56) ====================
+    // ==================== 8. CLICKABLE NOTIFICATIONS DEEP-LINK ROUTER (v57) ====================
     clickMatchingButtonInMain(keywords, attempt = 0) {
       if (!Array.isArray(keywords) || !keywords.length) return;
       const main = document.getElementById('app-main');
@@ -468,43 +481,55 @@
       const low = txt.toLowerCase();
       const isAdm = typeof app.isAdmin === 'function' && app.isAdmin();
 
-      // Close any open notifications modal first
       document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => {
         const h = (m.querySelector('h2, h3, h4')?.textContent || '');
-        if ((m.id || '').toLowerCase().includes('notif') || h.includes('الإشعارات') || h.includes('التنبيهات')) {
+        if ((m.id || '').toLowerCase().includes('notif') || h.includes('الإشعارات') || h.includes('التنبيهات') || h.toLowerCase().includes('notification')) {
           m.classList.add('hidden');
         }
       });
 
-      // 1) Admin-targeted wallet deposit/withdraw requests
+      // 1) Admin: Display Name Change / KYC requests
+      if (isAdm && (txt.includes('تعديل اسم') || txt.includes('اسم ظاهر') || txt.includes('طلب توثيق') || txt.includes('مراجعة التوثيق') || txt.includes('بطاقة جديدة') || txt.includes('سجل تجاري'))) {
+        app.switchTab('admin');
+        setTimeout(() => this.clickMatchingButtonInMain(['التوثيق والأسماء', 'التوثيق', 'توثيق']), 140);
+        return;
+      }
+
+      // 2) Admin: Wallet deposit/withdraw requests
       if (isAdm && (txt.includes('طلب شحن') || txt.includes('طلب إيداع') || txt.includes('طلب سحب') || txt.includes('مرجعي مكرر'))) {
         app.switchTab('admin');
         setTimeout(() => this.clickMatchingButtonInMain(['الشحن والسحب', 'طلبات الشحن', 'السحب']), 140);
         return;
       }
 
-      // 2) Admin-targeted KYC verification requests
-      if (isAdm && (txt.includes('طلب توثيق') || txt.includes('مراجعة التوثيق') || txt.includes('بطاقة جديدة') || txt.includes('سجل تجاري'))) {
+      // 3) Admin: AI escalation / support tickets / chat
+      if (isAdm && (txt.includes('المساعد الذكي') || txt.includes('تذكرة دعم'))) {
         app.switchTab('admin');
-        setTimeout(() => this.clickMatchingButtonInMain(['التوثيق', 'توثيق']), 140);
+        setTimeout(() => this.clickMatchingButtonInMain(['مراقبة الشات', 'الدعم']), 140);
         return;
       }
 
-      // 3) Admin-targeted disputes / reports / support
-      if (isAdm && (txt.includes('نزاع') || txt.includes('بلاغ') || txt.includes('شكوى') || txt.includes('تذكرة دعم'))) {
+      // 4) Admin: Disputes / reports
+      if (isAdm && (txt.includes('نزاع') || txt.includes('بلاغ') || txt.includes('شكوى'))) {
         app.switchTab('admin');
-        setTimeout(() => this.clickMatchingButtonInMain(['النزاعات', 'البلاغات', 'الدعم', 'مراقبة']), 140);
+        setTimeout(() => this.clickMatchingButtonInMain(['العقود والنزاع', 'النزاعات', 'المستخدمين']), 140);
         return;
       }
 
-      // 4) Admin-targeted 3x / VIP Labor / Boost requests
-      if (isAdm && (txt.includes('استلام هندسي') || txt.includes('3x') || txt.includes('عمالة vip') || txt.includes('عمالة VIP') || txt.includes('تمييز إعلان') || txt.includes('إلغاء طلب من العميل'))) {
+      // 5) Admin: Market posts review / 3x / VIP Labor / Boost
+      if (isAdm && (txt.includes('إعلان جديد') || txt.includes('تعديل إعلان') || txt.includes('إعادة فتح إعلان') || txt.includes('استلام هندسي') || txt.includes('3x') || low.includes('vip') || txt.includes('تمييز إعلان') || txt.includes('إلغاء طلب من العميل'))) {
         app.switchTab('admin');
-        setTimeout(() => this.clickMatchingButtonInMain(['3x', 'VIP', 'الطلبات', 'المشاريع', 'تمييز']), 140);
+        setTimeout(() => this.clickMatchingButtonInMain(['السوق والتمييز', '3x', 'VIP']), 140);
         return;
       }
 
-      // 5) Wallet (deposit, withdraw, balance, payout, gift, refund)
+      // 6) User: Display name approval/rejection
+      if (txt.includes('تعديل اسمك') || txt.includes('تعديل الاسم')) {
+        app.switchTab('profile');
+        return;
+      }
+
+      // 7) Wallet (deposit, withdraw, balance, payout, gift, refund)
       if (txt.includes('إيداع') || txt.includes('شحن') || txt.includes('سحب') || txt.includes('رصيد') || txt.includes('محفظ') || txt.includes('هدية') || txt.includes('تحويل') || txt.includes('مستحق')) {
         app.switchTab('wallet');
         if (txt.includes('طلب')) {
@@ -513,7 +538,7 @@
         return;
       }
 
-      // 6) KYC for regular user
+      // 8) KYC for regular user
       if (txt.includes('توثيق') || txt.includes('البطاقة') || txt.includes('الهوية') || low.includes('kyc')) {
         app.switchTab('wallet');
         if (txt.includes('رفض') || txt.includes('إعادة') || txt.includes('استكمال')) {
@@ -522,19 +547,19 @@
         return;
       }
 
-      // 7) Company / employees / payroll / custody / site attendance
+      // 9) Company / employees / payroll / custody / site attendance
       if (txt.includes('شركة') || txt.includes('موظف') || txt.includes('حضور') || txt.includes('انصراف') || txt.includes('عهدة') || txt.includes('مرتب') || txt.includes('راتب') || txt.includes('موقع العمل')) {
         app.switchTab('company');
         return;
       }
 
-      // 8) Chat / messages / calls / contracts / escrow milestones
+      // 10) Chat / messages / calls / contracts / escrow milestones
       if (txt.includes('رسالة') || txt.includes('شات') || txt.includes('دردش') || txt.includes('مكالمة') || txt.includes('عقد') || txt.includes('ضمان') || txt.includes('مستخلص') || txt.includes('دفعة') || txt.includes('مخالصة') || txt.includes('توقيع')) {
         app.switchTab('chat');
         return;
       }
 
-      // 9) Market / projects / ads / 3x / VIP labor
+      // 11) Market / projects / ads / 3x / VIP labor
       if (txt.includes('استلام') || txt.includes('3x') || low.includes('vip') || txt.includes('إعلان') || txt.includes('منشور') || txt.includes('مشروع') || txt.includes('السوق') || txt.includes('قسم') || txt.includes('عرض')) {
         app.switchTab('projects');
         if (txt.includes('3x') || txt.includes('استلام')) {
@@ -545,7 +570,7 @@
         return;
       }
 
-      // 10) Profile / rating / account / birthday
+      // 12) Profile / rating / account / birthday
       if (txt.includes('تقييم') || txt.includes('ملفك') || txt.includes('صفحتك') || txt.includes('عيد ميلاد') || txt.includes('حسابك')) {
         app.switchTab('profile');
         return;
@@ -566,21 +591,26 @@
         if (el.tagName === 'BUTTON' || el.closest('button')) return false;
         if (el.querySelector('form, input, textarea, select')) return false;
         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (txt.length < 10 || txt.includes('لا توجد إشعارات')) return false;
-        // Skip wrapper containers that enclose other notification cards
-        if (el.querySelector('.rounded-xl, .rounded-2xl, .glass-card')) return false;
+        if (txt.length < 10 || txt.includes('لا توجد إشعارات') || txt.includes('No notifications')) return false;
+        // Skip only outer wrappers that enclose multiple inner notification cards (allow small icon badges inside a card)
+        const innerCards = Array.from(el.querySelectorAll('.rounded-2xl, .rounded-xl, .glass-card, li')).filter(
+          (ch) => (ch.textContent || '').replace(/\s+/g, ' ').trim().length > 22
+        );
+        if (innerCards.length >= 1) return false;
         return true;
       });
 
       candidates.forEach((card) => {
-        if (card.dataset.damanNotifLinkedV56) return;
-        card.dataset.damanNotifLinkedV56 = '1';
+        if (card.dataset.damanNotifLinkedV57) return;
+        card.dataset.damanNotifLinkedV57 = '1';
         card.classList.add('cursor-pointer', 'hover:border-amber-400/70', 'transition');
 
-        const hint = document.createElement('div');
-        hint.className = 'mt-1.5 pt-1 border-t border-slate-800/80 text-[9.5px] font-black text-amber-400 flex items-center justify-end gap-1';
-        hint.innerHTML = '<span>اضغط للانتقال مباشرة</span><i class="fa-solid fa-chevron-left text-[8px]"></i>';
-        card.appendChild(hint);
+        if (!card.querySelector('.daman-notif-open-hint')) {
+          const hint = document.createElement('div');
+          hint.className = 'daman-notif-open-hint mt-1.5 pt-1 border-t border-slate-800/80 text-[9.5px] font-black text-amber-400 flex items-center justify-end gap-1';
+          hint.innerHTML = '<span>اضغط للانتقال مباشرة</span><i class="fa-solid fa-chevron-left text-[8px]"></i>';
+          card.appendChild(hint);
+        }
 
         card.addEventListener('click', (ev) => {
           if (ev.target && ev.target.closest('button, a')) return;
@@ -591,8 +621,8 @@
 
     patchNotificationDeepLinks() {
       const app = window.DamanApp;
-      if (!app || this._notifLinksPatchedV56) return;
-      this._notifLinksPatchedV56 = true;
+      if (!app || this._notifLinksPatchedV57) return;
+      this._notifLinksPatchedV57 = true;
 
       if (typeof app.openNotificationsModal === 'function') {
         const origOpen = app.openNotificationsModal.bind(app);
@@ -610,6 +640,7 @@
 
       if (typeof MutationObserver !== 'undefined') {
         const notifObs = new MutationObserver(() => {
+          this.fixDepositChannelGrid();
           document.querySelectorAll('.daman-modal:not(.hidden)').forEach((m) => this.enhanceNotificationsModal(m));
         });
         notifObs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
@@ -669,20 +700,23 @@
       watchBadge('daman-chat-unread-badge', 'chat');
     },
 
-    // ==================== 10. SYSTEM HEALTH DIAGNOSTIC MODAL ====================
+    // ==================== 10. SYSTEM HEALTH DIAGNOSTIC MODAL (v57 - 23/23 CHECKS) ====================
     openHealthReportModal() {
       const app = window.DamanApp;
       if (!app) return;
 
       const checks = [
         ['النواة الأساسية (app-core)', !!window.DamanApp],
-        ['المحفظة والتوثيق (wallet-kyc + ops v56)', !!window.DamanWallet],
+        ['المحفظة والتوثيق (wallet-kyc + ops)', !!window.DamanWallet],
+        ['يوم عمل + رقم مرجعي اختياري (wallet-sla)', !!window.DamanWalletSLA],
+        ['ترابط الإدارة والمحفظة + توحيد فحص العقد', !!window.DamanWalletMethods],
+        ['المساعد الذكي AI + الترجمة EN + تعديل الاسم (v57)', !!(window.DamanAiI18n && DamanAiI18n._booted)],
         ['الشات والعقود والمكالمات (chat-support + extras)', !!window.DamanChat],
         ['المايك والملفات واللوكيشن (chat-media)', !!(window.DamanChat && DamanChat._mediaPluginAttached)],
-        ['السوق والـ 3x وعمالة VIP (projects-escrow)', !!window.DamanProjects],
+        ['السوق + حذف ومراجعة المنشورات (projects-escrow v57)', !!(window.DamanProjects && typeof DamanProjects.deletePost === 'function')],
         ['لوحة الشركات (company-panel)', !!window.DamanCompany],
-        ['إشعارات الشركات وعلامات (؟) للمودال', !!(window.DamanCompanyEnh && DamanCompanyEnh._syncFixedV38)],
-        ['لوحة الإدارة 360° (admin + ext + ext2)', !!(window.DamanAdmin && DamanAdmin._ext1Ready)],
+        ['إشعارات الشركات وعلامات (؟) (company-enhancements)', !!(window.DamanCompanyEnh && DamanCompanyEnh._syncFixedV38)],
+        ['لوحة الإدارة 360° + مراجعة الأسماء (admin v57)', !!(window.DamanAdmin && DamanAdmin._ext1Ready && typeof DamanAdmin.approveNameChange === 'function')],
         ['صوت وملفات مراقبة الشات (admin-chat-media)', !!(window.DamanAdmin && DamanAdmin._watchMediaPatched)],
         ['الأقسام الديناميكية وإعلاناتها (categories-ads)', !!window.DamanCatAds],
         ['باقة الـ 62 قسم الشاملة (categories-pack)', !!(window.DamanCatAds && DamanCatAds._packV33Attached)],
@@ -690,9 +724,11 @@
         ['رقم المنشور وتحذير الأمان (post-contact-guard)', !!window.DamanPostContact],
         ['أرشيف البطاقات والسجلات (kyc-vault)', !!window.DamanKycVault],
         ['المشاركة وQR العقد والصفحة (share-qr)', !!(window.DamanShareQR && DamanShareQR._syncFixedV38)],
-        ['توجيه الإشعارات بالضغط والصوت (system-sync v56)', !!(this._booted && this._notifLinksPatchedV56)],
-        ['مكتبة رسم الـ QRCode', typeof window.QRCode !== 'undefined'],
-        ['اتصال Firebase Firestore', !!(app.db && app.auth)]
+        ['كاميرا QR + كاميرا التوثيق + أعياد الميلاد (kyc-bday-qr)', !!(window.DamanKycBdayQR && DamanKycBdayQR._rulesResilientV41)],
+        ['الإشعارات الجماعية + الحاسبة + انتهاء البطاقات (admin-growth-ops)', !!window.DamanGrowthOps],
+        ['التحقق العام من العقود + الحظر والتجميد (security-verify-ban)', !!window.DamanSecurityMod],
+        ['توجيه الإشعارات بالضغط والصوت (system-sync v57)', !!(this._booted && this._notifLinksPatchedV57)],
+        ['اتصال Firebase Firestore + QRCode', !!(app.db && app.auth && typeof window.QRCode !== 'undefined')]
       ];
 
       const passed = checks.filter((c) => c[1]).length;
@@ -710,7 +746,7 @@
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border-2 ${allOk ? 'border-emerald-500/60' : 'border-amber-500/60'} rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة v56 (${passed}/${checks.length})</h3>
+            <h3 class="text-sm font-black ${allOk ? 'text-emerald-400' : 'text-amber-400'}">🩺 تقرير فحص ترابط المنظومة v57 (${passed}/${checks.length})</h3>
             <button type="button" onclick="document.getElementById('daman-health-modal').classList.add('hidden')" class="w-7 h-7 rounded-lg bg-slate-800 text-slate-300"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] flex items-center justify-between">
@@ -728,6 +764,12 @@
         </div>`;
     },
 
+    // Keep v57 23/23 health report active even if older helper files try to override it
+    lockV57HealthReport() {
+      this._healthV56Patched = true;
+      this._healthV55Patched = true;
+    },
+
     // ==================== BOOT ====================
     boot() {
       if (this._booted) return;
@@ -735,6 +777,7 @@
       if (!app) return setTimeout(() => this.boot(), 250);
       this._booted = true;
 
+      this.lockV57HealthReport();
       this.patchShareQR();
       this.patchCompanyEnhancements();
       this.patchAdminIntegration();
@@ -745,6 +788,7 @@
       this.startLiveAlertWatcher();
 
       setTimeout(() => {
+        this.lockV57HealthReport();
         this.patchShareQR();
         this.patchCompanyEnhancements();
         this.patchAdminIntegration();
