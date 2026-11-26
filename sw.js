@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v59';
+const CACHE_NAME = 'damansite-v60';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,7 @@ const CORE_ASSETS = [
   './manifest.json?v=28',
   './app-core.js?v=59',
   './wallet-kyc.js?v=28',
-  './wallet-ops.js?v=56',
+  './wallet-ops.js?v=60',
   './chat-support.js?v=28',
   './chat-extras.js?v=28',
   './chat-media.js?v=29',
@@ -24,7 +24,7 @@ const CORE_ASSETS = [
   './post-contact-guard.js?v=36',
   './kyc-vault.js?v=36',
   './share-qr.js?v=36',
-  './system-sync.js?v=57',
+  './system-sync.js?v=60',
   './kyc-bday-qr.js?v=39',
   './admin-growth-ops.js?v=40',
   './wallet-sla.js?v=42',
