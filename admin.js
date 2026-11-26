@@ -1,5 +1,5 @@
 (function () {
-  const ADMIN_VER = '57';
+  const ADMIN_VER = '58';
 
   const AdminMod = {
     subTab: 'treasury',
@@ -360,7 +360,7 @@
         ]);
 
         const users = uSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((u) => app.normalizeAr(`${u.name} ${u.legalName} ${u.pendingDisplayName || ''} ${u.phone} ${u.nationalId} ${u.email}`).includes(qNorm)).slice(0, 6);
+          .filter((u) => app.normalizeAr(`${u.name} ${u.legalName} ${u.pendingDisplayName || ''} ${u.phone} ${u.nationalId} ${u.passportNumber || ''} ${u.email}`).includes(qNorm)).slice(0, 6);
         const wallets = wSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
           .filter((w) => String(w.txRef || '').toUpperCase().includes(qUp) || app.normalizeAr(`${w.userName} ${w.userLegalName || ''} ${w.senderAccount} ${w.destAccount}`).includes(qNorm)).slice(0, 6);
         const contracts = aSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
@@ -546,7 +546,7 @@
     exportAccountingCsv() {
       const app = window.DamanApp;
       const escCsv = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-      const lines = [['التاريخ', 'النوع', 'القناة', 'الاسم بالبطاقة', 'الاسم بالتطبيق', 'التفاصيل', 'المبلغ (ج.م)', 'الحالة'].map(escCsv).join(',')];
+      const lines = [['التاريخ', 'النوع', 'القناة', 'الاسم بالبطاقة/الجواز', 'الاسم بالتطبيق', 'التفاصيل', 'المبلغ (ج.م)', 'الحالة'].map(escCsv).join(',')];
       this.walletReqs.forEach((r) => lines.push([r.date || '', r.type, r.channel, r.userLegalName || '', r.userName || '', r.txRef || r.destAccount || '', r.actualAmount || r.amount, r.status].map(escCsv).join(',')));
       this.platformFees.forEach((f) => lines.push([f.date || '', 'profit_' + f.type, 'vault', '', f.userName || f.ticketNumber || '', '', f.cashPaid != null ? f.cashPaid : f.amount, 'approved'].map(escCsv).join(',')));
       this.adminExpenses.forEach((e) => lines.push([e.date || '', 'expense_' + e.category, e.channel || 'none', '', '', e.note, -Math.abs(Number(e.amount || 0)), 'approved'].map(escCsv).join(',')));
@@ -661,10 +661,10 @@
         const inpVal = parseFloat(document.getElementById('adm-act-amt-' + reqId)?.value);
         actualAmount = !isNaN(inpVal) && inpVal > 0 ? Math.round(inpVal * 100) / 100 : Number(req.amount || 0);
         const diffMsg = actualAmount !== Number(req.amount) ? `\n⚠️ تم تعديل المبلغ الواصل إلى ${app.fmtMoney(actualAmount)} ج.م` : '';
-        if (!window.confirm(`تأكيد اعتماد إيداع ${app.fmtMoney(actualAmount)} ج.م لحساب:\nالاسم بالبطاقة: ${req.userLegalName || '—'}\nالاسم بالتطبيق: ${req.userName || '—'}${diffMsg}`)) return;
+        if (!window.confirm(`تأكيد اعتماد إيداع ${app.fmtMoney(actualAmount)} ج.م لحساب:\nالاسم القانوني: ${req.userLegalName || '—'}\nالاسم بالتطبيق: ${req.userName || '—'}${diffMsg}`)) return;
       } else {
         transferCost = Math.max(0, Math.round((parseFloat(document.getElementById('adm-tr-cost-' + reqId)?.value) || 0) * 100) / 100);
-        if (!window.confirm(`تأكيد أنك حوّلت صافي السحب (${app.fmtMoney(req.netPayout || req.amount)} ج.م) إلى:\n${req.destAccount}\nالاسم بالبطاقة: ${req.userLegalName || '—'}`)) return;
+        if (!window.confirm(`تأكيد أنك حوّلت صافي السحب (${app.fmtMoney(req.netPayout || req.amount)} ج.م) إلى:\n${req.destAccount}\nالاسم القانوني: ${req.userLegalName || '—'}`)) return;
       }
 
       await app.withLock('wReq_' + reqId, async () => {
@@ -759,13 +759,13 @@
       });
     },
 
-    // ==================== 4. DISPLAY NAME CHANGE REVIEW & KYC ====================
+    // ==================== 4. DISPLAY NAME CHANGE REVIEW & KYC (ID + PASSPORT + OCR AUDIT) ====================
     async approveNameChange(uid) {
       const app = window.DamanApp;
       const u = this.nameReqs.find((x) => x.id === uid);
       if (!u || !u.pendingDisplayName) return;
       const approvedName = String(u.pendingDisplayName).trim();
-      if (!window.confirm(`اعتماد الاسم الظاهر الجديد «${approvedName}» للمستخدم:\nالاسم بالبطاقة: ${u.legalName || 'غير موثّق'}\nالاسم الحالي: ${u.name || '—'}`)) return;
+      if (!window.confirm(`اعتماد الاسم الظاهر الجديد «${approvedName}» للمستخدم:\nالاسم بالبطاقة/الجواز: ${u.legalName || 'غير موثّق'}\nالاسم الحالي: ${u.name || '—'}`)) return;
 
       await app.withLock('appName_' + uid, async () => {
         try {
@@ -778,7 +778,7 @@
             nameApprovedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await app.logAudit('name_change_approve', `${u.name} → ${approvedName} (قانوني: ${u.legalName || '—'})`, uid);
-          await app.sendNotification(uid, '✅ تمت الموافقة على تعديل اسمك بالتطبيق', `اسمك الظاهر الآن هو: ${approvedName} (مع الاحتفاظ باسمك القانوني بالبطاقة للتحويلات).`);
+          await app.sendNotification(uid, '✅ تمت الموافقة على تعديل اسمك بالتطبيق', `اسمك الظاهر الآن هو: ${approvedName} (مع الاحتفاظ باسمك القانوني بالبطاقة/الجواز للتحويلات).`);
           app.toast('تم اعتماد الاسم الجديد ✅', 'success');
           this.loadTabData('kyc');
         } catch (err) { app.toast(err.message, 'error'); }
@@ -810,30 +810,69 @@
 
     async approveKyc(uid) {
       const app = window.DamanApp;
+      const kReq = this.kycReqs.find((x) => x.id === uid) || {};
+
       await app.withLock('appKyc_' + uid, async () => {
-        const legalName = (document.getElementById('kyc-ed-name-' + uid)?.value || '').trim();
-        const nidRaw = (document.getElementById('kyc-ed-nid-' + uid)?.value || '').trim();
+        const docType = document.getElementById('kyc-ed-doctype-' + uid)?.value || kReq.docType || 'national_id';
+        const isPass = docType === 'passport';
+        const legalName = (document.getElementById('kyc-ed-name-' + uid)?.value || '').trim().replace(/\s+/g, ' ');
+        const nidRaw = (document.getElementById('kyc-ed-nid-' + uid)?.value || '').trim().toUpperCase();
+        const bdayInp = (document.getElementById('kyc-ed-bday-' + uid)?.value || '').trim();
         const legalAddress = (document.getElementById('kyc-ed-addr-' + uid)?.value || '').trim();
         const compName = (document.getElementById('kyc-ed-comp-' + uid)?.value || '').trim();
         const cr = (document.getElementById('kyc-ed-cr-' + uid)?.value || '').trim();
         const tax = (document.getElementById('kyc-ed-tax-' + uid)?.value || '').trim();
 
-        const parsed = app.parseEgyptianNationalId(nidRaw);
-        if (!parsed.valid) return app.toast(parsed.error, 'error');
-        if (legalName.split(/\s+/).length < 3) return app.toast('اكتب الاسم الرباعي بالكامل', 'warning');
+        let cleanDocNum = '';
+        let finalBirthDate = bdayInp || kReq.birthDate || '';
 
-        const dupSnap = await app.db.collection('users').where('nationalId', '==', parsed.nid).limit(2).get();
-        if (dupSnap.docs.some((d) => d.id !== uid)) return app.toast('⚠️ هذا الرقم القومي موثّق بالفعل لحساب آخر!', 'error');
+        if (isPass) {
+          cleanDocNum = nidRaw.replace(/[^A-Z0-9]/g, '');
+          if (cleanDocNum.length < 6 || cleanDocNum.length > 15) return app.toast('رقم جواز السفر غير صالح (يجب أن يكون 6 إلى 15 حرف/رقم)', 'error');
+          if (legalName.split(/\s+/).length < 2) return app.toast('اكتب الاسم الكامل كما في جواز السفر', 'warning');
+        } else {
+          const parsed = app.parseEgyptianNationalId(nidRaw);
+          if (!parsed.valid) return app.toast(parsed.error, 'error');
+          cleanDocNum = parsed.nid;
+          finalBirthDate = parsed.birthDate || finalBirthDate;
+          if (legalName.split(/\s+/).length < 3) return app.toast('اكتب الاسم الرباعي بالكامل', 'warning');
+        }
 
-        const patch = { kycStatus: 'verified', kycRejectionReason: '', legalName, nationalId: parsed.nid, birthDate: parsed.birthDate, legalAddress, kycVerifiedAt: Date.now() };
+        const dupSnap = await app.db.collection('users').where('nationalId', '==', cleanDocNum).limit(2).get();
+        if (dupSnap.docs.some((d) => d.id !== uid)) {
+          return app.toast(isPass ? '⚠️ رقم جواز السفر هذا موثّق بالفعل لحساب آخر!' : '⚠️ هذا الرقم القومي موثّق بالفعل لحساب آخر!', 'error');
+        }
+
+        const patch = {
+          kycStatus: 'verified',
+          kycDocType: docType,
+          kycRejectionReason: '',
+          legalName,
+          nationalId: cleanDocNum,
+          passportNumber: isPass ? cleanDocNum : '',
+          birthDate: finalBirthDate,
+          legalAddress,
+          kycVerifiedAt: Date.now()
+        };
+        if (kReq.docExpiryDate) patch.docExpiryDate = kReq.docExpiryDate;
         if (compName) patch.companyName = compName;
         if (cr) patch.commercialReg = cr;
         if (tax) patch.taxCard = tax;
 
         await app.db.collection('users').doc(uid).update(patch);
-        await app.db.collection('kycRequests').doc(uid).update({ status: 'approved', legalName, nationalId: parsed.nid, birthDate: parsed.birthDate, legalAddress, reviewedAt: firebase.firestore.FieldValue.serverTimestamp(), reviewedBy: app.user.email });
-        await app.logAudit('kyc_approve', `توثيق ${legalName} (${parsed.nid})`, uid);
-        await app.sendNotification(uid, '✅ تم توثيق حسابك وتثبيت بياناتك القانونية!', 'يمكنك الآن استخدام المحفظة والسوق والعقود.');
+        await app.db.collection('kycRequests').doc(uid).update({
+          status: 'approved',
+          docType,
+          legalName,
+          nationalId: cleanDocNum,
+          passportNumber: isPass ? cleanDocNum : '',
+          birthDate: finalBirthDate,
+          legalAddress,
+          reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          reviewedBy: app.user.email
+        });
+        await app.logAudit('kyc_approve', `توثيق (${isPass ? 'جواز سفر' : 'بطاقة'}) ${legalName} (${cleanDocNum})`, uid);
+        await app.sendNotification(uid, '✅ تم توثيق حسابك وتثبيت بياناتك القانونية!', 'يمكنك الآن استخدام المحفظة والإيداع والسحب ونشر الإعلانات والتواصل والعقود.');
         app.toast('تم اعتماد التوثيق ✅', 'success');
         this.loadTabData('kyc');
       });
@@ -841,7 +880,7 @@
 
     async rejectKyc(uid) {
       const app = window.DamanApp;
-      const reason = window.prompt('سبب الرفض:', 'صور البطاقة أو السيلفي غير واضحة');
+      const reason = window.prompt('سبب الرفض:', 'صور البطاقة / الجواز أو السيلفي غير واضحة أو البيانات غير مطابقة');
       if (!reason) return;
       await app.db.collection('users').doc(uid).update({ kycStatus: 'rejected', kycRejectionReason: reason.trim() });
       await app.db.collection('kycRequests').doc(uid).update({ status: 'rejected', rejectionReason: reason.trim() });
@@ -868,8 +907,8 @@
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">📄 إدارة وتعديل العقد: ${app.esc(a.ticketNumber)}</h3><button onclick="document.getElementById('daman-adm-ct-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
           <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px]">
-            <div>صاحب العمل (بطاقة): <b class="text-white">${app.esc(a.payerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.payerName || '—')})</span></div>
-            <div>المنفّذ (بطاقة): <b class="text-white">${app.esc(a.providerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.providerName || '—')})</span></div>
+            <div>صاحب العمل (قانوني): <b class="text-white">${app.esc(a.payerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.payerName || '—')})</span></div>
+            <div>المنفّذ (قانوني): <b class="text-white">${app.esc(a.providerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.providerName || '—')})</span></div>
             <div>القيمة: <b class="text-emerald-400">${app.fmtMoney(a.totalAmount)} ج.م</b> | المتبقي: <b class="text-amber-300">${app.fmtMoney(a.remainingEscrow || 0)} ج.م</b></div>
           </div>
           <form onsubmit="DamanAdmin.saveContractAdminEdit(event,'${a.id}')" class="space-y-2">
@@ -1205,8 +1244,8 @@
               </div>
               <div class="p-2 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-[10.5px]">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-slate-400">🪪 الاسم بالبطاقة (للتحويل):</span>
-                  <b class="text-emerald-300 text-end">${app.esc(r.userLegalName || 'غير موثّق بالبطاقة')}</b>
+                  <span class="text-slate-400">🪪 الاسم بالبطاقة/الجواز:</span>
+                  <b class="text-emerald-300 text-end">${app.esc(r.userLegalName || 'غير موثّق بعد')}</b>
                 </div>
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-slate-400">👤 الاسم بالتطبيق:</span>
@@ -1265,7 +1304,7 @@
             ${!this.nameReqs.length ? `<div class="text-[11px] text-slate-400 text-center py-1">لا توجد طلبات تعديل أسماء معلّقة ✅</div>` : this.nameReqs.map((u) => `
               <div class="p-3 rounded-xl bg-slate-950 border border-sky-500/40 space-y-1.5">
                 <div class="flex justify-between items-center gap-2">
-                  <span class="text-[10.5px] text-emerald-300 font-black">🪪 البطاقة: ${app.esc(u.legalName || 'غير موثّق بعد')}</span>
+                  <span class="text-[10.5px] text-emerald-300 font-black">🪪 القانوني: ${app.esc(u.legalName || 'غير موثّق بعد')}</span>
                   <button onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${u.id}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[9.5px] font-bold">ملف 360°</button>
                 </div>
                 <div class="text-[11px] text-slate-300">الاسم الحالي بالتطبيق: <b class="text-white">${app.esc(u.name || '—')}</b></div>
@@ -1277,29 +1316,75 @@
               </div>`).join('')}
           </div>
 
-          <div class="font-black text-amber-400 pt-1">طلبات التوثيق بالبطاقة المعلّقة (${pending.length})</div>
+          <div class="font-black text-amber-400 pt-1">طلبات التوثيق (بطاقة أو جواز سفر) المعلّقة (${pending.length})</div>
           ${!pending.length ? `<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد طلبات توثيق معلّقة ✅</div>` : pending.map((k) => {
+            const isPass = k.docType === 'passport';
             const isComp = k.accountType === 'company' || k.accountType === 'supplier';
-            return `
-              <div class="glass-card rounded-2xl p-3.5 space-y-2 border-amber-500/50">
-                <div class="flex justify-between">
-                  <div>
-                    <b class="text-white block">👤 بالتطبيق: ${app.esc(k.displayName || '—')}</b>
-                    <span class="text-[10.5px] text-emerald-300 font-bold">🪪 بالبطاقة: ${app.esc(k.legalName || '—')}</span>
+            const diffs = Array.isArray(k.ocrDiffs) ? k.ocrDiffs : [];
+            const ocrEdited = !!k.ocrEdited && diffs.length > 0;
+
+            let ocrBox = '';
+            if (ocrEdited) {
+              ocrBox = `
+                <div class="p-2.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/70 space-y-1.5">
+                  <div class="font-black text-rose-300 text-[10.5px]">⚠️ تنبيه مهم: المستخدم عدّل بيانات القراءة التلقائية (OCR) يدوياً!</div>
+                  <div class="space-y-1">
+                    ${diffs.map((d) => `
+                      <div class="p-1.5 rounded-lg bg-slate-950/90 border border-rose-500/30 text-[10px] space-y-0.5">
+                        <div class="font-black text-amber-300">${app.esc(d.label || d.field)}:</div>
+                        <div class="text-sky-300">🤖 قراءة النظام: <b>${app.esc(d.ocrValue || '—')}</b></div>
+                        <div class="text-rose-200">✏️ تعديل المستخدم: <b>${app.esc(d.userValue || '—')}</b></div>
+                      </div>`).join('')}
                   </div>
-                  <span class="text-sky-300">${app.esc(k.phone || '')}</span>
+                </div>`;
+            } else if (k.ocrStatus === 'done') {
+              ocrBox = `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-[10px]">🤖 تقرير القراءة الآلية (OCR): البيانات مطابقة تماماً لقراءة النظام بدون تعديل يدوي ✅</div>`;
+            } else if (k.ocrStatus === 'failed') {
+              ocrBox = `<div class="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 font-bold text-[10px]">ℹ️ تم إدخال البيانات يدوياً (تعذرت القراءة الآلية وقت التصوير — راجع الصور بدقة).</div>`;
+            }
+
+            return `
+              <div class="glass-card rounded-2xl p-3.5 space-y-2 ${ocrEdited ? 'border-2 border-rose-500/70' : 'border-amber-500/50'}">
+                <div class="flex justify-between items-start gap-2">
+                  <div>
+                    <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+                      <span class="px-2 py-0.5 rounded-lg font-black text-[9.5px] ${isPass ? 'bg-sky-500/20 text-sky-300' : 'bg-amber-500/20 text-amber-300'}">${isPass ? '🛂 جواز سفر' : '🪪 بطاقة شخصية'}</span>
+                      ${ocrEdited ? `<span class="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-black text-[9.5px]">✏️ عدّل OCR</span>` : ''}
+                    </div>
+                    <b class="text-white block">👤 بالتطبيق: ${app.esc(k.displayName || '—')}</b>
+                    <span class="text-[10.5px] text-emerald-300 font-bold">🪪 بالمستند: ${app.esc(k.legalName || '—')}</span>
+                  </div>
+                  <span class="text-sky-300 shrink-0">${app.esc(k.phone || '')}</span>
                 </div>
+
+                ${ocrBox}
+
                 <div class="flex flex-wrap gap-1.5">
-                  <button onclick="DamanApp.openMediaLightbox('${k.idFrontMedia}','وش البطاقة')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">🪪 وش</button>
-                  <button onclick="DamanApp.openMediaLightbox('${k.idBackMedia}','ضهر البطاقة')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">🪪 ضهر</button>
+                  <button onclick="DamanApp.openMediaLightbox('${k.idFrontMedia}','${isPass ? 'صفحة بيانات جواز السفر' : 'وش البطاقة'}')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">${isPass ? '🛂 صفحة الجواز' : '🪪 وش البطاقة'}</button>
+                  ${k.idBackMedia ? `<button onclick="DamanApp.openMediaLightbox('${k.idBackMedia}','ضهر البطاقة')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">🪪 ضهر البطاقة</button>` : ''}
                   <button onclick="DamanApp.openMediaLightbox('${k.selfieMedia}','سيلفي')" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-black text-[10px]">🤳 سيلفي</button>
                   ${k.crMedia ? `<button onclick="DamanApp.openMediaLightbox('${k.crMedia}','السجل التجاري')" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">📄 سجل</button>` : ''}
                   ${k.taxMedia ? `<button onclick="DamanApp.openMediaLightbox('${k.taxMedia}','البطاقة الضريبية')" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">📄 ضريبية</button>` : ''}
                 </div>
+
                 <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                  <div><label class="text-[9.5px] text-slate-400">الاسم الرباعي/الخماسي (كما بالبطاقة)</label><input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
-                  <div><label class="text-[9.5px] text-slate-400">الرقم القومي</label><input id="kyc-ed-nid-${k.id}" type="text" maxlength="14" value="${app.esc(k.nationalId || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-black" /></div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <div>
+                      <label class="text-[9.5px] text-slate-400">نوع المستند</label>
+                      <select id="kyc-ed-doctype-${k.id}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-sky-300 font-bold">
+                        <option value="national_id" ${!isPass ? 'selected' : ''}>🪪 بطاقة شخصية</option>
+                        <option value="passport" ${isPass ? 'selected' : ''}>🛂 جواز سفر</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="text-[9.5px] text-slate-400">تاريخ الميلاد</label>
+                      <input id="kyc-ed-bday-${k.id}" type="date" value="${app.esc(k.birthDate || '')}" class="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" />
+                    </div>
+                  </div>
+                  <div><label class="text-[9.5px] text-slate-400">الاسم القانوني الكامل (${isPass ? 'كما بالجواز' : 'رباعي/خماسي كما بالبطاقة'})</label><input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">${isPass ? 'رقم جواز السفر' : 'الرقم القومي (14 رقم)'}</label><input id="kyc-ed-nid-${k.id}" type="text" dir="ltr" maxlength="${isPass ? 16 : 14}" value="${app.esc(k.nationalId || k.passportNumber || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-black" /></div>
                   <div><label class="text-[9.5px] text-slate-400">العنوان</label><input id="kyc-ed-addr-${k.id}" type="text" value="${app.esc(k.legalAddress || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
+                  ${k.docExpiryDate ? `<div class="text-[10px] text-slate-400">تاريخ انتهاء الجواز: <b class="text-white">${app.esc(k.docExpiryDate)}</b></div>` : ''}
                   ${isComp ? `<input id="kyc-ed-comp-${k.id}" type="text" value="${app.esc(k.companyName || '')}" placeholder="الشركة" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><div class="grid grid-cols-2 gap-1.5"><input id="kyc-ed-cr-${k.id}" type="text" value="${app.esc(k.commercialReg || '')}" placeholder="سجل" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><input id="kyc-ed-tax-${k.id}" type="text" value="${app.esc(k.taxCard || '')}" placeholder="ضريبية" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>` : ''}
                 </div>
                 <div class="grid grid-cols-2 gap-2">
@@ -1308,7 +1393,7 @@
                 </div>
               </div>`;
           }).join('')}
-          ${others.length ? `<div class="font-bold text-slate-400 pt-1">طلبات تمت مراجعتها (${others.length})</div>${others.slice(0, 10).map((k) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${app.esc(k.legalName)} (${app.esc(k.nationalId)})</span><b class="${k.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(k.status)}</b></div>`).join('')}` : ''}
+          ${others.length ? `<div class="font-bold text-slate-400 pt-1">طلبات تمت مراجعتها (${others.length})</div>${others.slice(0, 10).map((k) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${k.docType === 'passport' ? '🛂 ' : '🪪 '}${app.esc(k.legalName)} (${app.esc(k.nationalId)})</span><b class="${k.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(k.status)}</b></div>`).join('')}` : ''}
         </div>`;
     },
 
@@ -1423,7 +1508,7 @@
           </div>
           ${pills.length ? `<div class="flex flex-wrap gap-1.5 p-2 rounded-2xl bg-slate-900/90 border border-rose-500/40">${pills.join('')}</div>` : ''}
           <form onsubmit="DamanAdmin.runOmniSearch(event)" class="flex gap-1.5 text-xs">
-            <input id="adm-omni-q" type="text" value="${app.esc(this.omniQuery)}" placeholder="بحث شامل: TKT- / CMP- / مرجع / رقم قومي / اسم / موبايل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+            <input id="adm-omni-q" type="text" value="${app.esc(this.omniQuery)}" placeholder="بحث شامل: TKT- / CMP- / مرجع / رقم قومي أو جواز / اسم / موبايل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
             <button type="submit" class="px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black"><i class="fa-solid fa-magnifying-glass"></i></button>
           </form>
           ${omniBox}
