@@ -1,5 +1,5 @@
 (function () {
-  const ADMIN_VER = '27';
+  const ADMIN_VER = '57';
 
   const AdminMod = {
     subTab: 'treasury',
@@ -21,10 +21,11 @@
     omniResults: null,
     pageLimits: { kyc: 20, wallet: 25, users: 30, comms: 30 },
 
-    counts: { kyc: 0, dep: 0, wd: 0, signed: 0, disputes: 0, posts: 0, reports: 0, tickets: 0 },
+    counts: { kyc: 0, names: 0, dep: 0, wd: 0, signed: 0, disputes: 0, posts: 0, reports: 0, tickets: 0 },
 
     users: [],
     kycReqs: [],
+    nameReqs: [],
     walletReqs: [],
     platformFees: [],
     adminExpenses: [],
@@ -118,6 +119,7 @@
       this.omniResults = null;
       this.users = [];
       this.kycReqs = [];
+      this.nameReqs = [];
       this.walletReqs = [];
       this.platformFees = [];
       this.adminExpenses = [];
@@ -146,6 +148,21 @@
       }
     },
 
+    copyText(val, label = 'البيان') {
+      const s = String(val || '').trim();
+      if (!s) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s).then(() => window.DamanApp?.toast(`تم نسخ ${label} ✅`, 'success')).catch(() => {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = s;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); window.DamanApp?.toast(`تم نسخ ${label} ✅`, 'success'); } catch (e) {}
+        ta.remove();
+      }
+    },
+
     statusAr(st) {
       const map = {
         pending: 'قيد المراجعة ⏳', pending_review: 'قيد المراجعة ⏳', pending_admin: 'بانتظار اعتماد الإدارة ⏳',
@@ -159,7 +176,7 @@
     },
 
     channelAr(ch) {
-      return { vodafone_cash: 'محفظة إلكترونية', instapay: 'إنستا باي', bank: 'تحويل بنكي' }[ch] || ch || '—';
+      return { vodafone_cash: 'محفظة إلكترونية', instapay: 'إنستا باي', bank: '🏦 تحويل بنكي' }[ch] || ch || '—';
     },
 
     setSubTab(t) {
@@ -191,16 +208,17 @@
 
     sortDesc(arr) {
       return arr.sort((a, b) => {
-        const ta = a.createdAt?.seconds || a.submittedAt?.seconds || a.updatedAt?.seconds || 0;
-        const tb = b.createdAt?.seconds || b.submittedAt?.seconds || b.updatedAt?.seconds || 0;
+        const ta = a.createdAt?.seconds || a.submittedAt?.seconds || a.updatedAt?.seconds || a.pendingDisplayNameAt || 0;
+        const tb = b.createdAt?.seconds || b.submittedAt?.seconds || b.updatedAt?.seconds || b.pendingDisplayNameAt || 0;
         return tb - ta;
       });
     },
 
     async refreshActionCounts(db) {
       try {
-        const [k, w, a, d, p, r, t] = await Promise.all([
+        const [k, nm, w, a, d, p, r, t] = await Promise.all([
           this.safeDocs(db.collection('kycRequests').where('status', '==', 'pending').limit(50).get(), 'cnt_kyc'),
+          this.safeDocs(db.collection('users').where('pendingDisplayNameStatus', '==', 'pending').limit(40).get(), 'cnt_names'),
           this.safeDocs(db.collection('walletRequests').where('status', '==', 'pending').limit(60).get(), 'cnt_w'),
           this.safeDocs(db.collection('chatAgreements').where('contractStatus', '==', 'pending_admin').limit(40).get(), 'cnt_ag'),
           this.safeDocs(db.collection('disputes').where('status', '==', 'open').limit(40).get(), 'cnt_d'),
@@ -210,6 +228,7 @@
         ]);
         this.counts = {
           kyc: k.length,
+          names: nm.length,
           dep: w.filter((x) => x.type === 'deposit').length,
           wd: w.filter((x) => x.type === 'withdraw').length,
           signed: a.length,
@@ -252,7 +271,12 @@
           this.walletReqs = this.sortDesc(w);
           this.treasuryTransfers = this.sortDesc(tr);
         } else if (tab === 'kyc') {
-          this.kycReqs = this.sortDesc(await this.safeDocs(db.collection('kycRequests').limit(this.pageLimits.kyc || 20).get(), 'التوثيق'));
+          const [k, nm] = await Promise.all([
+            this.safeDocs(db.collection('kycRequests').limit(this.pageLimits.kyc || 20).get(), 'التوثيق'),
+            this.safeDocs(db.collection('users').where('pendingDisplayNameStatus', '==', 'pending').limit(50).get(), 'طلبات تعديل الأسماء')
+          ]);
+          this.kycReqs = this.sortDesc(k);
+          this.nameReqs = this.sortDesc(nm);
         } else if (tab === 'wallet') {
           this.walletReqs = this.sortDesc(await this.safeDocs(db.collection('walletRequests').limit(this.pageLimits.wallet || 25).get(), 'طلبات المحفظة'));
         } else if (tab === 'contracts') {
@@ -264,7 +288,7 @@
           this.disputes = this.sortDesc(d);
         } else if (tab === 'market') {
           const [p, i, v] = await Promise.all([
-            this.safeDocs(db.collection('projects').limit(120).get(), 'السوق'),
+            this.safeDocs(db.collection('projects').limit(150).get(), 'السوق'),
             this.safeDocs(db.collection('vipRequests').limit(60).get(), 'الاستلام 3x'),
             this.safeDocs(db.collection('vipLaborRequests').limit(60).get(), 'عمالة VIP')
           ]);
@@ -336,11 +360,11 @@
         ]);
 
         const users = uSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((u) => app.normalizeAr(`${u.name} ${u.legalName} ${u.phone} ${u.nationalId} ${u.email}`).includes(qNorm)).slice(0, 6);
+          .filter((u) => app.normalizeAr(`${u.name} ${u.legalName} ${u.pendingDisplayName || ''} ${u.phone} ${u.nationalId} ${u.email}`).includes(qNorm)).slice(0, 6);
         const wallets = wSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((w) => String(w.txRef || '').toUpperCase().includes(qUp) || app.normalizeAr(`${w.userName} ${w.senderAccount} ${w.destAccount}`).includes(qNorm)).slice(0, 6);
+          .filter((w) => String(w.txRef || '').toUpperCase().includes(qUp) || app.normalizeAr(`${w.userName} ${w.userLegalName || ''} ${w.senderAccount} ${w.destAccount}`).includes(qNorm)).slice(0, 6);
         const contracts = aSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((a) => String(a.ticketNumber || '').toUpperCase().includes(qUp) || app.normalizeAr(`${a.title} ${a.payerName} ${a.providerName}`).includes(qNorm)).slice(0, 6);
+          .filter((a) => String(a.ticketNumber || '').toUpperCase().includes(qUp) || app.normalizeAr(`${a.title} ${a.payerName} ${a.payerLegalName || ''} ${a.providerName} ${a.providerLegalName || ''}`).includes(qNorm)).slice(0, 6);
         const companies = cSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
           .filter((c) => String(c.code || '').toUpperCase().includes(qUp) || app.normalizeAr(`${c.name} ${c.ownerName}`).includes(qNorm)).slice(0, 5);
 
@@ -522,10 +546,10 @@
     exportAccountingCsv() {
       const app = window.DamanApp;
       const escCsv = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-      const lines = [['التاريخ', 'النوع', 'القناة', 'المستخدم/البيان', 'المبلغ (ج.م)', 'الحالة'].map(escCsv).join(',')];
-      this.walletReqs.forEach((r) => lines.push([r.date || '', r.type, r.channel, `${r.userName} (${r.txRef || r.destAccount || ''})`, r.actualAmount || r.amount, r.status].map(escCsv).join(',')));
-      this.platformFees.forEach((f) => lines.push([f.date || '', 'profit_' + f.type, 'vault', f.userName || f.ticketNumber || '', f.cashPaid != null ? f.cashPaid : f.amount, 'approved'].map(escCsv).join(',')));
-      this.adminExpenses.forEach((e) => lines.push([e.date || '', 'expense_' + e.category, e.channel || 'none', e.note, -Math.abs(Number(e.amount || 0)), 'approved'].map(escCsv).join(',')));
+      const lines = [['التاريخ', 'النوع', 'القناة', 'الاسم بالبطاقة', 'الاسم بالتطبيق', 'التفاصيل', 'المبلغ (ج.م)', 'الحالة'].map(escCsv).join(',')];
+      this.walletReqs.forEach((r) => lines.push([r.date || '', r.type, r.channel, r.userLegalName || '', r.userName || '', r.txRef || r.destAccount || '', r.actualAmount || r.amount, r.status].map(escCsv).join(',')));
+      this.platformFees.forEach((f) => lines.push([f.date || '', 'profit_' + f.type, 'vault', '', f.userName || f.ticketNumber || '', '', f.cashPaid != null ? f.cashPaid : f.amount, 'approved'].map(escCsv).join(',')));
+      this.adminExpenses.forEach((e) => lines.push([e.date || '', 'expense_' + e.category, e.channel || 'none', '', '', e.note, -Math.abs(Number(e.amount || 0)), 'approved'].map(escCsv).join(',')));
       const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -637,10 +661,10 @@
         const inpVal = parseFloat(document.getElementById('adm-act-amt-' + reqId)?.value);
         actualAmount = !isNaN(inpVal) && inpVal > 0 ? Math.round(inpVal * 100) / 100 : Number(req.amount || 0);
         const diffMsg = actualAmount !== Number(req.amount) ? `\n⚠️ تم تعديل المبلغ الواصل إلى ${app.fmtMoney(actualAmount)} ج.م` : '';
-        if (!window.confirm(`تأكيد اعتماد إيداع ${app.fmtMoney(actualAmount)} ج.م لحساب ${req.userName}؟${diffMsg}`)) return;
+        if (!window.confirm(`تأكيد اعتماد إيداع ${app.fmtMoney(actualAmount)} ج.م لحساب:\nالاسم بالبطاقة: ${req.userLegalName || '—'}\nالاسم بالتطبيق: ${req.userName || '—'}${diffMsg}`)) return;
       } else {
         transferCost = Math.max(0, Math.round((parseFloat(document.getElementById('adm-tr-cost-' + reqId)?.value) || 0) * 100) / 100);
-        if (!window.confirm(`تأكيد أنك حوّلت صافي السحب (${app.fmtMoney(req.netPayout || req.amount)} ج.م) إلى ${req.destAccount}؟`)) return;
+        if (!window.confirm(`تأكيد أنك حوّلت صافي السحب (${app.fmtMoney(req.netPayout || req.amount)} ج.م) إلى:\n${req.destAccount}\nالاسم بالبطاقة: ${req.userLegalName || '—'}`)) return;
       }
 
       await app.withLock('wReq_' + reqId, async () => {
@@ -698,7 +722,7 @@
                 if (transferCost > 0) {
                   tx.set(app.db.collection('adminExpenses').doc(), {
                     amount: transferCost, category: 'transfer_fee', channel: r.channel || 'vodafone_cash',
-                    note: `رسوم تحويل سحب للمستخدم ${r.userName}`, date: app.todayLocal(),
+                    note: `رسوم تحويل سحب للمستخدم ${r.userLegalName || r.userName}`, date: app.todayLocal(),
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                   });
                 }
@@ -719,7 +743,7 @@
             }
           });
 
-          if (req.type === 'deposit' && req.txRef) {
+          if (req.type === 'deposit' && req.txRef && req.txRef !== 'بدون رقم مرجعي') {
             const refKey = String(req.txRef).toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 80);
             if (refKey) {
               app.db.collection('txRefIndex').doc(refKey).set({ txRef: req.txRef, status: action === 'approve' ? 'approved' : 'rejected' }, { merge: true }).catch(() => {});
@@ -727,7 +751,7 @@
           }
 
           delete this.tempPayoutReceipts[reqId];
-          await app.logAudit(`wallet_${req.type}_${action}`, `${req.userName} — ${app.fmtMoney(actualAmount)} ج.م`, reqId);
+          await app.logAudit(`wallet_${req.type}_${action}`, `${req.userLegalName || req.userName} — ${app.fmtMoney(actualAmount)} ج.م`, reqId);
           await app.sendNotification(req.userId, action === 'approve' ? '✅ تم تنفيذ طلب المحفظة' : '❌ تم رفض طلب المحفظة', action === 'approve' ? `المبلغ: ${app.fmtMoney(req.type === 'deposit' ? actualAmount : (req.netPayout || req.amount))} ج.م` : adminNote);
           app.toast('تم تنفيذ العملية بدقة ✅', 'success');
           this.loadTabData('wallet');
@@ -735,7 +759,55 @@
       });
     },
 
-    // ==================== 4. KYC & 5. CONTRACTS / DISPUTES ====================
+    // ==================== 4. DISPLAY NAME CHANGE REVIEW & KYC ====================
+    async approveNameChange(uid) {
+      const app = window.DamanApp;
+      const u = this.nameReqs.find((x) => x.id === uid);
+      if (!u || !u.pendingDisplayName) return;
+      const approvedName = String(u.pendingDisplayName).trim();
+      if (!window.confirm(`اعتماد الاسم الظاهر الجديد «${approvedName}» للمستخدم:\nالاسم بالبطاقة: ${u.legalName || 'غير موثّق'}\nالاسم الحالي: ${u.name || '—'}`)) return;
+
+      await app.withLock('appName_' + uid, async () => {
+        try {
+          await app.db.collection('users').doc(uid).update({
+            name: approvedName,
+            pendingDisplayName: '',
+            pendingDisplayNameStatus: 'approved',
+            pendingDisplayNameReason: '',
+            nameApprovedBy: app.user.email,
+            nameApprovedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await app.logAudit('name_change_approve', `${u.name} → ${approvedName} (قانوني: ${u.legalName || '—'})`, uid);
+          await app.sendNotification(uid, '✅ تمت الموافقة على تعديل اسمك بالتطبيق', `اسمك الظاهر الآن هو: ${approvedName} (مع الاحتفاظ باسمك القانوني بالبطاقة للتحويلات).`);
+          app.toast('تم اعتماد الاسم الجديد ✅', 'success');
+          this.loadTabData('kyc');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
+    async rejectNameChange(uid) {
+      const app = window.DamanApp;
+      const u = this.nameReqs.find((x) => x.id === uid);
+      if (!u) return;
+      const reason = window.prompt(`سبب رفض الاسم المطلوب «${u.pendingDisplayName || ''}»:`, 'الاسم غير مناسب لسياسة المنصة — يرجى اختيار اسم لائق');
+      if (reason === null) return;
+      const cleanReason = reason.trim() || 'الاسم غير مناسب لسياسة المنصة';
+
+      await app.withLock('rejName_' + uid, async () => {
+        try {
+          await app.db.collection('users').doc(uid).update({
+            pendingDisplayName: '',
+            pendingDisplayNameStatus: 'rejected',
+            pendingDisplayNameReason: cleanReason
+          });
+          await app.logAudit('name_change_reject', `رفض (${u.pendingDisplayName}): ${cleanReason}`, uid);
+          await app.sendNotification(uid, '❌ تم رفض طلب تعديل الاسم الظاهر', cleanReason);
+          app.toast('تم رفض الاسم وإبلاغ المستخدم', 'info');
+          this.loadTabData('kyc');
+        } catch (err) { app.toast(err.message, 'error'); }
+      });
+    },
+
     async approveKyc(uid) {
       const app = window.DamanApp;
       await app.withLock('appKyc_' + uid, async () => {
@@ -779,6 +851,7 @@
       this.loadTabData('kyc');
     },
 
+    // ==================== 5. CONTRACTS / DISPUTES ====================
     openContractAdminModal(agId) {
       const app = window.DamanApp;
       const a = this.agreements.find((x) => x.id === agId);
@@ -795,8 +868,8 @@
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between"><h3 class="text-sm font-black text-amber-400">📄 إدارة وتعديل العقد: ${app.esc(a.ticketNumber)}</h3><button onclick="document.getElementById('daman-adm-ct-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
           <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-[11px]">
-            <div>صاحب العمل: <b class="text-white">${app.esc(a.payerLegalName || a.payerName)}</b> (قومي: ${app.esc(a.payerNationalId || '—')})</div>
-            <div>المنفّذ: <b class="text-white">${app.esc(a.providerLegalName || a.providerName)}</b> (قومي: ${app.esc(a.providerNationalId || '—')})</div>
+            <div>صاحب العمل (بطاقة): <b class="text-white">${app.esc(a.payerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.payerName || '—')})</span></div>
+            <div>المنفّذ (بطاقة): <b class="text-white">${app.esc(a.providerLegalName || '—')}</b> <span class="text-slate-400">(تطبيق: ${app.esc(a.providerName || '—')})</span></div>
             <div>القيمة: <b class="text-emerald-400">${app.fmtMoney(a.totalAmount)} ج.م</b> | المتبقي: <b class="text-amber-300">${app.fmtMoney(a.remainingEscrow || 0)} ج.م</b></div>
           </div>
           <form onsubmit="DamanAdmin.saveContractAdminEdit(event,'${a.id}')" class="space-y-2">
@@ -1041,14 +1114,14 @@
       return `
         <form onsubmit="DamanAdmin.savePaymentSwitchboard(event)" class="space-y-3 text-xs">
           <div class="glass-card rounded-2xl p-3.5 space-y-2 border-emerald-500/40">
-            <div class="font-black text-emerald-400">🔌 تشغيل / إيقاف وسائل الإيداع (3) والسحب (2)</div>
+            <div class="font-black text-emerald-400">🔌 تشغيل / إيقاف وسائل الإيداع والسحب</div>
             <div class="grid grid-cols-3 gap-1.5 text-[10.5px] font-bold">
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-dep-vf" type="checkbox" ${dc.vodafone_cash !== false ? 'checked' : ''} class="accent-emerald-500" /> إيداع كاش</label>
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-dep-ip" type="checkbox" ${dc.instapay !== false ? 'checked' : ''} class="accent-emerald-500" /> إيداع إنستا</label>
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-dep-bk" type="checkbox" ${dc.bank !== false ? 'checked' : ''} class="accent-emerald-500" /> إيداع بنك</label>
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-wd-vf" type="checkbox" ${wc.vodafone_cash !== false ? 'checked' : ''} class="accent-amber-500" /> سحب كاش</label>
               <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-wd-ip" type="checkbox" ${wc.instapay !== false ? 'checked' : ''} class="accent-amber-500" /> سحب إنستا</label>
-              <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-wd-bk" type="checkbox" ${wc.bank === true ? 'checked' : ''} class="accent-amber-500" /> سحب بنك</label>
+              <label class="p-2 rounded-xl bg-slate-950 flex items-center gap-1.5"><input id="sw-wd-bk" type="checkbox" ${wc.bank !== false ? 'checked' : ''} class="accent-amber-500" /> سحب بنك</label>
             </div>
           </div>
 
@@ -1116,6 +1189,8 @@
     renderWalletTab(app) {
       const pending = this.walletReqs.filter((r) => r.status === 'pending');
       const done = this.walletReqs.filter((r) => r.status !== 'pending');
+      const escJs = (s) => app.esc(String(s || '')).replace(/'/g, "\\'");
+
       return `
         <div class="space-y-3 text-xs">
           <div class="font-black text-emerald-400">طلبات الشحن والسحب المعلّقة (${pending.length})</div>
@@ -1125,13 +1200,40 @@
               ${r.phoneMismatchFlag ? `<div class="p-1.5 rounded bg-amber-600 text-white font-black text-center text-[10px]">⚠️ تنبيه: رقم محفظة الاستلام مختلف عن رقم المستخدم!</div>` : ''}
               ${r.rapidFlipFlag ? `<div class="p-1.5 rounded bg-purple-600 text-white font-black text-center text-[10px]">⚠️ تنبيه: سحب سريع على قناة مختلفة بدون تعاملات!</div>` : ''}
               <div class="flex justify-between items-center">
-                <b class="${r.type === 'deposit' ? 'text-emerald-400' : 'text-amber-400'}">${r.type === 'deposit' ? '⬇️ شحن / إيداع' : '⬆️ سحب كاش'} — ${app.fmtMoney(r.amount)} ج.م</b>
+                <b class="${r.type === 'deposit' ? 'text-emerald-400' : 'text-amber-400'}">${r.type === 'deposit' ? '⬇️ إيداع' : '⬆️ سحب'} — ${app.fmtMoney(r.amount)} ج.م</b>
                 <button onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${r.userId}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[10px] font-bold">ملف 360°</button>
               </div>
-              <div class="text-[11px] text-slate-200">${app.esc(r.userLegalName || r.userName)} (${app.esc(r.userPhone || '')}) • ${this.channelAr(r.channel)} • ${app.esc(r.date || '')}</div>
-              ${r.txRef ? `<div class="text-[10.5px] text-amber-300">المرجع: <b class="select-all">${app.esc(r.txRef)}</b> | من: ${app.esc(r.senderAccount || '')}</div>` : ''}
+              <div class="p-2 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-[10.5px]">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-slate-400">🪪 الاسم بالبطاقة (للتحويل):</span>
+                  <b class="text-emerald-300 text-end">${app.esc(r.userLegalName || 'غير موثّق بالبطاقة')}</b>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-slate-400">👤 الاسم بالتطبيق:</span>
+                  <b class="text-white text-end">${app.esc(r.userName || '—')}</b>
+                </div>
+                <div class="flex items-center justify-between gap-2 text-slate-300 pt-0.5 border-t border-slate-800/80">
+                  <span>📞 ${app.esc(r.userPhone || '—')}</span>
+                  <span>${this.channelAr(r.channel)} • ${app.esc(r.date || '')}</span>
+                </div>
+              </div>
+              ${r.txRef ? `
+                <div class="flex items-center justify-between gap-2 text-[10.5px] text-amber-300 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800">
+                  <div class="min-w-0 truncate">المرجع: <b class="select-all">${app.esc(r.txRef)}</b> | من: ${app.esc(r.senderAccount || '')}</div>
+                  ${r.txRef !== 'بدون رقم مرجعي' ? `<button type="button" onclick="DamanAdmin.copyText('${escJs(r.txRef)}','الرقم المرجعي')" class="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-black text-[9.5px] shrink-0">نسخ</button>` : ''}
+                </div>` : ''}
               ${r.targetAccountUsed ? `<div class="text-[10px] text-slate-400">الحساب المستلم وقت الطلب: ${app.esc(r.targetAccountUsed)}</div>` : ''}
-              ${r.destAccount ? `<div class="text-[11px] text-emerald-300 font-black">تحويل إلى: <span class="select-all">${app.esc(r.destAccount)}</span> (الصافي: ${app.fmtMoney(r.netPayout || r.amount)} ج.م)</div>` : ''}
+              ${r.destAccount ? `
+                <div class="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 space-y-1.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-[11px] text-emerald-300 font-black break-all select-all">تحويل إلى: ${app.esc(r.destAccount)}</div>
+                    <button type="button" onclick="DamanAdmin.copyText('${escJs(r.destAccount)}','بيانات الحساب')" class="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] shrink-0"><i class="fa-regular fa-copy me-0.5"></i> نسخ</button>
+                  </div>
+                  <div class="flex items-center justify-between gap-2 text-[10.5px] text-white">
+                    <span>الصافي للتحويل: <b class="text-emerald-300">${app.fmtMoney(r.netPayout || r.amount)} ج.م</b></span>
+                    <button type="button" onclick="DamanAdmin.copyText('${Number(r.netPayout || r.amount)}','المبلغ الصافي')" class="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-bold text-[9.5px]">نسخ المبلغ</button>
+                  </div>
+                </div>` : ''}
               ${r.type === 'deposit' ? `
                 <div class="flex items-center gap-2 p-2 rounded-xl bg-slate-950 border border-emerald-500/30">
                   <span class="text-[10px] text-emerald-300 font-bold shrink-0">المبلغ الواصل:</span>
@@ -1148,7 +1250,7 @@
               </div>
             </div>`).join('')}
           <div class="font-bold text-slate-400 pt-2">المنفّذة (${done.length})</div>
-          ${done.slice(0, 15).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between text-[11px]"><span>${r.type === 'deposit' ? '⬇️' : '⬆️'} ${app.esc(r.userName)} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م</span><b class="${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(r.status)}</b></div>`).join('')}
+          ${done.slice(0, 15).map((r) => `<div class="glass-card rounded-xl p-2.5 flex justify-between gap-2 text-[11px]"><div class="min-w-0 truncate">${r.type === 'deposit' ? '⬇️' : '⬆️'} <b class="text-white">${app.esc(r.userLegalName || r.userName)}</b> ${r.userLegalName && r.userName && r.userLegalName !== r.userName ? `<span class="text-slate-400">(${app.esc(r.userName)})</span>` : ''} — ${app.fmtMoney(r.actualAmount || r.amount)} ج.م</div><b class="shrink-0 ${r.status === 'approved' ? 'text-emerald-400' : 'text-rose-400'}">${this.statusAr(r.status)}</b></div>`).join('')}
           <button onclick="DamanAdmin.loadMore('wallet')" class="w-full py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 font-bold">تحميل المزيد</button>
         </div>`;
     },
@@ -1158,12 +1260,35 @@
       const others = this.kycReqs.filter((k) => k.status !== 'pending');
       return `
         <div class="space-y-3 text-xs">
-          <div class="font-black text-amber-400">طلبات التوثيق المعلّقة (${pending.length})</div>
+          <div class="glass-card rounded-2xl p-3.5 space-y-2 border-sky-500/50">
+            <div class="font-black text-sky-300">✏️ طلبات تعديل الاسم الظاهر بالتطبيق (${this.nameReqs.length})</div>
+            ${!this.nameReqs.length ? `<div class="text-[11px] text-slate-400 text-center py-1">لا توجد طلبات تعديل أسماء معلّقة ✅</div>` : this.nameReqs.map((u) => `
+              <div class="p-3 rounded-xl bg-slate-950 border border-sky-500/40 space-y-1.5">
+                <div class="flex justify-between items-center gap-2">
+                  <span class="text-[10.5px] text-emerald-300 font-black">🪪 البطاقة: ${app.esc(u.legalName || 'غير موثّق بعد')}</span>
+                  <button onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${u.id}')" class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[9.5px] font-bold">ملف 360°</button>
+                </div>
+                <div class="text-[11px] text-slate-300">الاسم الحالي بالتطبيق: <b class="text-white">${app.esc(u.name || '—')}</b></div>
+                <div class="p-2 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 font-black text-xs">الاسم الجديد المطلوب: ${app.esc(u.pendingDisplayName)}</div>
+                <div class="grid grid-cols-2 gap-2 pt-0.5">
+                  <button onclick="DamanAdmin.approveNameChange('${u.id}')" class="py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black">✅ موافقة</button>
+                  <button onclick="DamanAdmin.rejectNameChange('${u.id}')" class="py-1.5 rounded-xl bg-rose-500 text-white font-black">❌ رفض</button>
+                </div>
+              </div>`).join('')}
+          </div>
+
+          <div class="font-black text-amber-400 pt-1">طلبات التوثيق بالبطاقة المعلّقة (${pending.length})</div>
           ${!pending.length ? `<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد طلبات توثيق معلّقة ✅</div>` : pending.map((k) => {
             const isComp = k.accountType === 'company' || k.accountType === 'supplier';
             return `
               <div class="glass-card rounded-2xl p-3.5 space-y-2 border-amber-500/50">
-                <div class="flex justify-between"><b class="text-white">${app.esc(k.displayName || k.legalName)}</b><span class="text-sky-300">${app.esc(k.phone || '')}</span></div>
+                <div class="flex justify-between">
+                  <div>
+                    <b class="text-white block">👤 بالتطبيق: ${app.esc(k.displayName || '—')}</b>
+                    <span class="text-[10.5px] text-emerald-300 font-bold">🪪 بالبطاقة: ${app.esc(k.legalName || '—')}</span>
+                  </div>
+                  <span class="text-sky-300">${app.esc(k.phone || '')}</span>
+                </div>
                 <div class="flex flex-wrap gap-1.5">
                   <button onclick="DamanApp.openMediaLightbox('${k.idFrontMedia}','وش البطاقة')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">🪪 وش</button>
                   <button onclick="DamanApp.openMediaLightbox('${k.idBackMedia}','ضهر البطاقة')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[10px]">🪪 ضهر</button>
@@ -1172,7 +1297,7 @@
                   ${k.taxMedia ? `<button onclick="DamanApp.openMediaLightbox('${k.taxMedia}','البطاقة الضريبية')" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 font-black text-[10px]">📄 ضريبية</button>` : ''}
                 </div>
                 <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                  <div><label class="text-[9.5px] text-slate-400">الاسم الرباعي</label><input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
+                  <div><label class="text-[9.5px] text-slate-400">الاسم الرباعي/الخماسي (كما بالبطاقة)</label><input id="kyc-ed-name-${k.id}" type="text" value="${app.esc(k.legalName || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold" /></div>
                   <div><label class="text-[9.5px] text-slate-400">الرقم القومي</label><input id="kyc-ed-nid-${k.id}" type="text" maxlength="14" value="${app.esc(k.nationalId || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-black" /></div>
                   <div><label class="text-[9.5px] text-slate-400">العنوان</label><input id="kyc-ed-addr-${k.id}" type="text" value="${app.esc(k.legalAddress || '')}" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>
                   ${isComp ? `<input id="kyc-ed-comp-${k.id}" type="text" value="${app.esc(k.companyName || '')}" placeholder="الشركة" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><div class="grid grid-cols-2 gap-1.5"><input id="kyc-ed-cr-${k.id}" type="text" value="${app.esc(k.commercialReg || '')}" placeholder="سجل" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /><input id="kyc-ed-tax-${k.id}" type="text" value="${app.esc(k.taxCard || '')}" placeholder="ضريبية" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white" /></div>` : ''}
@@ -1231,7 +1356,7 @@
         isMain ? ['treasury', '💰 الخزنة والميزان'] : null,
         isMain ? ['payments', '💳 محوّل الحسابات'] : null,
         app.canMod('wallet') ? ['wallet', '💸 الشحن والسحب'] : null,
-        app.canMod('kyc') ? ['kyc', '🪪 التوثيق'] : null,
+        app.canMod('kyc') ? ['kyc', '🪪 التوثيق والأسماء'] : null,
         app.canMod('contracts') ? ['contracts', '📄 العقود والنزاع'] : null,
         app.canMod('market') ? ['market', '🏗️ السوق والتمييز'] : null,
         isMain ? ['ads', '📢 النصوص والبانرات'] : null,
@@ -1248,6 +1373,7 @@
       const c = this.counts;
       const pills = [
         c.kyc ? `<button onclick="DamanAdmin.setSubTab('kyc')" class="px-2 py-1 rounded-lg bg-rose-600 text-white font-black text-[10px]">توثيق: ${c.kyc}</button>` : '',
+        c.names ? `<button onclick="DamanAdmin.setSubTab('kyc')" class="px-2 py-1 rounded-lg bg-sky-500 text-slate-950 font-black text-[10px]">✏️ أسماء: ${c.names}</button>` : '',
         c.dep ? `<button onclick="DamanAdmin.setSubTab('wallet')" class="px-2 py-1 rounded-lg bg-emerald-600 text-white font-black text-[10px]">شحن: ${c.dep}</button>` : '',
         c.wd ? `<button onclick="DamanAdmin.setSubTab('wallet')" class="px-2 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px]">سحب: ${c.wd}</button>` : '',
         c.signed ? `<button onclick="DamanAdmin.setSubTab('contracts')" class="px-2 py-1 rounded-lg bg-sky-600 text-white font-black text-[10px]">عقود: ${c.signed}</button>` : '',
@@ -1260,8 +1386,8 @@
       const omniBox = this.omniResults ? `
         <div class="glass-card rounded-2xl p-3 border-amber-500/50 space-y-2 text-[11px]">
           <div class="flex justify-between"><b class="text-amber-400">نتائج البحث: "${app.esc(this.omniQuery)}"</b><button onclick="DamanAdmin.omniResults=null; DamanAdmin.rerender()" class="text-rose-400 font-bold">إغلاق ×</button></div>
-          ${this.omniResults.users.map((u) => `<div onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${u.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>👤 ${app.esc(u.name)} (${app.esc(u.phone || '')})</span><b class="text-sky-300">ملف 360°</b></div>`).join('')}
-          ${this.omniResults.wallets.map((w) => `<div onclick="DamanAdmin.setSubTab('wallet')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>💳 ${app.esc(w.userName)}</span><b class="text-emerald-400">${app.fmtMoney(w.amount)} (${this.statusAr(w.status)})</b></div>`).join('')}
+          ${this.omniResults.users.map((u) => `<div onclick="if(DamanAdmin.openUser360Modal) DamanAdmin.openUser360Modal('${u.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between gap-2"><span class="truncate">👤 ${app.esc(u.name || '—')} | 🪪 ${app.esc(u.legalName || 'غير موثّق')} (${app.esc(u.phone || '')})</span><b class="text-sky-300 shrink-0">ملف 360°</b></div>`).join('')}
+          ${this.omniResults.wallets.map((w) => `<div onclick="DamanAdmin.setSubTab('wallet')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between gap-2"><span class="truncate">💳 ${app.esc(w.userLegalName || w.userName)} ${w.userLegalName && w.userName ? `(${app.esc(w.userName)})` : ''}</span><b class="text-emerald-400 shrink-0">${app.fmtMoney(w.amount)} (${this.statusAr(w.status)})</b></div>`).join('')}
           ${this.omniResults.contracts.map((a) => `<div onclick="DamanAdmin.openContractAdminModal('${a.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>📄 ${app.esc(a.ticketNumber)} — ${app.esc(a.title)}</span><b class="text-amber-300">${app.fmtMoney(a.totalAmount)}</b></div>`).join('')}
           ${this.omniResults.companies.map((co) => `<div onclick="if(DamanAdmin.openCompanyControlModal) DamanAdmin.openCompanyControlModal('${co.id}')" class="p-1.5 rounded bg-slate-950 cursor-pointer flex justify-between"><span>🏢 ${app.esc(co.name)} (${app.esc(co.code)})</span><b class="text-purple-300">تحكّم</b></div>`).join('')}
         </div>` : '';
@@ -1297,7 +1423,7 @@
           </div>
           ${pills.length ? `<div class="flex flex-wrap gap-1.5 p-2 rounded-2xl bg-slate-900/90 border border-rose-500/40">${pills.join('')}</div>` : ''}
           <form onsubmit="DamanAdmin.runOmniSearch(event)" class="flex gap-1.5 text-xs">
-            <input id="adm-omni-q" type="text" value="${app.esc(this.omniQuery)}" placeholder="بحث شامل: TKT- / CMP- / مرجع / رقم قومي / موبايل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+            <input id="adm-omni-q" type="text" value="${app.esc(this.omniQuery)}" placeholder="بحث شامل: TKT- / CMP- / مرجع / رقم قومي / اسم / موبايل..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white" />
             <button type="submit" class="px-3.5 py-2 rounded-xl bg-amber-500 text-slate-950 font-black"><i class="fa-solid fa-magnifying-glass"></i></button>
           </form>
           ${omniBox}
