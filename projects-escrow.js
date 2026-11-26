@@ -14,7 +14,7 @@
     { id: 'diamond', name: 'تمييز ماسي VIP (30 يوم)', badge: '💎 ماسي VIP', price: 250, days: 30, color: 'purple', priority: 3, showOnHome: true, features: 'أعلى أولوية مطلقة في قمة السوق والصفحة الرئيسية + إطار ماسي لمدة شهر كامل', active: true }
   ];
 
-  // 20 Built-in Showcase Ads covering ALL 17 Categories (5 Featured ★)
+  // 20 Built-in Showcase Ads covering core categories (5 Featured ★)
   const DEMO_SHOWCASE_POSTS = [
     { id: 'demo_01', isDemo: true, postType: 'project', category: 'concrete', title: 'مطلوب فرقة نجارة مسلحة لشدة أسقف 4 فيلات (تسليم استشاري)', description: 'مطلوب مقاول نجارة مسلحة بطاقم كامل (10 نجارين + 4 مساعدين) لشدة أسقف وأعمدة بكمبوند بالتجمع الخامس — التعاقد بالضمان المالي 100% وصرف أسبوعي منتظم.', budget: 145000, city: 'القاهرة الجديدة — التجمع الخامس', ownerId: 'demo_daman', ownerName: 'شركة الرواد للمقاولات العامة', ownerVerified: true, ownerVip: true, boostedUntil: FUTURE_BOOST, boostBadge: '💎 ماسي VIP', boostColor: 'purple', boostPriority: 3, showOnHome: true, status: 'approved', views: 214, date: '2026-11-20' },
     { id: 'demo_02', isDemo: true, postType: 'supplier', category: 'materials', title: 'توريد حديد عز وأسمنت السويس والعسكري بأسعار المصنع للمواقع B2B', description: 'توريد مباشر يومياً بكميات من 5 طن حتى 200 طن بضمان الوزن والفاتورة الضريبية والدفع المؤمّن عبر ضمان سايت عند الاستلام بالموقع.', budget: 39500, city: 'القاهرة والجيزة والعاصمة الإدارية', ownerId: 'demo_daman', ownerName: 'مجموعة النيل لتوريدات مواد البناء', ownerVerified: true, ownerVip: true, boostedUntil: FUTURE_BOOST, boostBadge: '★ إعلان مميز', boostColor: 'amber', boostPriority: 2, showOnHome: true, status: 'approved', views: 342, date: '2026-11-21' },
@@ -133,7 +133,7 @@
 
     ensureListeners(app) {
       if (!this.unsubProjects) {
-        this.unsubProjects = app.db.collection('projects').limit(120).onSnapshot((snap) => {
+        this.unsubProjects = app.db.collection('projects').limit(150).onSnapshot((snap) => {
           this.projects = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
           if (app.activeTab === 'projects' && this.subTab === 'market') this.rerender();
           if (app.activeTab === 'home') app.renderCurrentTab();
@@ -204,7 +204,7 @@
       return '🏗️ مطلوب تنفيذ / مشروع';
     },
 
-    // ==================== CREATE / EDIT / BOOST MODAL (WITH ? HELP ON EVERY FIELD) ====================
+    // ==================== CREATE / EDIT / DELETE / REVIEW POSTS ====================
     openPostModal() {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
@@ -232,16 +232,21 @@
         document.body.appendChild(m);
       }
       m.classList.remove('hidden');
-      const catsOpt = app.CATEGORIES.map((c) => `<option value="${c.id}" ${existing?.category === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
+      const cats = Array.isArray(app.CATEGORIES) ? app.CATEGORIES : [];
+      const catsOpt = cats.map((c) => `<option value="${c.id}" ${existing?.category === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
       const defType = existing?.postType || (app.profile?.accountType === 'supplier' ? 'supplier' : 'project');
       const boostPkgs = this.getBoostPackages(app).filter((b) => b.active !== false);
 
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-4 max-h-[92vh] overflow-y-auto space-y-3 text-xs">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-amber-400">${existing ? 'تعديل الإعلان' : 'نشر إعلان / مشروع / عرض توريد B2B'}</h3>
+            <h3 class="text-sm font-black text-amber-400">${existing ? '✏️ تعديل الإعلان' : '📢 نشر إعلان / مشروع / عرض توريد B2B'}</h3>
             <button onclick="document.getElementById('daman-post-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
           </div>
+          ${!app.hasAdminAccess() ? `
+            <div class="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-[10.5px] text-amber-200 leading-relaxed">
+              ⏳ <b>نظام المراجعة:</b> ${existing ? 'حفظ أي تعديل سيعيد الإعلان تلقائياً لمراجعة الإدارة قبل ظهوره مجدداً في السوق.' : 'بعد إرسال الإعلان يتم مراجعته من الإدارة والموافقة عليه قبل ظهوره في السوق.'}
+            </div>` : ''}
           <form onsubmit="DamanProjects.savePost(event,'${existing ? existing.id : ''}')" class="space-y-2.5">
             <div class="grid grid-cols-2 gap-2">
               <div>
@@ -258,7 +263,7 @@
               </div>
             </div>
             ${this.hBox('pm-tp', 'اختر «مطلوب تنفيذ» لو عندك شغل وبتدور على مقاول/عمالة، أو «مقاول/فني متاح» لعرض خدماتك، أو «توريد خامات B2B» لبيع مواد البناء والمعدات.')}
-            ${this.hBox('pm-ct', 'اختر القسم الهندسي الأنسب لإعلانك من بين الـ 17 تخصص حتى يصل لأكبر عدد من المهتمين به.')}
+            ${this.hBox('pm-ct', `اختر القسم الهندسي الأنسب لإعلانك من بين الـ ${cats.length} قسم حتى يصل لأكبر عدد من المهتمين به.`)}
 
             <div>
               <label class="block text-[10px] font-bold text-slate-300 mb-1">عنوان الإعلان * ${this.hBtn('pm-tt')}</label>
@@ -303,7 +308,7 @@
                   ${boostPkgs.map((bp) => `<option value="${app.esc(bp.id)}" ${existing?.boostTierId === bp.id ? 'selected' : ''}>${app.esc(bp.badge)} — ${app.esc(bp.name)} (${bp.days} يوم)</option>`).join('')}
                 </select>
               </div>` : ''}
-            <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">${existing ? 'حفظ التعديلات' : 'نشر الإعلان الآن'}</button>
+            <button type="submit" class="w-full py-3 rounded-2xl bg-amber-500 text-slate-950 font-black">${existing ? (app.hasAdminAccess() ? 'حفظ التعديلات ونشرها' : 'حفظ التعديلات وإرسالها للمراجعة') : 'نشر الإعلان الآن'}</button>
           </form>
         </div>`;
     },
@@ -323,6 +328,7 @@
       const app = window.DamanApp;
       if (!existingId && app.appConfig?.disableMarketPosting && !app.isAdmin()) return app.toast('نشر الإعلانات متوقف مؤقتاً', 'warning');
       await app.withLock('savePost', async () => {
+        const isStaff = app.hasAdminAccess();
         const tierId = app.isAdmin() ? (document.getElementById('pm-admin-tier')?.value || '') : '';
         const tierObj = tierId ? this.getBoostPackages(app).find((b) => b.id === tierId) : null;
         const payload = {
@@ -333,7 +339,8 @@
           city: document.getElementById('pm-city').value.trim(),
           description: document.getElementById('pm-desc').value.trim(),
           imageBase64: this.tempPostPhoto || '',
-          status: app.hasAdminAccess() ? 'approved' : 'pending_review',
+          status: isStaff ? 'approved' : 'pending_review',
+          rejectionReason: '',
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
         if (tierObj) {
@@ -344,8 +351,14 @@
         }
         try {
           if (existingId) {
+            payload.editedByUser = !isStaff;
             await app.db.collection('projects').doc(existingId).update(payload);
-            app.toast('تم تحديث الإعلان ✅', 'success');
+            if (!isStaff) {
+              await app.sendNotification('ADMIN', '✏️ تعديل إعلان بانتظار المراجعة', `${app.profile?.name || 'مستخدم'} عدّل إعلانه: ${payload.title}`);
+              app.toast('تم حفظ التعديلات وإعادة الإعلان لمراجعة الإدارة ⏳', 'success');
+            } else {
+              app.toast('تم تحديث الإعلان ونشره فوراً ✅', 'success');
+            }
           } else {
             Object.assign(payload, {
               ownerId: app.user.uid, ownerName: app.profile?.companyName || app.profile?.name || '',
@@ -354,12 +367,70 @@
               date: app.todayLocal(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await app.db.collection('projects').add(payload);
-            if (!app.hasAdminAccess()) await app.sendNotification('ADMIN', 'إعلان جديد للمراجعة 📢', payload.title);
-            app.toast(app.hasAdminAccess() ? 'تم نشر الإعلان مباشرة ✅' : 'تم الإرسال لمراجعة الإدارة ✅', 'success');
+            if (!isStaff) await app.sendNotification('ADMIN', '📢 إعلان جديد بانتظار المراجعة', `${app.profile?.name || 'مستخدم'}: ${payload.title}`);
+            app.toast(isStaff ? 'تم نشر الإعلان مباشرة ✅' : 'تم الإرسال لمراجعة الإدارة ⏳', 'success');
           }
           document.getElementById('daman-post-modal').classList.add('hidden');
         } catch (err) { app.toast(err.message, 'error'); }
       });
+    },
+
+    async deletePost(pid) {
+      const app = window.DamanApp;
+      if (!app.user) return app.openAuthModal('login');
+      let p = this.projects.find((x) => x.id === pid);
+      if (!p) {
+        try {
+          const snap = await app.db.collection('projects').doc(pid).get();
+          if (snap.exists) p = Object.assign({ id: snap.id }, snap.data());
+        } catch (e) {}
+      }
+      if (!p || p.isDemo) return;
+
+      const isOwner = p.ownerId === app.user.uid;
+      const isStaff = app.hasAdminAccess();
+      if (!isOwner && !isStaff) return app.toast('ليس لديك صلاحية حذف هذا المنشور', 'error');
+
+      let reason = '';
+      if (isOwner) {
+        if (!window.confirm(`هل أنت متأكد من حذف إعلانك «${p.title}» نهائياً؟ لا يمكن التراجع عن الحذف.`)) return;
+      } else {
+        reason = window.prompt(`حذف إعلان «${p.title}» لصاحبه (${p.ownerName || ''})\nاكتب سبب الحذف (سيصل للمعلن في إشعار):`, 'مخالفة شروط النشر في السوق');
+        if (reason === null) return;
+        reason = reason.trim() || 'تم الحذف بواسطة إدارة المنصة';
+      }
+
+      await app.withLock('delPost_' + pid, async () => {
+        try {
+          if (p.imageMedia) {
+            await app.db.collection('mediaVault').doc(p.imageMedia).delete().catch(() => {});
+          }
+          await app.db.collection('projects').doc(pid).delete();
+          if (!isOwner && isStaff) {
+            if (p.ownerId) {
+              await app.sendNotification(p.ownerId, '🗑️ تم حذف إعلانك من قِبل الإدارة', `${p.title} — السبب: ${reason}`).catch(() => {});
+            }
+            await app.logAudit('admin_delete_project', `حذف إعلان (${p.title}) — السبب: ${reason}`, pid).catch(() => {});
+            app.toast('تم حذف الإعلان وإبلاغ صاحبه ✅', 'success');
+          } else {
+            app.toast('تم حذف إعلانك نهائياً ✅', 'success');
+          }
+          document.getElementById('daman-post-detail-modal')?.classList.add('hidden');
+        } catch (err) {
+          app.toast('تعذر الحذف: ' + err.message, 'error');
+        }
+      });
+    },
+
+    async quickApproveFromMarket(pid) {
+      const app = window.DamanApp;
+      if (!app.hasAdminAccess()) return;
+      const p = this.projects.find((x) => x.id === pid);
+      if (!p) return;
+      await app.db.collection('projects').doc(pid).update({ status: 'approved', rejectionReason: '' });
+      if (p.ownerId) await app.sendNotification(p.ownerId, '✅ تم اعتماد ونشر إعلانك', p.title).catch(() => {});
+      await app.logAudit('market_approve_quick', `اعتماد سريع: ${p.title}`, pid).catch(() => {});
+      app.toast('تم اعتماد ونشر الإعلان فوراً ✅', 'success');
     },
 
     async toggleClosePost(pid) {
@@ -367,8 +438,11 @@
       const p = this.projects.find((x) => x.id === pid);
       if (!p) return;
       const next = p.status === 'closed' ? (app.hasAdminAccess() ? 'approved' : 'pending_review') : 'closed';
-      if (!window.confirm(next === 'closed' ? 'إغلاق الإعلان؟' : 'إعادة فتح الإعلان؟')) return;
+      if (!window.confirm(next === 'closed' ? 'إغلاق الإعلان مؤقتاً؟' : 'إعادة فتح الإعلان (سيُرسل للمراجعة)؟')) return;
       await app.db.collection('projects').doc(pid).update({ status: next });
+      if (next === 'pending_review') {
+        await app.sendNotification('ADMIN', '📢 إعادة فتح إعلان للمراجعة', p.title).catch(() => {});
+      }
       app.toast('تم التحديث ✅', 'success');
     },
 
@@ -487,11 +561,20 @@
       }
       m.classList.remove('hidden');
       const isOwner = !p.isDemo && app.user && p.ownerId === app.user.uid;
+      const isStaff = !p.isDemo && app.hasAdminAccess();
+
       m.innerHTML = `
         <div class="w-full max-w-md bg-slate-900 border border-amber-500/40 rounded-3xl p-4 max-h-[90vh] overflow-y-auto space-y-3 text-xs">
-          <div class="flex items-center justify-between gap-2"><span class="px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-300 font-black text-[10px]">${this.postTypeLabel(p.postType)}</span><button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-300 font-black text-[10px]">${this.postTypeLabel(p.postType)}</span>
+              ${p.status !== 'approved' ? this.statusBadgeAr(p.status) : ''}
+            </div>
+            <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          ${p.status === 'rejected' && p.rejectionReason ? `<div class="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/50 text-[11px] text-rose-200"><b>سبب الرفض:</b> ${app.esc(p.rejectionReason)}</div>` : ''}
           <h3 class="text-sm font-black text-white">${app.esc(p.title)}</h3>
-          ${p.imageBase64 ? `<img src="${p.imageBase64}" onclick="DamanApp.openMediaLightbox('${p.imageBase64}','${app.esc(p.title)}')" class="w-full max-h-56 object-cover rounded-2xl border border-slate-700 cursor-pointer" />` : ''}
+          ${p.imageBase64 ? `<img src="${p.imageBase64}" onclick="DamanApp.openMediaLightbox('${p.imageBase64}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="w-full max-h-56 object-cover rounded-2xl border border-slate-700 cursor-pointer" />` : ''}
           <p class="text-slate-200 leading-relaxed whitespace-pre-line">${app.esc(p.description || '')}</p>
           <div class="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
             <div>التخصص: <b class="text-amber-300">${app.esc(this.catLabel(p.category))}</b></div>
@@ -506,10 +589,17 @@
           <div class="flex gap-2">
             ${!isOwner ? `
               <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); if(window.DamanChat) DamanChat.openDirectChat('${p.ownerId}','${app.esc(p.ownerName || '').replace(/'/g, "\\'")}','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black"><i class="fa-solid fa-comments me-1"></i> مراسلة واتفاق بالضمان</button>
-              ${!p.isDemo ? `<button onclick="DamanApp.reportUserOrPost('project','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="px-3.5 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold"><i class="fa-solid fa-flag"></i></button>` : ''}` : `
-              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">تعديل</button>
-              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openBoostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-purple-500 text-white font-black">★ باقات التمييز</button>`}
+              ${!p.isDemo ? `<button onclick="DamanApp.reportUserOrPost('project','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="px-3.5 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold" title="إبلاغ"><i class="fa-solid fa-flag"></i></button>` : ''}` : `
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black">✏️ تعديل</button>
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openBoostModal('${p.id}')" class="flex-1 py-2.5 rounded-xl bg-purple-500 text-white font-black">★ تمييز</button>
+              <button onclick="DamanProjects.deletePost('${p.id}')" class="px-3.5 py-2.5 rounded-xl bg-rose-600 text-white font-black"><i class="fa-solid fa-trash-can"></i> حذف</button>`}
           </div>
+          ${isStaff && !isOwner ? `
+            <div class="pt-2 border-t border-slate-800 flex items-center gap-1.5">
+              ${p.status === 'pending_review' ? `<button onclick="DamanProjects.quickApproveFromMarket('${p.id}'); document.getElementById('daman-post-detail-modal').classList.add('hidden')" class="flex-1 py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]">✅ اعتماد ونشر</button>` : ''}
+              <button onclick="document.getElementById('daman-post-detail-modal').classList.add('hidden'); DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-2 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-300 font-black text-[11px]">✏️ تعديل (إدارة)</button>
+              <button onclick="DamanProjects.deletePost('${p.id}')" class="flex-1 py-2 rounded-xl bg-rose-600 text-white font-black text-[11px]">🗑️ حذف (إدارة)</button>
+            </div>` : ''}
         </div>`;
     },
 
@@ -699,12 +789,13 @@
     // ==================== RENDER MARKET & SUB-TABS ====================
     renderMarketCards(app) {
       const myUid = app.user?.uid;
+      const isStaff = app.hasAdminAccess();
       const favs = Array.isArray(app.profile?.favorites) ? app.profile.favorites : [];
       const qNorm = app.normalizeAr(this.searchQuery);
 
       const list = this.getAllMarketPosts(app).filter((p) => {
         const isOwn = !p.isDemo && myUid && p.ownerId === myUid;
-        if (p.status !== 'approved' && !isOwn && !app.hasAdminAccess()) return false;
+        if (p.status !== 'approved' && !isOwn && !isStaff) return false;
         if (this.marketFilter === 'favorites') { if (!favs.includes(p.id)) return false; }
         else if (this.marketFilter !== 'all' && p.postType !== this.marketFilter) return false;
         if (this.selectedCategory !== 'all' && p.category !== this.selectedCategory) return false;
@@ -732,6 +823,8 @@
               <button onclick="DamanProjects.toggleFavorite('${p.id}')" class="text-sm ${isFav ? 'text-rose-500' : 'text-slate-500'}"><i class="fa-${isFav ? 'solid' : 'regular'} fa-heart"></i></button>
             </div>
 
+            ${p.status === 'rejected' && p.rejectionReason && (isOwn || isStaff) ? `<div class="p-2 rounded-xl bg-rose-500/15 border border-rose-500/40 text-[10px] text-rose-200"><b>سبب الرفض:</b> ${app.esc(p.rejectionReason)}</div>` : ''}
+
             <div onclick="DamanProjects.openPostDetails('${p.id}')" class="cursor-pointer space-y-1.5">
               <h4 class="text-xs font-black text-white">${app.esc(p.title)}</h4>
               ${p.imageBase64 ? `<img src="${p.imageBase64}" class="w-full h-36 object-cover rounded-xl border border-slate-800" />` : ''}
@@ -749,20 +842,24 @@
               </div>
             </div>
 
-            <div class="flex items-center gap-1.5 pt-0.5">
+            <div class="flex items-center gap-1.5 pt-0.5 flex-wrap">
               ${!isOwn ? `
                 <button onclick="if(window.DamanChat) DamanChat.openDirectChat('${p.ownerId}','${app.esc(p.ownerName || '').replace(/'/g, "\\'")}','${p.id}','${app.esc(p.title).replace(/'/g, "\\'")}')" class="flex-1 py-2 rounded-xl bg-emerald-500 text-slate-950 font-black text-[11px]"><i class="fa-solid fa-comments me-1"></i> مراسلة واتفاق</button>
-                <button onclick="DamanProjects.openPostDetails('${p.id}')" class="px-3 py-2 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">التفاصيل</button>` : `
+                <button onclick="DamanProjects.openPostDetails('${p.id}')" class="px-3 py-2 rounded-xl bg-slate-800 text-white font-bold text-[10.5px]">التفاصيل</button>
+                ${isStaff && !p.isDemo && p.status === 'pending_review' ? `<button onclick="DamanProjects.quickApproveFromMarket('${p.id}')" class="px-2.5 py-2 rounded-xl bg-emerald-600 text-white font-black text-[10px]">✅ نشر</button>` : ''}
+                ${isStaff && !p.isDemo ? `<button onclick="DamanProjects.deletePost('${p.id}')" class="px-2.5 py-2 rounded-xl bg-rose-600/25 border border-rose-500/50 text-rose-300 font-black text-[10px]" title="حذف إداري"><i class="fa-solid fa-trash-can"></i></button>` : ''}` : `
                 <button onclick="DamanProjects.openEditPostModal('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-slate-800 text-amber-300 font-bold text-[10.5px]">تعديل</button>
                 <button onclick="DamanProjects.openBoostModal('${p.id}')" class="flex-1 py-1.5 rounded-xl bg-purple-500/25 text-purple-200 border border-purple-500/40 font-black text-[10.5px]">★ تمييز</button>
-                <button onclick="DamanProjects.toggleClosePost('${p.id}')" class="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-[10.5px]">${p.status === 'closed' ? 'فتح' : 'إغلاق'}</button>`}
+                <button onclick="DamanProjects.toggleClosePost('${p.id}')" class="px-2.5 py-1.5 rounded-xl bg-amber-500/15 text-amber-300 font-bold text-[10.5px]">${p.status === 'closed' ? 'فتح' : 'إغلاق'}</button>
+                <button onclick="DamanProjects.deletePost('${p.id}')" class="px-2.5 py-1.5 rounded-xl bg-rose-500/25 text-rose-300 font-black text-[10.5px]" title="حذف نهائي"><i class="fa-solid fa-trash-can me-0.5"></i>حذف</button>`}
             </div>
           </div>`;
       }).join('');
     },
 
     renderMarketTab(app) {
-      const catOpts = `<option value="all">كل التخصصات (17 تخصص)</option>` + app.CATEGORIES.map((c) => `<option value="${c.id}" ${this.selectedCategory === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
+      const cats = Array.isArray(app.CATEGORIES) ? app.CATEGORIES : [];
+      const catOpts = `<option value="all">كل التخصصات (${cats.length} قسم)</option>` + cats.map((c) => `<option value="${c.id}" ${this.selectedCategory === c.id ? 'selected' : ''}>${app.esc(c.ar)}</option>`).join('');
       return `
         <div class="space-y-3">
           <div class="flex items-center gap-2">
