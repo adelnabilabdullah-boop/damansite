@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v57';
+const CACHE_NAME = 'damansite-v58';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -13,7 +13,7 @@ const CORE_ASSETS = [
   './chat-media.js?v=29',
   './projects-escrow.js?v=57',
   './company-panel.js?v=28',
-  './admin.js?v=57',
+  './admin.js?v=58',
   './admin-ext.js?v=57',
   './admin-ext2.js?v=28',
   './categories-ads.js?v=30',
@@ -30,7 +30,8 @@ const CORE_ASSETS = [
   './wallet-sla.js?v=42',
   './security-verify-ban.js?v=43',
   './wallet-methods-control.js?v=56',
-  './daman-ai-i18n.js?v=57'
+  './daman-ai-i18n.js?v=57',
+  './kyc-ocr-passport-gate.js?v=58'
 ];
 
 self.addEventListener('install', (event) => {
@@ -59,7 +60,9 @@ self.addEventListener('fetch', (event) => {
   if (
     url.includes('firestore.googleapis.com') ||
     url.includes('identitytoolkit.googleapis.com') ||
-    url.includes('accounts.google.com')
+    url.includes('accounts.google.com') ||
+    url.includes('cdn.jsdelivr.net') ||
+    url.includes('tessdata')
   ) {
     return;
   }
