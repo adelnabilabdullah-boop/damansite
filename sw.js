@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v60';
+const CACHE_NAME = 'damansite-v61';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -31,7 +31,7 @@ const CORE_ASSETS = [
   './security-verify-ban.js?v=43',
   './wallet-methods-control.js?v=56',
   './daman-ai-i18n.js?v=57',
-  './kyc-ocr-passport-gate.js?v=59'
+  './kyc-ocr-passport-gate.js?v=61'
 ];
 
 self.addEventListener('install', (event) => {
