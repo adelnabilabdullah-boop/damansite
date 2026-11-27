@@ -1,5 +1,5 @@
 (function () {
-  const CHAT_VER = '28';
+  const CHAT_VER = '65';
 
   if (!window.DamanToggleHelp) {
     window.DamanToggleHelp = function (id) {
@@ -27,6 +27,15 @@
 
     _extrasReady: false,
     _extrasLoading: false,
+    _audioUnlockBound: false,
+    _ringingCallId: null,
+
+    ringtone: {
+      ctx: null,
+      mode: null, // 'outgoing' | 'incoming' | null
+      timer: null,
+      activeNodes: []
+    },
 
     tempPayoutPhoto: '',
     tempAddonPhoto: '',
@@ -35,7 +44,7 @@
     callState: {
       active: false, chatId: null, callId: null, otherUid: null, otherName: '',
       role: null, pc: null, localStream: null, mediaRecorder: null, recordedChunks: [],
-      startedAt: 0, timerInt: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
+      startedAt: 0, timerInt: null, ringTimeout: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
     },
 
     // ==================== INTERACTIVE ? HELP TOOLTIP & EXTRAS LOADER ====================
@@ -61,7 +70,7 @@
       }
       this._extrasLoading = true;
       const sc = document.createElement('script');
-      sc.src = `chat-extras.js?v=${CHAT_VER}&t=${Date.now()}`;
+      sc.src = `chat-extras.js?v=28&t=${Date.now()}`;
       sc.onload = () => {
         this._extrasLoading = false;
         if (this._extrasReady && cb) cb();
@@ -91,8 +100,144 @@
     printContractA4(agId) { return this.runExtra('_printContractA4Impl', agId); },
     openReviewModal(agId) { return this.runExtra('_openReviewModalImpl', agId); },
 
+    // ==================== ADMIN CHAT DETECTION ====================
+    isAdminChatRoom(chatId, otherUid, otherName) {
+      const app = window.DamanApp;
+      const cid = String(chatId || this.activeChatId || '');
+      const oUid = String(otherUid || this.activeChatMeta?.otherUid || '');
+      const oName = String(otherName || this.activeChatMeta?.otherName || '');
+
+      if (app && typeof app.isAdmin === 'function' && app.isAdmin()) return true;
+      if (oUid === 'admin' || oUid === 'ADMIN_ROOM' || oUid === 'support') return true;
+      if (this.cachedAdminUid && (oUid === this.cachedAdminUid || (cid && cid.includes(this.cachedAdminUid)))) return true;
+
+      const lowId = cid.toLowerCase();
+      if (lowId.includes('admin') || lowId.includes('support')) return true;
+
+      const existing = this.chats.find((c) => c.id === cid);
+      if (existing) {
+        if (existing.isAdminChat || existing.isSupport) return true;
+        const parts = Array.isArray(existing.participants) ? existing.participants : [];
+        if (parts.includes('admin') || parts.includes('ADMIN_ROOM') || (this.cachedAdminUid && parts.includes(this.cachedAdminUid))) return true;
+        const names = Object.values(existing.participantNames || {}).join(' ');
+        if (names.includes('إدارة') || names.toLowerCase().includes('admin')) return true;
+      }
+
+      if (oName.includes('إدارة') || oName.toLowerCase().includes('admin')) return true;
+      return false;
+    },
+
+    // ==================== CALL RINGTONE & RINGBACK ENGINE (WEB AUDIO + VIBRATION) ====================
+    initAudioUnlock() {
+      if (this._audioUnlockBound) return;
+      this._audioUnlockBound = true;
+      const unlock = () => {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          if (!this.ringtone.ctx || this.ringtone.ctx.state === 'closed') {
+            this.ringtone.ctx = new Ctx();
+          }
+          if (this.ringtone.ctx.state === 'suspended') {
+            this.ringtone.ctx.resume().catch(() => {});
+          }
+        } catch (e) {}
+      };
+      ['touchstart', 'pointerdown', 'click', 'keydown'].forEach((ev) => {
+        window.addEventListener(ev, unlock, { passive: true });
+      });
+    },
+
+    _getAudioCtx() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        if (!this.ringtone.ctx || this.ringtone.ctx.state === 'closed') {
+          this.ringtone.ctx = new Ctx();
+        }
+        if (this.ringtone.ctx.state === 'suspended') {
+          this.ringtone.ctx.resume().catch(() => {});
+        }
+        return this.ringtone.ctx;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    _playToneBurst(freqs, startOffset, duration, volume) {
+      const ctx = this._getAudioCtx();
+      if (!ctx) return;
+      try {
+        const now = ctx.currentTime + startOffset;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(volume, now + 0.025);
+        gain.gain.setValueAtTime(volume, Math.max(now + 0.03, now + duration - 0.04));
+        gain.gain.linearRampToValueAtTime(0.0001, now + duration);
+        gain.connect(ctx.destination);
+        this.ringtone.activeNodes.push(gain);
+
+        freqs.forEach((f) => {
+          const osc = ctx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, now);
+          osc.connect(gain);
+          osc.start(now);
+          osc.stop(now + duration + 0.02);
+          this.ringtone.activeNodes.push(osc);
+        });
+      } catch (e) {}
+    },
+
+    startRingtone(mode) {
+      this.stopRingtone();
+      this.ringtone.mode = mode;
+
+      if (mode === 'outgoing') {
+        const playOutgoingPulse = () => {
+          if (this.ringtone.mode !== 'outgoing') return;
+          this._playToneBurst([440, 480], 0, 1.15, 0.12);
+        };
+        playOutgoingPulse();
+        this.ringtone.timer = setInterval(playOutgoingPulse, 3400);
+      } else if (mode === 'incoming') {
+        const playIncomingPulse = () => {
+          if (this.ringtone.mode !== 'incoming') return;
+          this._playToneBurst([880, 1108.73], 0, 0.22, 0.2);
+          this._playToneBurst([1046.5, 1318.5], 0.24, 0.22, 0.2);
+          this._playToneBurst([880, 1108.73], 0.56, 0.22, 0.2);
+          this._playToneBurst([1046.5, 1318.5], 0.8, 0.22, 0.2);
+          try {
+            if (navigator.vibrate) navigator.vibrate([380, 140, 380]);
+          } catch (e) {}
+        };
+        playIncomingPulse();
+        this.ringtone.timer = setInterval(playIncomingPulse, 2300);
+      }
+    },
+
+    stopRingtone() {
+      this.ringtone.mode = null;
+      this._ringingCallId = null;
+      if (this.ringtone.timer) {
+        clearInterval(this.ringtone.timer);
+        this.ringtone.timer = null;
+      }
+      if (Array.isArray(this.ringtone.activeNodes) && this.ringtone.activeNodes.length) {
+        this.ringtone.activeNodes.forEach((node) => {
+          try { if (typeof node.stop === 'function') node.stop(); } catch (e) {}
+          try { if (typeof node.disconnect === 'function') node.disconnect(); } catch (e) {}
+        });
+        this.ringtone.activeNodes = [];
+      }
+      try {
+        if (navigator.vibrate) navigator.vibrate(0);
+      } catch (e) {}
+    },
+
     // ==================== LIFECYCLE & LISTENERS ====================
     ensureListeners(app) {
+      this.initAudioUnlock();
       this.ensureExtrasLoaded();
       if (!app.user) { this.detachListeners(); return; }
       if (this.attachedUid === app.user.uid) return;
@@ -101,6 +246,10 @@
 
       const uid = app.user.uid;
       const db = app.db;
+
+      this.resolveAdminUid(app).then(() => {
+        if (app.activeTab === 'chat' && this.activeChatId) this.rerender();
+      }).catch(() => {});
 
       this.unsubChats = db.collection('chats').where('participants', 'array-contains', uid).limit(60).onSnapshot((snap) => {
         this.chats = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
@@ -122,7 +271,12 @@
         if (!snap.exists) { this.hideIncomingCallBanner(); return; }
         const data = snap.data();
         if (data && data.status === 'ringing' && !this.callState.active) {
+          if (this.isAdminChatRoom(data.chatId, data.callerUid, data.callerName)) {
+            this.hideIncomingCallBanner();
+            return;
+          }
           if (Date.now() - Number(data.sentAtMs || 0) < 65000) this.showIncomingCallBanner(data);
+          else this.hideIncomingCallBanner();
         } else {
           this.hideIncomingCallBanner();
         }
@@ -134,6 +288,7 @@
         if (this[k]) { try { this[k](); } catch (e) {} this[k] = null; }
       });
       this.endActiveCall(true);
+      this.stopRingtone();
       this.attachedUid = null;
       this.chats = [];
       this.agreements = [];
@@ -213,13 +368,18 @@
     async openDirectChat(targetUid, targetName = 'مستخدم', projectId = '', contextTitle = '') {
       const app = window.DamanApp;
       if (!app.user || !app.profile) return app.openAuthModal('login');
-      if (!app.isKycVerified()) return app.toast('يجب توثيق الحساب قبل بدء المحادثات والعقود', 'warning');
+
+      const isAdminTarget = targetUid === 'admin' || targetUid === 'support' || String(targetName || '').includes('إدارة');
+      if (!isAdminTarget && !app.isKycVerified()) {
+        if (window.DamanKycGate) return DamanKycGate.requireVerifiedForAction('المراسلة والتواصل مع الأعضاء');
+        return app.toast('يجب توثيق الحساب قبل بدء المحادثات والعقود', 'warning');
+      }
 
       let realTargetUid = targetUid;
       let realTargetName = targetName;
-      if (targetUid === 'admin' || targetUid === 'demo_daman') {
+      if (targetUid === 'admin' || targetUid === 'demo_daman' || targetUid === 'support') {
         realTargetUid = await this.resolveAdminUid(app);
-        if (targetUid === 'admin') realTargetName = 'إدارة ضمان سايت';
+        if (targetUid === 'admin' || targetUid === 'support') realTargetName = 'إدارة ضمان سايت';
       }
 
       if (realTargetUid === app.user.uid) {
@@ -238,6 +398,7 @@
           await chatRef.set({
             participants: pair,
             participantNames: { [app.user.uid]: myName, [realTargetUid]: realTargetName || 'مستخدم' },
+            isAdminChat: isAdminTarget || app.isAdmin(),
             projectId: projectId || '',
             contextTitle: contextTitle || '',
             lastMessage: contextTitle ? `استفسار بخصوص: ${contextTitle}` : 'بدأت المحادثة',
@@ -374,7 +535,7 @@
       } catch (e) { app.toast('تعذر إرسال الصورة', 'error'); }
     },
 
-    // ==================== WEBRTC VOICE CALLS + 30-DAY AUTO RECORDING ====================
+    // ==================== WEBRTC VOICE CALLS + RINGTONE + 30-DAY AUTO RECORDING ====================
     buildRtcConfig(app) {
       const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
       const rawTurn = String(app.appConfig?.turnServer || '').trim();
@@ -387,9 +548,14 @@
 
     async startVoiceCall() {
       const app = window.DamanApp;
+      if (this.isAdminChatRoom()) {
+        return app.toast('المكالمات الصوتية غير متاحة في محادثة الإدارة — تواصل بالرسائل والصور والملفات فقط', 'warning');
+      }
       if (app.appConfig?.disableCalls && !app.isAdmin()) return app.toast('المكالمات الصوتية متوقفة مؤقتاً من الإدارة', 'warning');
       if (!this.activeChatId || !this.activeChatMeta?.otherUid) return;
       if (this.callState.active) return app.toast('يوجد مكالمة نشطة بالفعل', 'warning');
+
+      this._getAudioCtx();
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -407,9 +573,17 @@
         this.callState = {
           active: true, chatId, callId, otherUid, otherName, role: 'caller',
           pc, localStream: stream, mediaRecorder: null, recordedChunks: [],
-          startedAt: Date.now(), timerInt: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
+          startedAt: Date.now(), timerInt: null, ringTimeout: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
         };
-        this.showCallOverlay(`جارٍ الاتصال بـ ${otherName}...`);
+        this.showCallOverlay(`جارٍ الرنين على ${otherName}...`);
+        this.startRingtone('outgoing');
+
+        this.callState.ringTimeout = setTimeout(() => {
+          if (this.callState.active && this.ringtone.mode === 'outgoing') {
+            app.toast('لم يتم الرد على المكالمة', 'info');
+            this.endActiveCall(false);
+          }
+        }, 60000);
 
         pc.ontrack = (ev) => {
           const aud = document.getElementById('daman-remote-audio');
@@ -434,16 +608,24 @@
           const d = snap.data();
           if (!d) return;
           if (d.answer && !pc.currentRemoteDescription) {
+            this.stopRingtone();
+            if (this.callState.ringTimeout) { clearTimeout(this.callState.ringTimeout); this.callState.ringTimeout = null; }
             await pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(() => {});
             this.callState.startedAt = Date.now();
+            const ttl = document.getElementById('daman-call-status-title');
+            if (ttl) ttl.innerHTML = `<i class="fa-solid fa-phone-volume me-1"></i> متصل مع ${app.esc(otherName)}`;
             this.startCallTimer();
           }
-          if (d.status === 'ended' || d.status === 'rejected') this.endActiveCall(false);
+          if (d.status === 'ended' || d.status === 'rejected') {
+            if (d.status === 'rejected') app.toast('تم رفض المكالمة من الطرف الآخر', 'info');
+            this.endActiveCall(false);
+          }
         });
         this.callState.unsubRemoteCands = calleeCands.onSnapshot((snap) => {
           snap.docChanges().forEach((ch) => { if (ch.type === 'added') pc.addIceCandidate(new RTCIceCandidate(ch.doc.data())).catch(() => {}); });
         });
       } catch (err) {
+        this.stopRingtone();
         app.toast('تعذر بدء المكالمة — تأكد من السماح بصلاحية الميكروفون', 'error');
         this.endActiveCall(true);
       }
@@ -459,14 +641,23 @@
       }
       this._pendingIncoming = data;
       b.classList.remove('hidden');
-      b.innerHTML = `<div class="min-w-0"><div class="text-xs font-black animate-pulse">📞 مكالمة صوتية واردة (مسجّلة للضمان)</div><div class="text-[11px] font-bold truncate">${window.DamanApp.esc(data.callerName || 'مستخدم')}</div></div><div class="flex gap-1.5 shrink-0"><button onclick="DamanChat.acceptIncomingCall()" class="px-3 py-1.5 rounded-xl bg-white text-emerald-700 font-black text-xs">رد</button><button onclick="DamanChat.rejectIncomingCall()" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black text-xs">رفض</button></div>`;
+      b.innerHTML = `<div class="min-w-0"><div class="text-xs font-black animate-pulse">🔔 مكالمة صوتية واردة (مسجّلة للضمان)</div><div class="text-[11px] font-bold truncate">${window.DamanApp.esc(data.callerName || 'مستخدم')}</div></div><div class="flex gap-1.5 shrink-0"><button onclick="DamanChat.acceptIncomingCall()" class="px-3 py-1.5 rounded-xl bg-white text-emerald-700 font-black text-xs">رد</button><button onclick="DamanChat.rejectIncomingCall()" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black text-xs">رفض</button></div>`;
+
+      if (this.ringtone.mode !== 'incoming' || this._ringingCallId !== data.callId) {
+        this._ringingCallId = data.callId;
+        this.startRingtone('incoming');
+      }
     },
 
-    hideIncomingCallBanner() { document.getElementById('daman-incoming-call-bar')?.classList.add('hidden'); },
+    hideIncomingCallBanner() {
+      document.getElementById('daman-incoming-call-bar')?.classList.add('hidden');
+      if (this.ringtone.mode === 'incoming') this.stopRingtone();
+    },
 
     async rejectIncomingCall() {
       const app = window.DamanApp;
       const d = this._pendingIncoming;
+      this.stopRingtone();
       this.hideIncomingCallBanner();
       if (!d || !app.user) return;
       await app.db.collection('incomingCalls').doc(app.user.uid).delete().catch(() => {});
@@ -476,6 +667,7 @@
     async acceptIncomingCall() {
       const app = window.DamanApp;
       const d = this._pendingIncoming;
+      this.stopRingtone();
       this.hideIncomingCallBanner();
       if (!d || !app.user) return;
       try {
@@ -489,7 +681,7 @@
         this.callState = {
           active: true, chatId: d.chatId, callId: d.callId, otherUid: d.callerUid, otherName: d.callerName, role: 'callee',
           pc, localStream: stream, mediaRecorder: null, recordedChunks: [],
-          startedAt: Date.now(), timerInt: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
+          startedAt: Date.now(), timerInt: null, ringTimeout: null, unsubCallDoc: null, unsubRemoteCands: null, muted: false
         };
         this.showCallOverlay(`متصل مع ${d.callerName}`);
         this.startCallTimer();
@@ -537,7 +729,7 @@
         document.body.appendChild(ov);
       }
       ov.classList.remove('hidden');
-      ov.innerHTML = `<div class="min-w-0"><div class="font-black text-emerald-400 truncate"><i class="fa-solid fa-phone-volume me-1 animate-pulse"></i> ${window.DamanApp.esc(statusTxt)}</div><div id="daman-call-timer" class="text-[10px] text-amber-300 font-bold">🔴 مسجّلة تلقائياً لحفظ الحقوق</div></div><div class="flex items-center gap-1.5 shrink-0"><button onclick="DamanChat.toggleMuteCall()" id="daman-mute-btn" class="w-8 h-8 rounded-xl bg-slate-800 text-white"><i class="fa-solid fa-microphone"></i></button><button onclick="DamanChat.endActiveCall(false)" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black">إنهاء</button></div>`;
+      ov.innerHTML = `<div class="min-w-0"><div id="daman-call-status-title" class="font-black text-emerald-400 truncate"><i class="fa-solid fa-phone-volume me-1 animate-pulse"></i> ${window.DamanApp.esc(statusTxt)}</div><div id="daman-call-timer" class="text-[10px] text-amber-300 font-bold">🔔 جارٍ الرنين — المكالمة مسجّلة للضمان</div></div><div class="flex items-center gap-1.5 shrink-0"><button onclick="DamanChat.toggleMuteCall()" id="daman-mute-btn" class="w-8 h-8 rounded-xl bg-slate-800 text-white"><i class="fa-solid fa-microphone"></i></button><button onclick="DamanChat.endActiveCall(false)" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-black">إنهاء</button></div>`;
     },
 
     startCallTimer() {
@@ -561,6 +753,8 @@
     async endActiveCall(silent = false) {
       const app = window.DamanApp;
       const cs = this.callState;
+      this.stopRingtone();
+      if (cs.ringTimeout) { clearTimeout(cs.ringTimeout); cs.ringTimeout = null; }
       if (!cs.active) return;
       cs.active = false;
       if (cs.timerInt) clearInterval(cs.timerInt);
@@ -620,7 +814,7 @@
       app.toast('تم إرسال تذكرة الدعم بنجاح ✅', 'success');
     },
 
-    // ==================== CONTRACT CARD (SHOWS VEHICLES/ADDONS + PAYOUTS + DEDUCTIONS) ====================
+    // ==================== CONTRACT CARD ====================
     renderContractCard(a, app) {
       const uid = app.user?.uid;
       const isPayer = a.payerUid === uid;
@@ -752,6 +946,7 @@
       }
 
       if (this.activeChatId) {
+        const isAdmChat = this.isAdminChatRoom();
         const roomAgs = this.agreements.filter((a) => a.chatId === this.activeChatId && ['draft', 'funded', 'disputed'].includes(a.status));
         container.innerHTML = `
           <div class="flex flex-col h-[calc(100vh-145px)] space-y-2">
@@ -760,19 +955,21 @@
                 <button onclick="DamanChat.closeActiveChat()" class="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0"><i class="fa-solid fa-arrow-right"></i></button>
                 <div class="min-w-0">
                   <div class="text-xs font-black text-white truncate">${app.esc(this.activeChatMeta?.otherName || 'محادثة')}</div>
-                  <div class="text-[9.5px] text-emerald-400 font-bold">محادثة وعقود محمية بضمان سايت</div>
+                  <div class="text-[9.5px] ${isAdmChat ? 'text-purple-300' : 'text-emerald-400'} font-bold">${isAdmChat ? 'محادثة الإدارة (رسائل وصور وملفات فقط)' : 'محادثة وعقود محمية بضمان سايت'}</div>
                 </div>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
-                <button onclick="DamanChat.openCreateContractModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]"><i class="fa-solid fa-file-contract me-1"></i> عقد</button>
-                <button onclick="DamanChat.startVoiceCall()" class="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center"><i class="fa-solid fa-phone"></i></button>
+                ${!isAdmChat ? `
+                  <button onclick="DamanChat.openCreateContractModal()" class="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px]"><i class="fa-solid fa-file-contract me-1"></i> عقد</button>
+                  <button onclick="DamanChat.startVoiceCall()" class="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center" title="اتصال صوتي"><i class="fa-solid fa-phone"></i></button>
+                ` : '<span class="px-2 py-1 rounded-xl bg-purple-500/20 border border-purple-500/40 text-purple-200 text-[9.5px] font-black">رسائل وملفات</span>'}
               </div>
             </div>
 
             ${roomAgs.length ? `<div class="max-h-56 overflow-y-auto space-y-2">${roomAgs.map((a) => this.renderContractCard(a, app)).join('')}</div>` : ''}
 
             <div id="daman-chat-scroll" class="flex-1 overflow-y-auto space-y-2 p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-xs">
-              ${!this.activeMessages.length ? `<div class="text-center text-slate-500 py-10">ابدأ الاتفاق الآمن بالرسائل أو اضغط «عقد» لإبرام اتفاق رسمي مضمون.</div>` : this.activeMessages.map((m) => {
+              ${!this.activeMessages.length ? `<div class="text-center text-slate-500 py-10">${isAdmChat ? 'تواصل مع الإدارة بالرسائل النصية أو إرفاق الصور والملفات.' : 'ابدأ الاتفاق الآمن بالرسائل أو اضغط «عقد» لإبرام اتفاق رسمي مضمون.'}</div>` : this.activeMessages.map((m) => {
                 const mine = m.senderId === app.user.uid;
                 return `
                   <div class="flex ${mine ? 'justify-end' : 'justify-start'}">
