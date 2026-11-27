@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v63';
+const CACHE_NAME = 'damansite-v64';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -13,7 +13,7 @@ const CORE_ASSETS = [
   './chat-media.js?v=29',
   './projects-escrow.js?v=57',
   './company-panel.js?v=28',
-  './admin.js?v=58',
+  './admin.js?v=64',
   './admin-ext.js?v=57',
   './admin-ext2.js?v=28',
   './categories-ads.js?v=30',
