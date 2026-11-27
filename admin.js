@@ -1,5 +1,5 @@
 (function () {
-  const ADMIN_VER = '58';
+  const ADMIN_VER = '64';
 
   const AdminMod = {
     subTab: 'treasury',
@@ -759,7 +759,7 @@
       });
     },
 
-    // ==================== 4. DISPLAY NAME CHANGE REVIEW & KYC (ID + PASSPORT + OCR AUDIT) ====================
+    // ==================== 4. DISPLAY NAME CHANGE REVIEW & KYC (ID + PASSPORT + ACCURATE OCR AUDIT) ====================
     async approveNameChange(uid) {
       const app = window.DamanApp;
       const u = this.nameReqs.find((x) => x.id === uid);
@@ -888,6 +888,53 @@
       await app.sendNotification(uid, '❌ تم رفض مستندات التوثيق', reason.trim());
       app.toast('تم الرفض', 'info');
       this.loadTabData('kyc');
+    },
+
+    analyzeKycOcrAudit(k) {
+      const isPass = k.docType === 'passport';
+      const ex = (k.ocrExtracted && typeof k.ocrExtracted === 'object') ? k.ocrExtracted : {};
+      const norm = (v) => String(v || '')
+        .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .toUpperCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const fields = [
+        ['legalName', 'الاسم الكامل', k.legalName || '', ex.legalName || ''],
+        ['docNumber', isPass ? 'رقم جواز السفر' : 'الرقم القومي', k.nationalId || k.passportNumber || '', ex.docNumber || ''],
+        ['birthDate', 'تاريخ الميلاد', k.birthDate || '', ex.birthDate || ''],
+        ['legalAddress', 'العنوان', k.legalAddress || '', ex.legalAddress || '']
+      ];
+      if (isPass && (k.docExpiryDate || ex.expiryDate)) {
+        fields.push(['expiryDate', 'تاريخ الانتهاء', k.docExpiryDate || '', ex.expiryDate || '']);
+      }
+
+      const editedDiffs = [];
+      const manualFields = [];
+      const matchedFields = [];
+
+      fields.forEach(([field, label, userVal, ocrVal]) => {
+        const uClean = String(userVal || '').trim();
+        const oClean = String(ocrVal || '').trim();
+        const uNorm = norm(uClean);
+        const oNorm = norm(oClean);
+        if (!uNorm) return;
+
+        if (!oNorm) {
+          manualFields.push({ field, label, userValue: uClean, ocrValue: 'لم تُقرأ آلياً (إدخال يدوي)' });
+        } else if (uNorm !== oNorm) {
+          editedDiffs.push({ field, label, userValue: uClean, ocrValue: oClean });
+        } else {
+          matchedFields.push({ field, label, value: uClean });
+        }
+      });
+
+      const hasEdited = editedDiffs.length > 0;
+      const hasManual = manualFields.length > 0;
+      const isFullAutoMatch = !hasEdited && !hasManual && matchedFields.length >= 3 && k.ocrStatus === 'done';
+
+      return { editedDiffs, manualFields, matchedFields, hasEdited, hasManual, isFullAutoMatch };
     },
 
     // ==================== 5. CONTRACTS / DISPUTES ====================
@@ -1320,36 +1367,68 @@
           ${!pending.length ? `<div class="glass-card rounded-2xl p-5 text-center text-slate-400">لا توجد طلبات توثيق معلّقة ✅</div>` : pending.map((k) => {
             const isPass = k.docType === 'passport';
             const isComp = k.accountType === 'company' || k.accountType === 'supplier';
-            const diffs = Array.isArray(k.ocrDiffs) ? k.ocrDiffs : [];
-            const ocrEdited = !!k.ocrEdited && diffs.length > 0;
+            const audit = this.analyzeKycOcrAudit(k);
 
             let ocrBox = '';
-            if (ocrEdited) {
+            let ocrBadge = '';
+            let cardBorder = 'border-amber-500/50';
+
+            if (audit.hasEdited) {
+              cardBorder = 'border-2 border-rose-500/70';
+              ocrBadge = `<span class="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-black text-[9.5px]">✏️ عدّل OCR</span>`;
               ocrBox = `
                 <div class="p-2.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/70 space-y-1.5">
-                  <div class="font-black text-rose-300 text-[10.5px]">⚠️ تنبيه مهم: المستخدم عدّل بيانات القراءة التلقائية (OCR) يدوياً!</div>
+                  <div class="font-black text-rose-300 text-[10.5px]">⚠️ تنبيه: المستخدم عدّل بيانات القراءة الآلية (OCR) يدوياً!</div>
                   <div class="space-y-1">
-                    ${diffs.map((d) => `
+                    ${audit.editedDiffs.map((d) => `
                       <div class="p-1.5 rounded-lg bg-slate-950/90 border border-rose-500/30 text-[10px] space-y-0.5">
-                        <div class="font-black text-amber-300">${app.esc(d.label || d.field)}:</div>
-                        <div class="text-sky-300">🤖 قراءة النظام: <b>${app.esc(d.ocrValue || '—')}</b></div>
-                        <div class="text-rose-200">✏️ تعديل المستخدم: <b>${app.esc(d.userValue || '—')}</b></div>
+                        <div class="font-black text-amber-300">${app.esc(d.label)}:</div>
+                        <div class="text-sky-300">🤖 قراءة النظام: <b>${app.esc(d.ocrValue)}</b></div>
+                        <div class="text-rose-200">✏️ تعديل المستخدم: <b>${app.esc(d.userValue)}</b></div>
+                      </div>`).join('')}
+                    ${audit.manualFields.map((m) => `
+                      <div class="p-1.5 rounded-lg bg-slate-950/90 border border-sky-500/30 text-[10px] space-y-0.5">
+                        <div class="font-black text-sky-300">✍️ ${app.esc(m.label)} (إدخال يدوي):</div>
+                        <div class="text-white"><b>${app.esc(m.userValue)}</b></div>
                       </div>`).join('')}
                   </div>
                 </div>`;
-            } else if (k.ocrStatus === 'done') {
-              ocrBox = `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-[10px]">🤖 تقرير القراءة الآلية (OCR): البيانات مطابقة تماماً لقراءة النظام بدون تعديل يدوي ✅</div>`;
-            } else if (k.ocrStatus === 'failed') {
-              ocrBox = `<div class="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 font-bold text-[10px]">ℹ️ تم إدخال البيانات يدوياً (تعذرت القراءة الآلية وقت التصوير — راجع الصور بدقة).</div>`;
+            } else if (audit.hasManual && audit.matchedFields.length === 0) {
+              cardBorder = 'border-2 border-amber-500/70';
+              ocrBadge = `<span class="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-black text-[9.5px]">✍️ إدخال يدوي</span>`;
+              ocrBox = `
+                <div class="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/60 text-amber-200 space-y-1 text-[10.5px]">
+                  <div class="font-black text-amber-300">✍️ تم إدخال جميع البيانات يدوياً بواسطة المستخدم</div>
+                  <div class="text-[10px] text-slate-200 leading-relaxed">لم تُقرأ هذه الخانات آلياً بالـ OCR (إما لعدم وضوح الإضاءة أو للكتابة اليدوية المباشرة) — يرجى مطابقة البيانات مع صور المستند بدقة قبل الاعتماد.</div>
+                </div>`;
+            } else if (audit.hasManual && audit.matchedFields.length > 0) {
+              cardBorder = 'border-2 border-sky-500/60';
+              ocrBadge = `<span class="px-2 py-0.5 rounded-lg bg-sky-500/25 text-sky-200 font-black text-[9.5px]">✍️ قراءة جزئية + يدوي</span>`;
+              ocrBox = `
+                <div class="p-2.5 rounded-xl bg-sky-500/15 border border-sky-500/50 space-y-1.5 text-[10px]">
+                  <div class="font-black text-sky-300">✍️ قراءة آلية جزئية (${audit.matchedFields.length}) + إدخال يدوي (${audit.manualFields.length}) — راجع الحقول اليدوية:</div>
+                  <div class="space-y-1">
+                    ${audit.manualFields.map((m) => `
+                      <div class="p-1.5 rounded-lg bg-slate-950/90 border border-sky-500/30">
+                        <span class="text-amber-300 font-black">${app.esc(m.label)} (يدوي):</span> <b class="text-white">${app.esc(m.userValue)}</b>
+                      </div>`).join('')}
+                  </div>
+                </div>`;
+            } else if (audit.isFullAutoMatch) {
+              ocrBadge = `<span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-black text-[9.5px]">🤖 مطابق للـ OCR</span>`;
+              ocrBox = `<div class="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-[10px]">🤖 تقرير القراءة الآلية (OCR): جميع البيانات قُرئت آلياً من المستند ومطابقة 100% بدون تعديل يدوي ✅</div>`;
+            } else {
+              ocrBadge = `<span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-[9.5px]">✍️ إدخال يدوي</span>`;
+              ocrBox = `<div class="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-200 font-bold text-[10px]">✍️ تم إدخال البيانات يدوياً — راجع صور المستند قبل الاعتماد.</div>`;
             }
 
             return `
-              <div class="glass-card rounded-2xl p-3.5 space-y-2 ${ocrEdited ? 'border-2 border-rose-500/70' : 'border-amber-500/50'}">
+              <div class="glass-card rounded-2xl p-3.5 space-y-2 ${cardBorder}">
                 <div class="flex justify-between items-start gap-2">
                   <div>
                     <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
                       <span class="px-2 py-0.5 rounded-lg font-black text-[9.5px] ${isPass ? 'bg-sky-500/20 text-sky-300' : 'bg-amber-500/20 text-amber-300'}">${isPass ? '🛂 جواز سفر' : '🪪 بطاقة شخصية'}</span>
-                      ${ocrEdited ? `<span class="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-black text-[9.5px]">✏️ عدّل OCR</span>` : ''}
+                      ${ocrBadge}
                     </div>
                     <b class="text-white block">👤 بالتطبيق: ${app.esc(k.displayName || '—')}</b>
                     <span class="text-[10.5px] text-emerald-300 font-bold">🪪 بالمستند: ${app.esc(k.legalName || '—')}</span>
