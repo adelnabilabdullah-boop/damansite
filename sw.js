@@ -1,4 +1,4 @@
-const CACHE_NAME = 'damansite-v61';
+const CACHE_NAME = 'damansite-v62';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -25,7 +25,7 @@ const CORE_ASSETS = [
   './kyc-vault.js?v=36',
   './share-qr.js?v=36',
   './system-sync.js?v=60',
-  './kyc-bday-qr.js?v=39',
+  './kyc-bday-qr.js?v=62',
   './admin-growth-ops.js?v=40',
   './wallet-sla.js?v=42',
   './security-verify-ban.js?v=43',
