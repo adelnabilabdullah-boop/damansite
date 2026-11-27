@@ -71,10 +71,13 @@
       }
     };
 
-    // ==================== 1. VOICE NOTES (MIC) ====================
+    // ==================== 1. VOICE NOTES (MIC - BLOCKED IN ADMIN CHAT) ====================
     Chat.startVoiceNote = async function () {
       const app = window.DamanApp;
       if (!this.activeChatId || !app.user) return;
+      if (typeof this.isAdminChatRoom === 'function' && this.isAdminChatRoom()) {
+        return app.toast('الرسائل الصوتية (المايك) غير متاحة في محادثة الإدارة — استخدم الرسائل والصور والملفات فقط', 'warning');
+      }
       if (this.activeChatMeta?.frozen && !app.hasAdminAccess()) return app.toast('المحادثة مجمّدة من الإدارة 🔒', 'error');
       if (this.callState?.active) return app.toast('الميكروفون مستخدم حالياً في المكالمة الصوتية', 'warning');
       if (this.voiceRec.recording) return;
@@ -290,7 +293,9 @@
       const locked = this.activeChatMeta?.frozen && !app.hasAdminAccess();
       if (locked) { bar.innerHTML = ''; return; }
 
-      if (this.voiceRec.recording) {
+      const isAdmChat = typeof this.isAdminChatRoom === 'function' && this.isAdminChatRoom();
+
+      if (this.voiceRec.recording && !isAdmChat) {
         const elapsed = this._chatMediaHelpers.fmtDuration(Math.floor((Date.now() - this.voiceRec.startedAt) / 1000));
         bar.innerHTML = `
           <div class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-rose-600/20 border border-rose-500 text-xs">
@@ -303,6 +308,20 @@
               <button type="button" onclick="DamanChat.stopVoiceNote(true)" class="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 font-bold text-[10.5px]">إلغاء</button>
               <button type="button" onclick="DamanChat.stopVoiceNote(false)" class="px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10.5px]"><i class="fa-solid fa-paper-plane me-1"></i>إرسال</button>
             </div>
+          </div>`;
+        return;
+      }
+
+      if (isAdmChat) {
+        bar.innerHTML = `
+          <div class="grid grid-cols-2 gap-1.5 text-[10.5px] font-black">
+            <button type="button" onclick="DamanChat._triggerNativeImgPick()" class="py-1.5 px-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 flex items-center justify-center gap-1 active:scale-95">
+              <i class="fa-solid fa-image"></i><span>رفع صورة</span>
+            </button>
+            <label class="py-1.5 px-2 rounded-xl bg-slate-900 border border-slate-700 text-sky-300 flex items-center justify-center gap-1 cursor-pointer active:scale-95">
+              <i class="fa-solid fa-paperclip"></i><span>رفع ملف</span>
+              <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar,image/*" class="hidden" onchange="DamanChat.sendChatFile(this)" />
+            </label>
           </div>`;
         return;
       }
@@ -334,7 +353,9 @@
     Chat._enhanceChatRoomDOM = function (container, app) {
       if (!this.activeChatId) return;
 
-      // 1. Inject Media Toolbar right above the send form & widen text input
+      const isAdmChat = typeof this.isAdminChatRoom === 'function' && this.isAdminChatRoom();
+
+      // 1. Inject Media Toolbar right above the send form
       const form = container.querySelector('form[onsubmit*="DamanChat.sendMessage"]');
       if (form && !document.getElementById('daman-chat-media-bar')) {
         const oldImgLbl = form.querySelector('label');
@@ -345,8 +366,8 @@
         form.parentNode.insertBefore(bar, form);
         this._syncMediaToolbarUI();
 
-        // Add quick mic icon inside form next to send button too
-        if (!(this.activeChatMeta?.frozen && !app.hasAdminAccess())) {
+        // Add quick mic icon inside form ONLY for normal user-to-user chats (NOT Admin chat)
+        if (!isAdmChat && !(this.activeChatMeta?.frozen && !app.hasAdminAccess())) {
           const micBtn = document.createElement('button');
           micBtn.type = 'button';
           micBtn.title = 'تسجيل رسالة صوتية';
@@ -422,7 +443,6 @@
       });
     };
 
-    // Wrap render & closeActiveChat cleanly without touching chat-support.js
     const origRender = Chat.render.bind(Chat);
     Chat.render = function (container, app) {
       origRender(container, app);
