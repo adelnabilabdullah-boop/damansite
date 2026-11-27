@@ -89,7 +89,7 @@
       return false;
     },
 
-    // ==================== 1. BROWSE-ONLY GATE (VIEW EVERYTHING & SUPPORT, LOCK ACTIONS & PHONES) ====================
+    // ==================== 1. BROWSE-ONLY GATE ====================
     maskVisiblePhonesForUnverified() {
       const app = window.DamanApp;
       if (!app || this.isVerifiedOrAdmin()) return;
@@ -157,9 +157,8 @@
       const app = window.DamanApp;
       if (!app) return;
 
-      // 1) Wallet Deposit / Withdraw / Buy Package / KYC modal override
-      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV61) {
-        DamanWallet._kycOcrOverriddenV61 = true;
+      if (window.DamanWallet && !DamanWallet._kycOcrOverriddenV63) {
+        DamanWallet._kycOcrOverriddenV63 = true;
 
         if (typeof DamanWallet.openDepositModal === 'function') {
           const origDep = DamanWallet.openDepositModal.bind(DamanWallet);
@@ -193,9 +192,8 @@
         };
       }
 
-      // 2) Chat direct open, messages & calls gate (Admin & Support & AI ALWAYS allowed!)
-      if (window.DamanChat && !DamanChat._kycGatePatchedV61) {
-        DamanChat._kycGatePatchedV61 = true;
+      if (window.DamanChat && !DamanChat._kycGatePatchedV63) {
+        DamanChat._kycGatePatchedV63 = true;
 
         if (typeof DamanChat.openDirectChat === 'function') {
           const origOpenChat = DamanChat.openDirectChat.bind(DamanChat);
@@ -225,9 +223,8 @@
         }
       }
 
-      // 3) External contact / phone reveal gate on ads & profiles
-      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV61) {
-        DamanPostContact._kycGatePatchedV61 = true;
+      if (window.DamanPostContact && typeof DamanPostContact.requestExternalContact === 'function' && !DamanPostContact._kycGatePatchedV63) {
+        DamanPostContact._kycGatePatchedV63 = true;
         const origExt = DamanPostContact.requestExternalContact.bind(DamanPostContact);
         DamanPostContact.requestExternalContact = (...args) => {
           if (!this.requireVerifiedForAction('إظهار رقم المعلن والتواصل معه')) return;
@@ -235,9 +232,8 @@
         };
       }
 
-      // 4) Projects / Market actions gate (Post, Boost/Purchase, 3x Inspection, VIP Labor)
-      if (window.DamanProjects && !DamanProjects._kycGatePatchedV61) {
-        DamanProjects._kycGatePatchedV61 = true;
+      if (window.DamanProjects && !DamanProjects._kycGatePatchedV63) {
+        DamanProjects._kycGatePatchedV63 = true;
 
         if (typeof DamanProjects.openPostModal === 'function') {
           const origPost = DamanProjects.openPostModal.bind(DamanProjects);
@@ -298,7 +294,6 @@
         const target = ev.target;
         if (!target || typeof target.closest !== 'function') return;
 
-        // Manual click on any "توثيق الحساب" button always opens our upgraded modal
         const kycBtn = target.closest('button[onclick*="openKycModal"], button[onclick*="openKycSafe"]');
         if (kycBtn && !kycBtn.closest('#daman-kyc-modal')) {
           ev.preventDefault();
@@ -310,7 +305,6 @@
         if (this.isVerifiedOrAdmin()) return;
         if (target.closest('#daman-kyc-modal') || target.closest('#daman-ai-support-modal')) return;
 
-        // Intercept action buttons (deposit / withdraw / buy / boost / post / chat) safely without loop
         const actionBtn = target.closest('button');
         if (actionBtn) {
           const oc = (actionBtn.getAttribute('onclick') || '').toLowerCase();
@@ -341,7 +335,6 @@
           }
         }
 
-        // Block tel: and non-platform wa.me links inside ads/profiles (allow official support WhatsApp!)
         const link = target.closest('a[href]');
         if (link) {
           const href = (link.getAttribute('href') || '').toLowerCase();
@@ -364,7 +357,7 @@
       }, true);
     },
 
-    // ==================== 2. CLIENT-SIDE OCR ENGINE (TESSERACT.JS + MRZ + EGYPTIAN ID) ====================
+    // ==================== 2. CLIENT-SIDE OCR ENGINE ====================
     loadTesseract() {
       if (window.Tesseract) return Promise.resolve(window.Tesseract);
       if (this._tesseractPromise) return this._tesseractPromise;
@@ -555,17 +548,18 @@
         if (statusBox) {
           if (foundCount > 0) {
             statusBox.className = 'p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/50 text-emerald-200 text-[10.5px] font-bold leading-relaxed';
-            statusBox.innerHTML = `✅ <b>تمت القراءة التلقائية (${foundCount} حقول):</b> راجع البيانات المكتوبة وعدّل أي حرف غير دقيق (سيصل للإدارة تقرير بأي تعديل يدوي).`;
+            statusBox.innerHTML = `✅ <b>تمت القراءة التلقائية (${foundCount} حقول):</b> راجع البيانات المكتوبة وعدّل أي حرف غير دقيق (سيصل للإدارة تقرير بأي إدخال أو تعديل يدوي).`;
           } else {
             statusBox.className = 'p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-200 text-[10.5px] font-bold leading-relaxed';
-            statusBox.innerHTML = `⚠️ لم تتضح النصوص آلياً بسبب الإضاءة — يمكنك كتابة بياناتك يدوياً بدقة ومطابقتها مع الصورة.`;
+            statusBox.innerHTML = `⚠️ لم تتضح النصوص آلياً بسبب الإضاءة — اكتب بياناتك يدوياً بدقة (وستظهر للإدارة كإدخال يدوي للمطابقة).`;
           }
         }
       } catch (err) {
         this._ocrState.status = 'failed';
+        this.refreshFieldEditBadges();
         if (statusBox) {
           statusBox.className = 'p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-200 text-[10.5px] font-bold';
-          statusBox.innerHTML = `ℹ️ تعذرت القراءة الآلية حالياً — أدخل البيانات يدوياً كما في المستند.`;
+          statusBox.innerHTML = `ℹ️ تعذرت القراءة الآلية حالياً — أدخل البيانات يدوياً كما في المستند (وستظهر للإدارة كإدخال يدوي).`;
         }
       }
     },
@@ -608,32 +602,78 @@
 
       const diffs = [];
       map.forEach(([field, label, userVal, ocrVal]) => {
-        const uNorm = this.normalizeCompare(userVal);
-        const oNorm = this.normalizeCompare(ocrVal);
-        if (oNorm && uNorm !== oNorm) {
-          diffs.push({ field, label, ocrValue: String(ocrVal).trim(), userValue: String(userVal).trim() });
+        const uClean = String(userVal || '').trim();
+        const oClean = String(ocrVal || '').trim();
+        const uNorm = this.normalizeCompare(uClean);
+        const oNorm = this.normalizeCompare(oClean);
+
+        if (!uNorm) return;
+
+        if (!oNorm) {
+          diffs.push({
+            field,
+            label,
+            changeType: 'manual_entry',
+            ocrValue: 'لم تُقرأ آلياً (إدخال يدوي)',
+            userValue: uClean
+          });
+        } else if (uNorm !== oNorm) {
+          diffs.push({
+            field,
+            label,
+            changeType: 'edited_ocr',
+            ocrValue: oClean,
+            userValue: uClean
+          });
         }
       });
       return diffs;
     },
 
     refreshFieldEditBadges() {
+      const ex = this._ocrState.extracted || {};
       const diffs = this.computeOcrDiffs();
-      const diffSet = new Set(diffs.map((d) => d.field));
+      const diffByField = {};
+      diffs.forEach((d) => { diffByField[d.field] = d; });
+
       const ids = [
-        ['legalName', 'kyc-ed-tag-name'],
-        ['docNumber', 'kyc-ed-tag-docnum'],
-        ['birthDate', 'kyc-ed-tag-bday'],
-        ['expiryDate', 'kyc-ed-tag-exp'],
-        ['legalAddress', 'kyc-ed-tag-addr']
+        ['legalName', 'kyc-ed-tag-name', 'kyc-f-name'],
+        ['docNumber', 'kyc-ed-tag-docnum', 'kyc-f-docnum'],
+        ['birthDate', 'kyc-ed-tag-bday', 'kyc-f-bday'],
+        ['expiryDate', 'kyc-ed-tag-exp', 'kyc-f-exp'],
+        ['legalAddress', 'kyc-ed-tag-addr', 'kyc-f-addr']
       ];
-      ids.forEach(([field, tagId]) => {
+
+      ids.forEach(([field, tagId, inpId]) => {
         const el = document.getElementById(tagId);
-        if (el) el.classList.toggle('hidden', !diffSet.has(field));
+        const inp = document.getElementById(inpId);
+        if (!el || !inp) return;
+
+        const val = this.normalizeCompare(inp.value);
+        const ocrVal = this.normalizeCompare(ex[field] || '');
+        const diff = diffByField[field];
+
+        if (!val) {
+          el.classList.add('hidden');
+          return;
+        }
+
+        if (diff && diff.changeType === 'edited_ocr') {
+          el.className = 'px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-black';
+          el.textContent = '✏️ معدّل يدوياً';
+        } else if (diff && diff.changeType === 'manual_entry') {
+          el.className = 'px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[9px] font-black';
+          el.textContent = '✍️ إدخال يدوي';
+        } else if (ocrVal && val === ocrVal) {
+          el.className = 'px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-black';
+          el.textContent = '🤖 قراءة آلية';
+        } else {
+          el.classList.add('hidden');
+        }
       });
     },
 
-    // ==================== 3. UPGRADED KYC MODAL (NATIONAL ID OR PASSPORT + OCR + ANTI-DUPLICATE) ====================
+    // ==================== 3. UPGRADED KYC MODAL ====================
     switchDocType(type) {
       this._docType = type === 'passport' ? 'passport' : 'national_id';
       this._photos.front = '';
@@ -819,6 +859,8 @@
             </div>
           </form>
         </div>`;
+
+      this.refreshFieldEditBadges();
     },
 
     async submitKyc(e) {
@@ -860,7 +902,7 @@
         }
       }
 
-      await app.withLock('submitKycV61', async () => {
+      await app.withLock('submitKycV63', async () => {
         const btn = document.getElementById('kyc-submit-v58-btn');
         const resetBtn = () => {
           if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> إرسال للتوثيق والمراجعة'; }
@@ -916,6 +958,10 @@
 
           const ocrDiffs = this.computeOcrDiffs();
           const ocrEdited = ocrDiffs.length > 0;
+          const ocrManualCount = ocrDiffs.filter((d) => d.changeType === 'manual_entry').length;
+          const ocrEditedCount = ocrDiffs.filter((d) => d.changeType === 'edited_ocr').length;
+          const finalOcrStatus = this._ocrState.status === 'running' ? 'manual_before_ocr' : this._ocrState.status;
+
           const payload = {
             uid: app.user.uid,
             displayName: app.profile?.name || '',
@@ -936,9 +982,11 @@
             selfieMedia,
             crMedia,
             taxMedia,
-            ocrStatus: this._ocrState.status,
+            ocrStatus: finalOcrStatus,
             ocrExtracted: this._ocrState.extracted || {},
             ocrEdited,
+            ocrManualCount,
+            ocrEditedCount,
             ocrDiffs,
             status: 'pending',
             submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -949,7 +997,11 @@
           await app.db.collection('users').doc(app.user.uid).update({ kycStatus: 'pending', kycDocType: this._docType });
 
           const docTag = isPass ? '🛂 جواز سفر' : '🪪 بطاقة شخصية';
-          const editTag = ocrEdited ? ' ⚠️ (عدّل بيانات القراءة الآلية)' : '';
+          const editTag = ocrEditedCount > 0
+            ? ' ⚠️ (عدّل بيانات القراءة الآلية)'
+            : ocrManualCount > 0
+            ? ' ✍️ (إدخال يدوي للبيانات)'
+            : ' ✅ (مطابق للـ OCR)';
           await app.sendNotification(
             'ADMIN',
             `طلب توثيق جديد (${docTag})${editTag}`,
@@ -988,8 +1040,8 @@
       this.attachClickAndLinkGate();
       this.patchModuleActionGates();
 
-      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV61) {
-        app._kycGateTabHookedV61 = true;
+      if (typeof app.renderCurrentTab === 'function' && !app._kycGateTabHookedV63) {
+        app._kycGateTabHookedV63 = true;
         const origRender = app.renderCurrentTab.bind(app);
         app.renderCurrentTab = () => {
           origRender();
