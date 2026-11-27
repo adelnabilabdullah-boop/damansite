@@ -1,6 +1,7 @@
 (function () {
   const KycBdayQR = {
     _booted: false,
+    _obsTimer: null,
     _qrStream: null,
     _qrScanTimer: null,
     _camStream: null,
@@ -92,7 +93,6 @@
             <button type="button" onclick="DamanKycBdayQR.closeQrScannerModal()" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-200"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
-          <!-- 1. Live Camera QR Scanner -->
           <div class="p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2 text-center">
             <div class="flex items-center justify-between">
               <span class="font-black text-emerald-300 text-[11px]"><i class="fa-solid fa-camera me-1"></i> 1. مسح رمز QR بالكاميرا</span>
@@ -108,13 +108,11 @@
             <div id="daman-qr-scan-status" class="text-[10.5px] text-slate-400">اضغط «تشغيل الكاميرا» لمسح كود العقد مباشرة</div>
           </div>
 
-          <!-- 2. Scan QR from Image File -->
           <label class="block p-2.5 rounded-2xl bg-slate-950 border border-dashed border-sky-500/50 text-center cursor-pointer">
             <span class="font-black text-sky-300 text-[11px]"><i class="fa-solid fa-image me-1"></i> 2. أو اختر صورة / لقطة شاشة لرمز QR</span>
             <input type="file" accept="image/*" class="hidden" onchange="DamanKycBdayQR.scanQrFromImageFile(this)" />
           </label>
 
-          <!-- 3. Manual Ticket Code Input -->
           <form onsubmit="DamanKycBdayQR.submitManualTicket(event)" class="p-3 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
             <label class="block font-black text-amber-300 text-[11px]"><i class="fa-solid fa-keyboard me-1"></i> 3. أو اكتب كود العقد يدوياً</label>
             <div class="flex gap-1.5">
@@ -124,7 +122,6 @@
           </form>
         </div>`;
 
-      // Auto-start camera right away on open
       setTimeout(() => this.startCameraQrScan(), 120);
     },
 
@@ -252,7 +249,7 @@
       if (window.DamanShareQR) DamanShareQR.openContractVerifyModal(ticket);
     },
 
-    // ==================== 2. KYC LIVE CAMERA CAPTURE + ID EXPIRY DATE VALIDATION ====================
+    // ==================== 2. KYC LIVE CAMERA CAPTURE + SAFE LEGACY ENHANCER ====================
     closeInAppCamera() {
       if (this._camStream) {
         try { this._camStream.getTracks().forEach((t) => t.stop()); } catch (e) {}
@@ -343,95 +340,107 @@
     },
 
     enhanceKycModalDOM() {
-      const app = window.DamanApp;
-      const modal = document.getElementById('daman-kyc-modal');
-      if (!modal || modal.classList.contains('hidden')) return;
-      const form = modal.querySelector('form');
-      if (!form) return;
+      try {
+        const app = window.DamanApp;
+        const modal = document.getElementById('daman-kyc-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        const form = modal.querySelector('form');
+        if (!form || form.dataset.bdayEnhancedV62 === '1') return;
 
-      // 1. Force Camera Capture (no old gallery uploads) on all KYC file inputs
-      const fileInputs = Array.from(form.querySelectorAll('input[type="file"]'));
-      fileInputs.forEach((inp, idx) => {
-        if (inp.dataset.liveCamEnforced) return;
-        inp.dataset.liveCamEnforced = '1';
-        if (!inp.id) inp.id = `kyc-live-inp-${idx}`;
-
-        const lblText = (inp.parentElement?.textContent || '').trim();
-        const isSelfie = lblText.includes('سيلفي') || lblText.toLowerCase().includes('selfie');
-        const facing = isSelfie ? 'user' : 'environment';
-
-        inp.setAttribute('accept', 'image/*');
-        inp.setAttribute('capture', facing);
-
-        const camBtn = document.createElement('button');
-        camBtn.type = 'button';
-        camBtn.className = 'mt-1.5 w-full py-1.5 px-2.5 rounded-xl bg-amber-500/20 border border-amber-500/60 text-amber-300 font-black text-[10.5px] flex items-center justify-center gap-1';
-        camBtn.innerHTML = `<i class="fa-solid fa-camera"></i><span>${isSelfie ? '📸 تصوير سيلفي مباشر بالكاميرا' : '📸 تصوير المستند بالكاميرا مباشرة'}</span>`;
-        camBtn.onclick = (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          this.openInAppCameraForInput(inp.id, facing, lblText || 'تصوير مستند التوثيق');
-        };
-        if (inp.parentElement) inp.parentElement.appendChild(camBtn);
-      });
-
-      // 2. Inject National ID Expiry Date input + Camera-Only Security Notice
-      if (!document.getElementById('kyc-id-expiry')) {
-        const notice = document.createElement('div');
-        notice.className = 'p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-[10.5px] text-amber-200 font-bold leading-relaxed';
-        notice.innerHTML = '📸 <b>التوثيق بالكاميرا المباشرة فقط:</b> يُشترط تصوير البطاقة والسيلفي والسجل التجاري مباشرة بالكاميرا، وأن تكون البطاقة سارية غير منتهية.';
-        form.insertBefore(notice, form.firstElementChild);
-
-        const expWrap = document.createElement('div');
-        expWrap.className = 'p-2.5 rounded-2xl bg-slate-950 border border-rose-500/40 space-y-1';
-        expWrap.innerHTML = `
-          <label class="block text-[10.5px] font-black text-rose-300">
-            📅 تاريخ انتهاء البطاقة الشخصية (مدوّن بظهر البطاقة) *
-          </label>
-          <input id="kyc-id-expiry" type="date" required value="${app.esc(app.profile?.idExpiryDate || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
-          <div class="text-[9.5px] text-slate-400">لن يُقبل توثيق الحساب إذا كانت البطاقة منتهية، وسيصلك تنبيه تلقائي عند انتهائها مستقبلاً لتجديدها.</div>`;
-
-        const firstFileParent = fileInputs[0]?.parentElement;
-        if (firstFileParent && firstFileParent.parentNode === form) {
-          form.insertBefore(expWrap, firstFileParent);
-        } else {
-          const submitBtn = form.querySelector('button[type="submit"]');
-          if (submitBtn) form.insertBefore(expWrap, submitBtn);
-          else form.appendChild(expWrap);
+        // Skip legacy DOM injection on the upgraded OCR + Passport modal (DamanKycGate handles it natively)
+        const onsubmitAttr = form.getAttribute('onsubmit') || '';
+        if (onsubmitAttr.includes('DamanKycGate')) {
+          form.dataset.bdayEnhancedV62 = '1';
+          return;
         }
-      }
 
-      // 3. Capture-phase submit validator: block expired ID + save idExpiryDate
-      if (!form.dataset.expiryGuardBound) {
-        form.dataset.expiryGuardBound = '1';
-        form.addEventListener('submit', (ev) => {
-          const expInp = document.getElementById('kyc-id-expiry');
-          const expVal = (expInp?.value || '').trim();
-          const today = app.todayLocal();
+        // Mark enhanced BEFORE mutating DOM so it can NEVER loop
+        form.dataset.bdayEnhancedV62 = '1';
 
-          if (!expVal) {
+        const fileInputs = Array.from(form.querySelectorAll('input[type="file"]'));
+        fileInputs.forEach((inp, idx) => {
+          if (inp.dataset.liveCamEnforced) return;
+          inp.dataset.liveCamEnforced = '1';
+          if (!inp.id) inp.id = `kyc-live-inp-${idx}`;
+
+          const lblText = (inp.parentElement?.textContent || '').trim();
+          const isSelfie = lblText.includes('سيلفي') || lblText.toLowerCase().includes('selfie');
+          const facing = isSelfie ? 'user' : 'environment';
+
+          inp.setAttribute('accept', 'image/*');
+          inp.setAttribute('capture', facing);
+
+          const camBtn = document.createElement('button');
+          camBtn.type = 'button';
+          camBtn.className = 'mt-1.5 w-full py-1.5 px-2.5 rounded-xl bg-amber-500/20 border border-amber-500/60 text-amber-300 font-black text-[10.5px] flex items-center justify-center gap-1';
+          camBtn.innerHTML = `<i class="fa-solid fa-camera"></i><span>${isSelfie ? '📸 تصوير سيلفي مباشر بالكاميرا' : '📸 تصوير المستند بالكاميرا مباشرة'}</span>`;
+          camBtn.onclick = (ev) => {
             ev.preventDefault();
-            ev.stopImmediatePropagation();
-            return app.toast('يرجى إدخال تاريخ انتهاء البطاقة الشخصية أولاً', 'error');
-          }
-          if (expVal <= today) {
-            ev.preventDefault();
-            ev.stopImmediatePropagation();
-            return app.toast('❌ عذراً، البطاقة الشخصية منتهية الصلاحية! يرجى تجديد البطاقة أولاً ثم إعادة التصوير.', 'error');
-          }
+            ev.stopPropagation();
+            this.openInAppCameraForInput(inp.id, facing, lblText || 'تصوير مستند التوثيق');
+          };
+          if (inp.parentElement) inp.parentElement.appendChild(camBtn);
+        });
 
-          // Persist idExpiryDate after original submit handler saves KYC
-          setTimeout(async () => {
-            if (!app.user || !app.db) return;
-            try {
-              await Promise.all([
-                app.db.collection('kycRequests').doc(app.user.uid).set({ idExpiryDate: expVal }, { merge: true }).catch(() => {}),
-                app.db.collection('users').doc(app.user.uid).set({ idExpiryDate: expVal, idExpiryExpired: false }, { merge: true }).catch(() => {})
-              ]);
-            } catch (e) {}
-          }, 900);
-        }, true);
-      }
+        if (!document.getElementById('kyc-id-expiry')) {
+          const notice = document.createElement('div');
+          notice.className = 'p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/50 text-[10.5px] text-amber-200 font-bold leading-relaxed';
+          notice.innerHTML = '📸 <b>التوثيق بالكاميرا المباشرة فقط:</b> يُشترط تصوير البطاقة والسيلفي والسجل التجاري مباشرة بالكاميرا، وأن تكون البطاقة سارية غير منتهية.';
+          form.insertBefore(notice, form.firstElementChild);
+
+          const expWrap = document.createElement('div');
+          expWrap.className = 'p-2.5 rounded-2xl bg-slate-950 border border-rose-500/40 space-y-1';
+          expWrap.innerHTML = `
+            <label class="block text-[10.5px] font-black text-rose-300">
+              📅 تاريخ انتهاء البطاقة الشخصية (مدوّن بظهر البطاقة) *
+            </label>
+            <input id="kyc-id-expiry" type="date" required value="${app.esc(app.profile?.idExpiryDate || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold" />
+            <div class="text-[9.5px] text-slate-400">لن يُقبل توثيق الحساب إذا كانت البطاقة منتهية، وسيصلك تنبيه تلقائي عند انتهائها مستقبلاً لتجديدها.</div>`;
+
+          const firstFileParent = fileInputs[0]?.parentElement;
+          const submitBtn = form.querySelector('button[type="submit"]');
+          if (firstFileParent && firstFileParent.parentNode === form) {
+            form.insertBefore(expWrap, firstFileParent);
+          } else if (submitBtn && submitBtn.parentNode === form) {
+            form.insertBefore(expWrap, submitBtn);
+          } else if (submitBtn && submitBtn.parentNode) {
+            submitBtn.parentNode.insertBefore(expWrap, submitBtn);
+          } else {
+            form.appendChild(expWrap);
+          }
+        }
+
+        if (!form.dataset.expiryGuardBound) {
+          form.dataset.expiryGuardBound = '1';
+          form.addEventListener('submit', (ev) => {
+            const expInp = document.getElementById('kyc-id-expiry');
+            if (!expInp) return;
+            const expVal = (expInp.value || '').trim();
+            const today = app.todayLocal();
+
+            if (!expVal) {
+              ev.preventDefault();
+              ev.stopImmediatePropagation();
+              return app.toast('يرجى إدخال تاريخ انتهاء البطاقة الشخصية أولاً', 'error');
+            }
+            if (expVal <= today) {
+              ev.preventDefault();
+              ev.stopImmediatePropagation();
+              return app.toast('❌ عذراً، البطاقة الشخصية منتهية الصلاحية! يرجى تجديد البطاقة أولاً ثم إعادة التصوير.', 'error');
+            }
+
+            setTimeout(async () => {
+              if (!app.user || !app.db) return;
+              try {
+                await Promise.all([
+                  app.db.collection('kycRequests').doc(app.user.uid).set({ idExpiryDate: expVal }, { merge: true }).catch(() => {}),
+                  app.db.collection('users').doc(app.user.uid).set({ idExpiryDate: expVal, idExpiryExpired: false }, { merge: true }).catch(() => {})
+                ]);
+              } catch (e) {}
+            }, 900);
+          }, true);
+        }
+      } catch (e) {}
     },
 
     // ==================== 3. AUTO CHECK EXPIRED NATIONAL ID & SEND RENEWAL ALERT ====================
@@ -457,7 +466,6 @@
       const today = app.todayLocal();
       if (expDate > today) return;
 
-      // ID IS EXPIRED!
       this._isCurrentUserIdExpired = true;
       this.injectExpiredIdWarningBanner(expDate);
 
@@ -493,7 +501,7 @@
             <div class="text-[11px] leading-relaxed">يرجى تجديد رفع صورة البطاقة الشخصية السارية بالكاميرا الآن للاستمرار في التوثيق الكامل والعقود المضمونة.</div>
           </div>
         </div>
-        <button type="button" onclick="if(window.DamanWallet) DamanWallet.openKycModal(false)" class="w-full py-2 rounded-xl bg-rose-500 text-white font-black text-[11px]">
+        <button type="button" onclick="if(window.DamanApp && DamanApp.openKycSafe){ DamanApp.openKycSafe(); } else if(window.DamanWallet){ DamanWallet.openKycModal(false); }" class="w-full py-2 rounded-xl bg-rose-500 text-white font-black text-[11px]">
           📸 تجديد تصوير البطاقة الشخصية الآن
         </button>`;
       main.insertBefore(div, main.firstElementChild);
@@ -531,7 +539,7 @@
       if (!bdate || bdate.length < 10) return;
       this._bdayCheckedForUid = uid;
 
-      const today = app.todayLocal(); // YYYY-MM-DD
+      const today = app.todayLocal();
       if (bdate.slice(5, 10) !== today.slice(5, 10)) return;
 
       const yearStr = today.slice(0, 4);
@@ -700,7 +708,6 @@
 
       slot.innerHTML = `
         <div class="space-y-4 text-xs">
-          <!-- 1. Today's Birthdays -->
           <div class="glass-card rounded-2xl p-3.5 border-amber-500/50 space-y-2">
             <div class="font-black text-amber-400">🎂 أعياد ميلاد اليوم (${bdayToday.length}) — ${today}</div>
             ${!bdayToday.length ? `<div class="p-3 rounded-xl bg-slate-950 text-center text-slate-400">لا يوجد أعضاء عيد ميلادهم اليوم.</div>` : bdayToday.map((u) => `
@@ -713,7 +720,6 @@
               </div>`).join('')}
           </div>
 
-          <!-- 2. Manual Gift & Greeting Sender -->
           <form onsubmit="DamanKycBdayQR.sendManualGiftToUser(event)" class="glass-card rounded-2xl p-3.5 border-emerald-500/40 space-y-2.5">
             <div class="font-black text-emerald-400">🎁 إرسال هدية وتهنئة يدوية لأي عضو</div>
             <div>
@@ -744,7 +750,6 @@
             <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-black">🎉 إرسال التهنئة والهدية فوراً</button>
           </form>
 
-          <!-- 3. Automatic Birthday Greeting & Gift Settings -->
           <form onsubmit="DamanKycBdayQR.saveBirthdaySettings(event)" class="glass-card rounded-2xl p-3.5 border-purple-500/40 space-y-2.5">
             <div class="font-black text-purple-300">⚙️ إعدادات التهنئة والهدية التلقائية في أعياد الميلاد</div>
             <label class="flex items-center gap-2 text-[11px] font-bold text-white cursor-pointer">
@@ -772,7 +777,6 @@
             <button type="submit" class="w-full py-2.5 rounded-xl bg-purple-600 text-white font-black">حفظ إعدادات أعياد الميلاد</button>
           </form>
 
-          <!-- 4. This Month Birthdays -->
           <div class="glass-card rounded-2xl p-3.5 space-y-1.5">
             <div class="font-black text-sky-300">📅 أعياد ميلاد هذا الشهر (${bdayMonth.length})</div>
             ${!bdayMonth.length ? `<div class="text-slate-500">لا يوجد أعضاء مسجّلين بتاريخ ميلاد في هذا الشهر.</div>` : bdayMonth.map((u) => `
@@ -787,18 +791,16 @@
         </div>`;
     },
 
-    // ==================== 5. BOOT & HOOKS ====================
+    // ==================== 5. LOOP-SAFE BOOT & HOOKS ====================
     boot() {
       if (this._booted) return;
       const app = window.DamanApp;
       if (!app) return setTimeout(() => this.boot(), 250);
       this._booted = true;
 
-      // 1. Replace promptVerifyContractCode with full Camera QR Scanner + Manual Code Modal
       if (window.DamanShareQR) {
         DamanShareQR.promptVerifyContractCode = () => this.openContractScannerModal();
 
-        // Also add "📷 مسح QR بالكاميرا" button inside Share Contract modal
         const origShareCt = DamanShareQR.shareContract.bind(DamanShareQR);
         DamanShareQR.shareContract = (agId) => {
           origShareCt(agId);
@@ -819,31 +821,34 @@
         };
       }
 
-      // 2. Hook DamanWallet.openKycModal & observe #daman-kyc-modal for Live Camera + Expiry Date
       if (window.DamanWallet && typeof DamanWallet.openKycModal === 'function' && !DamanWallet._liveCamHooked) {
         DamanWallet._liveCamHooked = true;
         const origKycModal = DamanWallet.openKycModal.bind(DamanWallet);
         DamanWallet.openKycModal = function () {
           const r = origKycModal.apply(this, arguments);
-          setTimeout(() => KycBdayQR.enhanceKycModalDOM(), 50);
+          setTimeout(() => KycBdayQR.enhanceKycModalDOM(), 80);
           return r;
         };
       }
 
       if (typeof MutationObserver !== 'undefined') {
         const obs = new MutationObserver(() => {
-          const m = document.getElementById('daman-kyc-modal');
-          if (m && !m.classList.contains('hidden')) {
-            this.enhanceKycModalDOM();
-          }
-          if (this._isCurrentUserIdExpired && app.profile?.idExpiryDate) {
-            this.injectExpiredIdWarningBanner(app.profile.idExpiryDate);
-          }
+          clearTimeout(this._obsTimer);
+          this._obsTimer = setTimeout(() => {
+            try {
+              const m = document.getElementById('daman-kyc-modal');
+              if (m && !m.classList.contains('hidden')) {
+                this.enhanceKycModalDOM();
+              }
+              if (this._isCurrentUserIdExpired && app.profile?.idExpiryDate) {
+                this.injectExpiredIdWarningBanner(app.profile.idExpiryDate);
+              }
+            } catch (e) {}
+          }, 150);
         });
         obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       }
 
-      // 3. Hook Admin Panel to add "🎂 أعياد الميلاد والهدايا" tab cleanly without colliding with other dynamic tabs
       if (window.DamanAdmin && !DamanAdmin._bdayTabHooked) {
         DamanAdmin._bdayTabHooked = true;
         const prevSetTab = DamanAdmin.setSubTab.bind(DamanAdmin);
@@ -897,7 +902,6 @@
         };
       }
 
-      // 4. Periodic check once user profile loads (ID Expiry + Birthday Celebration)
       const profWatcher = setInterval(() => {
         if (app.user && app.profile) {
           this.checkUserNationalIdExpiry();
